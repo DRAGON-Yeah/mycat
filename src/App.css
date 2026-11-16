@@ -3775,6 +3775,87 @@ tr.is-inserted {
   background: #7e57c2;
 }
 
+.object-kind.is-function {
+  background: #00897b;
+  font-size: 9px;
+  letter-spacing: -0.02em;
+}
+
+.object-kind.is-procedure {
+  background: #ef6c00;
+  font-size: 9px;
+  letter-spacing: -0.02em;
+}
+
+.tree-obj-badge {
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+.function-designer-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.function-designer-advanced {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.function-designer-params {
+  margin-bottom: 8px;
+}
+
+.function-designer-params .view-designer-sql-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.run-routine-params {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 8px 0;
+}
+
+.run-routine-params th,
+.run-routine-params td {
+  border: 1px solid var(--border);
+  padding: 4px 6px;
+  text-align: left;
+}
+
+.run-routine-params input,
+.run-routine-params select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.run-routine-modal {
+  min-width: min(560px, 92vw);
+  max-width: 720px;
+}
+
+.run-routine-result {
+  max-height: 220px;
+  overflow: auto;
+  margin-top: 8px;
+}
+
+.inspector-badge.function {
+  background: linear-gradient(160deg, #26a69a, #00695c);
+  font-size: 11px;
+}
+
+.inspector-badge.procedure {
+  background: linear-gradient(160deg, #ffb74d, #ef6c00);
+  font-size: 11px;
+}
+
 .obj-tool-btn.is-danger-text {
   color: #c62828;
 }

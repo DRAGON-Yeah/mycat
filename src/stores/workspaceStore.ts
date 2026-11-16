@@ -58,8 +58,10 @@ export type DesignerTab = {
   database: string;
   table: string;
   mode: "create" | "alter";
-  /** table (default) or view designer */
-  kind?: "table" | "view";
+  /** table (default), view, or function/procedure designer */
+  kind?: "table" | "view" | "function";
+  /** Only for kind === "function" */
+  routineType?: "FUNCTION" | "PROCEDURE";
   dirty?: boolean;
   seedColumns?: {
     name: string;
@@ -154,12 +156,21 @@ type WorkspaceState = {
     view: string;
     mode: "create" | "alter";
   }) => string | null;
+  openFunctionDesigner: (opts: {
+    connection?: ConnectionDto;
+    database?: string;
+    routine: string;
+    mode: "create" | "alter";
+    routineType?: "FUNCTION" | "PROCEDURE";
+  }) => string | null;
   setActiveDesigner: (id: string) => void;
   closeDesignerTab: (id: string, opts?: { force?: boolean }) => boolean;
   markDesignerDirty: (id: string, dirty: boolean) => void;
   updateDesignerTab: (
     id: string,
-    patch: Partial<Pick<DesignerTab, "table" | "dirty" | "mode">>,
+    patch: Partial<
+      Pick<DesignerTab, "table" | "dirty" | "mode" | "routineType">
+    >,
   ) => void;
   /** After CREATE TABLE succeeds: switch create tab → alter and retarget id. */
   promoteDesignerToAlter: (id: string, tableName: string) => string | null;
@@ -322,7 +333,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       });
       return;
     }
-    const listable = folder === "tables" || folder === "views";
+    const listable =
+      folder === "tables" || folder === "views" || folder === "functions";
     set({
       selectedDatabase: database,
       selectedFolder: folder,
@@ -331,13 +343,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       centerMode: listable ? "objectList" : "placeholder",
       placeholderFeature: listable
         ? null
-        : folder === "functions"
-          ? "function"
-          : folder === "backups"
-            ? "backup"
-            : folder === "events"
-              ? "automation"
-              : folder,
+        : folder === "backups"
+          ? "backup"
+          : folder === "events"
+            ? "automation"
+            : folder,
       toolbarAction:
         folder === "tables"
           ? "table"
@@ -408,13 +418,26 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       get().openQuery();
       return;
     }
-    if (action === "table") {
-      set({
-        toolbarAction: action,
-        centerMode: get().selectedDatabase ? "objectList" : "welcome",
-        placeholderFeature: null,
-        activeTabId: null,
-      });
+    if (action === "table" || action === "view" || action === "function") {
+      const folder =
+        action === "table"
+          ? "tables"
+          : action === "view"
+            ? "views"
+            : "functions";
+      const db = get().selectedDatabase;
+      if (db) {
+        get().selectObjectFolder(db, folder);
+        set({ toolbarAction: action, placeholderFeature: null });
+      } else {
+        set({
+          toolbarAction: action,
+          centerMode: "welcome",
+          placeholderFeature: null,
+          activeTabId: null,
+          selectedFolder: folder,
+        });
+      }
       return;
     }
     if (action === "connection") {
@@ -629,19 +652,95 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
     return id;
   },
+  openFunctionDesigner: (opts) => {
+    const conn = opts.connection ?? get().activeConnection;
+    if (!conn) {
+      window.alert("请先打开一个连接。");
+      return null;
+    }
+    const database =
+      opts.database?.trim() ||
+      get().selectedDatabase ||
+      conn.database?.trim() ||
+      "";
+    if (!database) {
+      window.alert("请先选择数据库，再设计函数。");
+      return null;
+    }
+    const routine = opts.routine.trim() || "new_proc";
+    const routineType = opts.routineType ?? "PROCEDURE";
+    const id =
+      opts.mode === "create"
+        ? `fn-designer-create-${conn.id}:${database}:${Date.now()}`
+        : `fn-designer:${conn.id}:${database}:${routine}`;
+    const existing =
+      opts.mode === "alter"
+        ? get().designerTabs.find((t) => t.id === id)
+        : undefined;
+    if (existing) {
+      set({
+        activeConnectionId: conn.id,
+        activeConnection: conn,
+        selectedDatabase: database,
+        selectedTable: routine,
+        selectedFolder: "functions",
+        selectionKind: "table",
+        activeDesignerId: existing.id,
+        activeTabId: null,
+        activeQueryId: null,
+        centerMode: "table-designer",
+        toolbarAction: "function",
+        placeholderFeature: null,
+      });
+      return existing.id;
+    }
+    const tab: DesignerTab = {
+      id,
+      connectionId: conn.id,
+      connectionName: conn.name,
+      connectionEngine: String(conn.engine),
+      database,
+      table: routine,
+      mode: opts.mode,
+      kind: "function",
+      routineType,
+      dirty: false,
+    };
+    set({
+      activeConnectionId: conn.id,
+      activeConnection: conn,
+      selectedDatabase: database,
+      selectedTable: opts.mode === "alter" ? routine : null,
+      selectedFolder: "functions",
+      selectionKind: "table",
+      designerTabs: [...get().designerTabs, tab],
+      activeDesignerId: id,
+      activeTabId: null,
+      activeQueryId: null,
+      centerMode: "table-designer",
+      toolbarAction: "function",
+      placeholderFeature: null,
+    });
+    return id;
+  },
   setActiveDesigner: (id) => {
     const tab = get().designerTabs.find((t) => t.id === id);
     if (!tab) return;
     const isView = tab.kind === "view";
+    const isFn = tab.kind === "function";
     set({
       activeDesignerId: id,
       activeTabId: null,
       activeQueryId: null,
       centerMode: "table-designer",
-      toolbarAction: isView ? "view" : "table",
+      toolbarAction: isFn ? "function" : isView ? "view" : "table",
       placeholderFeature: null,
       selectedDatabase: tab.database,
-      selectedFolder: isView ? "views" : get().selectedFolder,
+      selectedFolder: isFn
+        ? "functions"
+        : isView
+          ? "views"
+          : get().selectedFolder,
       selectedTable: tab.mode === "alter" ? tab.table : null,
       selectionKind: "table",
     });
@@ -695,9 +794,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (!tab) return null;
     const name = tableName.trim() || tab.table;
     const isView = tab.kind === "view";
-    const newId = isView
-      ? `view-designer:${tab.connectionId}:${tab.database}:${name}`
-      : `designer:${tab.connectionId}:${tab.database}:${name}`;
+    const isFn = tab.kind === "function";
+    const newId = isFn
+      ? `fn-designer:${tab.connectionId}:${tab.database}:${name}`
+      : isView
+        ? `view-designer:${tab.connectionId}:${tab.database}:${name}`
+        : `designer:${tab.connectionId}:${tab.database}:${name}`;
     const others = get().designerTabs.filter(
       (t) => t.id !== id && t.id !== newId,
     );
@@ -713,9 +815,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       designerTabs: [...others, next],
       activeDesignerId: newId,
       selectedTable: name,
-      selectedFolder: isView ? "views" : get().selectedFolder,
+      selectedFolder: isFn
+        ? "functions"
+        : isView
+          ? "views"
+          : get().selectedFolder,
       centerMode: "table-designer",
-      toolbarAction: isView ? "view" : "table",
+      toolbarAction: isFn ? "function" : isView ? "view" : "table",
     });
     return newId;
   },

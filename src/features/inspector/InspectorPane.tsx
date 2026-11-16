@@ -8,6 +8,11 @@ import {
   listViewMeta,
   type ViewMeta,
 } from "../object-list/viewMeta";
+import {
+  formatRoutineType,
+  listRoutineMeta,
+  type RoutineMeta,
+} from "../object-list/routineMeta";
 
 export function InspectorPane() {
   const connection = useWorkspaceStore((s) => s.activeConnection);
@@ -21,6 +26,7 @@ export function InspectorPane() {
   const activeQuery = queryTabs.find((t) => t.id === activeQueryId) ?? null;
 
   const [viewMeta, setViewMeta] = useState<ViewMeta | null>(null);
+  const [routineMeta, setRoutineMeta] = useState<RoutineMeta | null>(null);
   const [rowCount, setRowCount] = useState<number | null>(null);
   const [rowBusy, setRowBusy] = useState(false);
 
@@ -44,6 +50,29 @@ export function InspectorPane() {
       }
     })();
     setRowCount(null);
+    return () => {
+      cancelled = true;
+    };
+  }, [connection, database, table, folder]);
+
+  useEffect(() => {
+    if (!connection || !database || !table || folder !== "functions") {
+      setRoutineMeta(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const map = await listRoutineMeta({
+          connectionId: connection.id,
+          engine: String(connection.engine),
+          database,
+        });
+        if (!cancelled) setRoutineMeta(map[table] ?? null);
+      } catch {
+        if (!cancelled) setRoutineMeta(null);
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -73,6 +102,72 @@ export function InspectorPane() {
       <aside className="pane inspector-pane" aria-label="信息">
         <div className="pane-title">信息</div>
         <p className="pane-placeholder">选中连接、数据库或表以查看详情。</p>
+      </aside>
+    );
+  }
+
+  if (kind === "table" && table && folder === "functions") {
+    const badge =
+      routineMeta?.routineType === "FUNCTION" ? "fx" : "Px";
+    return (
+      <aside className="pane inspector-pane" aria-label="信息">
+        <div className="pane-title">信息</div>
+        <div className="inspector-hero">
+          <div
+            className={`inspector-badge ${
+              routineMeta?.routineType === "FUNCTION"
+                ? "function"
+                : "procedure"
+            }`}
+          >
+            {badge}
+          </div>
+          <div>
+            <h3>{table}</h3>
+            <p className="inspector-sub">
+              {formatRoutineType(routineMeta?.routineType)}
+            </p>
+          </div>
+        </div>
+        <p className="inspector-conn-line">
+          {connection.name}
+          <span> · </span>
+          {database}
+        </p>
+        <dl className="inspector-meta">
+          <div>
+            <dt>类型</dt>
+            <dd>{formatRoutineType(routineMeta?.routineType)}</dd>
+          </div>
+          <div>
+            <dt>返回类型</dt>
+            <dd>{routineMeta?.returns || "—"}</dd>
+          </div>
+          <div>
+            <dt>定义者</dt>
+            <dd>{routineMeta?.definer || "—"}</dd>
+          </div>
+          <div>
+            <dt>SQL 安全性</dt>
+            <dd>{routineMeta?.securityType || "—"}</dd>
+          </div>
+          <div>
+            <dt>确定性</dt>
+            <dd>{routineMeta?.isDeterministic || "—"}</dd>
+          </div>
+          <div>
+            <dt>创建日期</dt>
+            <dd>{routineMeta?.created || "—"}</dd>
+          </div>
+          <div>
+            <dt>修改日期</dt>
+            <dd>{routineMeta?.lastAltered || "—"}</dd>
+          </div>
+          <div>
+            <dt>注释</dt>
+            <dd>{routineMeta?.comment || "—"}</dd>
+          </div>
+        </dl>
       </aside>
     );
   }

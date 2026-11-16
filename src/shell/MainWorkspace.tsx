@@ -5,6 +5,7 @@ import { ConsolePanel } from "../features/query/Console";
 import { QueryEditor } from "../features/query/QueryEditor";
 import { TableDesigner } from "../features/table-designer/TableDesigner";
 import { ViewDesigner } from "../features/view-designer/ViewDesigner";
+import { FunctionDesigner } from "../features/function-designer/FunctionDesigner";
 import { useWorkspaceStore } from "../stores/workspaceStore";
 
 function queryTabLabel(title: string, database: string, connectionName: string) {
@@ -196,7 +197,12 @@ export function MainWorkspace() {
               t.database,
               t.connectionName,
             );
-            const kindLabel = t.kind === "view" ? "视图" : "表";
+            const kindLabel =
+              t.kind === "function"
+                ? "函数"
+                : t.kind === "view"
+                  ? "视图"
+                  : "表";
             const label =
               t.mode === "create"
                 ? `设计${kindLabel}·${base}`
@@ -265,7 +271,9 @@ export function MainWorkspace() {
         ) : centerMode === "console" ? (
           <ConsolePanel />
         ) : centerMode === "table-designer" && activeDesigner ? (
-          activeDesigner.kind === "view" ? (
+          activeDesigner.kind === "function" ? (
+            <FunctionDesigner tab={activeDesigner} />
+          ) : activeDesigner.kind === "view" ? (
             <ViewDesigner tab={activeDesigner} />
           ) : (
             <TableDesigner tab={activeDesigner} />

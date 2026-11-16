@@ -12,9 +12,10 @@ import {
   loadDesignerTriggers,
 } from "../table-designer/loadColumns";
 import { TABLE_DATA_CHANGED } from "../../lib/tableEvents";
-import { IconTables, IconViews } from "./TreeIcons";
+import { listRoutines } from "../object-list/routineMeta";
+import { IconFunctions, IconTables, IconViews } from "./TreeIcons";
 
-export type TreeObjectFolderId = "tables" | "views";
+export type TreeObjectFolderId = "tables" | "views" | "functions";
 
 type TableDetail = {
   loading: boolean;
@@ -32,7 +33,7 @@ type Props = {
   selectedTable: string | null;
   onSelectFolder: () => void;
   onOpenTable: (table: string, kind: string) => void;
-  onDesignTable: (table: string) => void;
+  onDesignTable: (table: string, kind?: string) => void;
   onTableContextMenu: (args: {
     x: number;
     y: number;
@@ -53,7 +54,16 @@ const PARTS = [
 type PartId = (typeof PARTS)[number]["id"];
 
 function folderIcon(folder: TreeObjectFolderId) {
+  if (folder === "functions") return <IconFunctions />;
   return folder === "tables" ? <IconTables /> : <IconViews />;
+}
+
+function itemKindBadge(folder: TreeObjectFolderId, kind: string) {
+  if (folder === "functions") {
+    return kind === "FUNCTION" || kind === "function" ? "fx" : "Px";
+  }
+  if (folder === "views" || kind === "view") return "V";
+  return "T";
 }
 
 export function TreeObjectFolder({
@@ -82,13 +92,27 @@ export function TreeObjectFolder({
     setLoading(true);
     try {
       await openConnection(conn.id);
-      const all = await listTables(conn.id, database);
-      const next =
-        folder === "tables"
-          ? all.filter((t) => t.kind !== "view")
-          : all.filter((t) => t.kind === "view");
-      next.sort((a, b) => a.name.localeCompare(b.name, "zh"));
-      setItems(next);
+      if (folder === "functions") {
+        const routines = await listRoutines({
+          connectionId: conn.id,
+          engine: String(conn.engine),
+          database,
+        });
+        setItems(
+          routines.map((r) => ({
+            name: r.name,
+            kind: r.routineType,
+          })),
+        );
+      } else {
+        const all = await listTables(conn.id, database);
+        const next =
+          folder === "tables"
+            ? all.filter((t) => t.kind !== "view")
+            : all.filter((t) => t.kind === "view");
+        next.sort((a, b) => a.name.localeCompare(b.name, "zh"));
+        setItems(next);
+      }
     } catch (err) {
       onMessageRef.current(
         err instanceof Error ? err.message : String(err),
@@ -96,7 +120,7 @@ export function TreeObjectFolder({
     } finally {
       setLoading(false);
     }
-  }, [conn.id, database, folder]);
+  }, [conn.id, conn.engine, database, folder]);
 
   useEffect(() => {
     if (!expanded) return;
@@ -213,7 +237,9 @@ export function TreeObjectFolder({
     return d.triggers;
   }
 
-  const label = folder === "tables" ? "表" : "视图";
+  const label =
+    folder === "functions" ? "函数" : folder === "tables" ? "表" : "视图";
+  const isRoutineFolder = folder === "functions";
 
   return (
     <li>
@@ -270,20 +296,24 @@ export function TreeObjectFolder({
             const active = selectedTable === obj.name;
             const detail = details[obj.name];
             return (
-              <li key={obj.name}>
+              <li key={`${obj.kind}-${obj.name}`}>
                 <div className={`tree-row ${active ? "is-active" : ""}`}>
-                  <button
-                    type="button"
-                    className={`tree-twist ${tableOpen ? "is-expanded" : ""}`}
-                    onClick={() => toggleTable(obj.name)}
-                    aria-label={tableOpen ? "折叠" : "展开"}
-                  />
+                  {isRoutineFolder ? (
+                    <span className="tree-twist-spacer" />
+                  ) : (
+                    <button
+                      type="button"
+                      className={`tree-twist ${tableOpen ? "is-expanded" : ""}`}
+                      onClick={() => toggleTable(obj.name)}
+                      aria-label={tableOpen ? "折叠" : "展开"}
+                    />
+                  )}
                   <button
                     type="button"
                     className="tree-label"
                     title={obj.name}
                     onClick={() => onOpenTable(obj.name, obj.kind)}
-                    onDoubleClick={() => onDesignTable(obj.name)}
+                    onDoubleClick={() => onDesignTable(obj.name, obj.kind)}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -295,12 +325,24 @@ export function TreeObjectFolder({
                       });
                     }}
                   >
-                    {folderIcon(folder)}
+                    <span
+                      className={`object-kind tree-obj-badge ${
+                        obj.kind === "FUNCTION" || obj.kind === "function"
+                          ? "is-function"
+                          : obj.kind === "PROCEDURE" || obj.kind === "procedure"
+                            ? "is-procedure"
+                            : folder === "views"
+                              ? "is-view"
+                              : ""
+                      }`}
+                    >
+                      {itemKindBadge(folder, obj.kind)}
+                    </span>
                     <span className="tree-text">{obj.name}</span>
                   </button>
                 </div>
 
-                {tableOpen && (
+                {!isRoutineFolder && tableOpen && (
                   <ul className="tree-children tree-object-meta">
                     {detail?.loading && (
                       <li className="pane-placeholder tree-query-empty">

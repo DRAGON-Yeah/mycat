@@ -48,7 +48,16 @@ import {
   ViewsFolderContextMenu,
   type ViewsFolderMenuTarget,
 } from "./ViewsFolderContextMenu";
+import {
+  FunctionsFolderContextMenu,
+  type FunctionsFolderMenuTarget,
+} from "./FunctionsFolderContextMenu";
+import {
+  RoutineContextMenu,
+  type RoutineMenuTarget,
+} from "./RoutineContextMenu";
 import { TreeObjectFolder } from "./TreeObjectFolder";
+import type { RoutineType } from "../object-list/routineMeta";
 import { emitTableDataChanged } from "../../lib/tableEvents";
 import { CloseWorkspaceDialog } from "./CloseWorkspaceDialog";
 import { EditDatabaseDialog } from "./EditDatabaseDialog";
@@ -155,6 +164,11 @@ export function ConnectionTree() {
   const [tableMenu, setTableMenu] = useState<TableMenuTarget | null>(null);
   const [viewsFolderMenu, setViewsFolderMenu] =
     useState<ViewsFolderMenuTarget | null>(null);
+  const [functionsFolderMenu, setFunctionsFolderMenu] =
+    useState<FunctionsFolderMenuTarget | null>(null);
+  const [routineMenu, setRoutineMenu] = useState<RoutineMenuTarget | null>(
+    null,
+  );
 
   const activeConnectionId = useWorkspaceStore((s) => s.activeConnectionId);
   const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
@@ -168,6 +182,7 @@ export function ConnectionTree() {
   const openTable = useWorkspaceStore((s) => s.openTable);
   const openTableDesigner = useWorkspaceStore((s) => s.openTableDesigner);
   const openViewDesigner = useWorkspaceStore((s) => s.openViewDesigner);
+  const openFunctionDesigner = useWorkspaceStore((s) => s.openFunctionDesigner);
   const openQuery = useWorkspaceStore((s) => s.openQuery);
   const activeConnection = useWorkspaceStore((s) => s.activeConnection);
   const activeQueryId = useWorkspaceStore((s) => s.activeQueryId);
@@ -212,6 +227,8 @@ export function ConnectionTree() {
       if (t?.closest?.(".dg-context-menu, .modal, .modal-backdrop")) return;
       setDbMenu(null);
       setConnMenu(null);
+      setFunctionsFolderMenu(null);
+      setRoutineMenu(null);
       setSavedQueryMenu(null);
       setQueriesFolderMenu(null);
       setTableMenu(null);
@@ -893,7 +910,8 @@ export function ConnectionTree() {
                             {FOLDERS.map((folder) => {
                               if (
                                 folder.id === "tables" ||
-                                folder.id === "views"
+                                folder.id === "views" ||
+                                folder.id === "functions"
                               ) {
                                 return (
                                   <TreeObjectFolder
@@ -913,6 +931,24 @@ export function ConnectionTree() {
                                     }}
                                     onOpenTable={(table, kind) => {
                                       openConn(n.conn);
+                                      if (folder.id === "functions") {
+                                        selectObjectFolder(db, "functions");
+                                        selectTableMeta(table);
+                                        const rt = (
+                                          kind === "FUNCTION" ||
+                                          kind === "function"
+                                            ? "FUNCTION"
+                                            : "PROCEDURE"
+                                        ) as RoutineType;
+                                        openFunctionDesigner({
+                                          connection: n.conn,
+                                          database: db,
+                                          routine: table,
+                                          mode: "alter",
+                                          routineType: rt,
+                                        });
+                                        return;
+                                      }
                                       selectObjectFolder(
                                         db,
                                         kind === "view" ? "views" : "tables",
@@ -920,9 +956,22 @@ export function ConnectionTree() {
                                       selectTableMeta(table);
                                       openTable(table);
                                     }}
-                                    onDesignTable={(table) => {
+                                    onDesignTable={(table, kind) => {
                                       openConn(n.conn);
-                                      if (folder.id === "views") {
+                                      if (folder.id === "functions") {
+                                        openFunctionDesigner({
+                                          connection: n.conn,
+                                          database: db,
+                                          routine: table,
+                                          mode: "alter",
+                                          routineType: (
+                                            kind === "FUNCTION" ||
+                                            kind === "function"
+                                              ? "FUNCTION"
+                                              : "PROCEDURE"
+                                          ) as RoutineType,
+                                        });
+                                      } else if (folder.id === "views") {
                                         openViewDesigner({
                                           connection: n.conn,
                                           database: db,
@@ -949,14 +998,33 @@ export function ConnectionTree() {
                                       setSavedQueryMenu(null);
                                       setQueriesFolderMenu(null);
                                       setViewsFolderMenu(null);
-                                      setTableMenu({
-                                        x,
-                                        y,
-                                        conn: n.conn,
-                                        database: db,
-                                        table,
-                                        kind,
-                                      });
+                                      setFunctionsFolderMenu(null);
+                                      if (folder.id === "functions") {
+                                        setTableMenu(null);
+                                        setRoutineMenu({
+                                          x,
+                                          y,
+                                          conn: n.conn,
+                                          database: db,
+                                          name: table,
+                                          routineType: (
+                                            kind === "FUNCTION" ||
+                                            kind === "function"
+                                              ? "FUNCTION"
+                                              : "PROCEDURE"
+                                          ) as RoutineType,
+                                        });
+                                      } else {
+                                        setRoutineMenu(null);
+                                        setTableMenu({
+                                          x,
+                                          y,
+                                          conn: n.conn,
+                                          database: db,
+                                          table,
+                                          kind,
+                                        });
+                                      }
                                     }}
                                     onFolderContextMenu={
                                       folder.id === "views"
@@ -966,6 +1034,8 @@ export function ConnectionTree() {
                                             setSavedQueryMenu(null);
                                             setQueriesFolderMenu(null);
                                             setTableMenu(null);
+                                            setRoutineMenu(null);
+                                            setFunctionsFolderMenu(null);
                                             setViewsFolderMenu({
                                               x,
                                               y,
@@ -973,7 +1043,23 @@ export function ConnectionTree() {
                                               database: db,
                                             });
                                           }
-                                        : undefined
+                                        : folder.id === "functions"
+                                          ? ({ x, y }) => {
+                                              setDbMenu(null);
+                                              setConnMenu(null);
+                                              setSavedQueryMenu(null);
+                                              setQueriesFolderMenu(null);
+                                              setTableMenu(null);
+                                              setRoutineMenu(null);
+                                              setViewsFolderMenu(null);
+                                              setFunctionsFolderMenu({
+                                                x,
+                                                y,
+                                                conn: n.conn,
+                                                database: db,
+                                              });
+                                            }
+                                          : undefined
                                     }
                                     onMessage={(msg) => {
                                       setToast(msg);
@@ -1277,6 +1363,44 @@ export function ConnectionTree() {
             emitTableDataChanged({
               connectionId: viewsFolderMenu.conn.id,
               database: viewsFolderMenu.database,
+              table: "*",
+            });
+            window.dispatchEvent(new Event("mycat:object-list-refresh"));
+          }}
+          onMessage={(msg) => {
+            setToast(msg);
+            window.setTimeout(() => setToast(null), 2500);
+          }}
+        />
+      )}
+
+      {functionsFolderMenu && (
+        <FunctionsFolderContextMenu
+          target={functionsFolderMenu}
+          onClose={() => setFunctionsFolderMenu(null)}
+          onRefresh={() => {
+            emitTableDataChanged({
+              connectionId: functionsFolderMenu.conn.id,
+              database: functionsFolderMenu.database,
+              table: "*",
+            });
+            window.dispatchEvent(new Event("mycat:object-list-refresh"));
+          }}
+          onMessage={(msg) => {
+            setToast(msg);
+            window.setTimeout(() => setToast(null), 2500);
+          }}
+        />
+      )}
+
+      {routineMenu && (
+        <RoutineContextMenu
+          target={routineMenu}
+          onClose={() => setRoutineMenu(null)}
+          onRefresh={() => {
+            emitTableDataChanged({
+              connectionId: routineMenu.conn.id,
+              database: routineMenu.database,
               table: "*",
             });
             window.dispatchEvent(new Event("mycat:object-list-refresh"));

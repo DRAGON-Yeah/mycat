@@ -16,7 +16,7 @@ const ITEMS: Item[] = [
   { id: "connection", label: "连接" },
   { id: "table", label: "表" },
   { id: "view", label: "视图", placeholder: "view" },
-  { id: "function", label: "函数", placeholder: "function" },
+  { id: "function", label: "函数" },
   { id: "query", label: "查询" },
   { id: "backup", label: "备份", placeholder: "backup" },
   { id: "automation", label: "自动化", placeholder: "automation" },
