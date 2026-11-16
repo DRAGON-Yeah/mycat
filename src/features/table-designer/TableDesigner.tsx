@@ -169,8 +169,10 @@ export function TableDesigner({ tab }: Props) {
       setBaselineOptions(emptyOptions());
       setTableName(t.table || "new_table");
       setSelectedIdx(0);
-      setDirty(true);
-      markDirty(t.id, true);
+      // Create starts clean until the user edits; otherwise × always prompts
+      // and 「放弃」cannot clear dirty (load used to re-mark dirty).
+      setDirty(false);
+      markDirty(t.id, false);
       setError(null);
       return;
     }
@@ -570,7 +572,11 @@ export function TableDesigner({ tab }: Props) {
 
   function onDiscard() {
     if (!dirty) return;
-    if (!window.confirm("放弃未保存的设计更改？")) return;
+    const msg =
+      tab.mode === "create"
+        ? "放弃未保存的新建表设计并恢复默认字段？"
+        : "放弃未保存的设计更改？";
+    if (!window.confirm(msg)) return;
     void load();
     setMessage("已放弃更改");
   }

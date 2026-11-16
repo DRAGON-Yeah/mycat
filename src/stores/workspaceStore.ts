@@ -555,7 +555,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (!tab) return false;
     if (!opts?.force && tab.dirty) {
       const ok = window.confirm(
-        `设计器「${tab.table}」有未保存更改，确定关闭？`,
+        tab.mode === "create"
+          ? `新建表「${tab.table}」尚未保存，确定关闭并丢弃？`
+          : `设计器「${tab.table}」有未保存更改，确定关闭？`,
       );
       if (!ok) return false;
     }
