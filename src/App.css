@@ -4020,12 +4020,16 @@ tr.is-inserted {
 .td-topbar {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  position: relative;
+  z-index: 2;
 }
 .td-tools {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
+  position: relative;
+  z-index: 3;
 }
 .td-tools button {
   min-width: 28px;

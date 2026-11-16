@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -125,11 +126,16 @@ export function TableDesigner({ tab }: Props) {
     MYSQL_COLLATIONS_BY_CHARSET,
   );
 
+  // Keep latest tab fields without re-binding load to the whole tab object
+  // (markDirty updates store → new tab ref → would otherwise reset edits).
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+
   const touch = useCallback(() => {
     setDirty(true);
-    markDirty(tab.id, true);
+    markDirty(tabRef.current.id, true);
     setMessage(null);
-  }, [markDirty, tab.id]);
+  }, [markDirty]);
 
   const collationChoices = useMemo(() => {
     const fromServer = collationMap[options.charset];
@@ -138,9 +144,10 @@ export function TableDesigner({ tab }: Props) {
   }, [collationMap, options.charset]);
 
   const load = useCallback(async () => {
-    if (tab.mode === "create") {
-      const seed = tab.seedColumns?.length
-        ? tab.seedColumns.map(seedToColumn)
+    const t = tabRef.current;
+    if (t.mode === "create") {
+      const seed = t.seedColumns?.length
+        ? t.seedColumns.map(seedToColumn)
         : [
             newColumn({
               name: "id",
@@ -160,59 +167,60 @@ export function TableDesigner({ tab }: Props) {
       setChecks([]);
       setOptions(emptyOptions());
       setBaselineOptions(emptyOptions());
-      setTableName(tab.table || "new_table");
+      setTableName(t.table || "new_table");
       setSelectedIdx(0);
       setDirty(true);
-      markDirty(tab.id, true);
+      markDirty(t.id, true);
+      setError(null);
       return;
     }
     setLoading(true);
     setError(null);
     try {
       const cols = await loadDesignerColumns({
-        connectionId: tab.connectionId,
-        engine: tab.connectionEngine,
-        database: tab.database,
-        table: tab.table,
+        connectionId: t.connectionId,
+        engine: t.connectionEngine,
+        database: t.database,
+        table: t.table,
       });
       setColumns(cols);
       setBaseline(cols.map((c) => ({ ...c })));
-      setTableName(tab.table);
+      setTableName(t.table);
       setSelectedIdx(0);
 
       const [ix, fk, tr, ck, meta, cs] = await Promise.all([
         loadDesignerIndexes({
-          connectionId: tab.connectionId,
-          engine: tab.connectionEngine,
-          database: tab.database,
-          table: tab.table,
+          connectionId: t.connectionId,
+          engine: t.connectionEngine,
+          database: t.database,
+          table: t.table,
         }),
         loadDesignerForeignKeys({
-          connectionId: tab.connectionId,
-          engine: tab.connectionEngine,
-          database: tab.database,
-          table: tab.table,
+          connectionId: t.connectionId,
+          engine: t.connectionEngine,
+          database: t.database,
+          table: t.table,
         }),
         loadDesignerTriggers({
-          connectionId: tab.connectionId,
-          engine: tab.connectionEngine,
-          database: tab.database,
-          table: tab.table,
+          connectionId: t.connectionId,
+          engine: t.connectionEngine,
+          database: t.database,
+          table: t.table,
         }),
         loadDesignerChecks({
-          connectionId: tab.connectionId,
-          engine: tab.connectionEngine,
-          database: tab.database,
-          table: tab.table,
+          connectionId: t.connectionId,
+          engine: t.connectionEngine,
+          database: t.database,
+          table: t.table,
         }),
         loadTableOptions({
-          connectionId: tab.connectionId,
-          engine: tab.connectionEngine,
-          database: tab.database,
-          table: tab.table,
+          connectionId: t.connectionId,
+          engine: t.connectionEngine,
+          database: t.database,
+          table: t.table,
         }),
-        engineKey(tab.connectionEngine) === "mysql"
-          ? loadMysqlCharsets({ connectionId: tab.connectionId })
+        engineKey(t.connectionEngine) === "mysql"
+          ? loadMysqlCharsets({ connectionId: t.connectionId })
           : Promise.resolve({ charsets: [], collationsByCharset: {} }),
       ]);
       setIndexes(ix);
@@ -229,17 +237,21 @@ export function TableDesigner({ tab }: Props) {
         setCollationMap(cs.collationsByCharset);
       }
       setDirty(false);
-      markDirty(tab.id, false);
+      markDirty(t.id, false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [tab, markDirty]);
+  }, [markDirty]);
+
+  // Only reload when switching designer tab identity — never on dirty flag updates.
+  useEffect(() => {
+    void load();
+  }, [tab.id, load]);
 
   useEffect(() => {
     if (engineKey(tab.connectionEngine) !== "mysql") return;
-    if (tab.mode !== "create") return;
     void loadMysqlCharsets({ connectionId: tab.connectionId })
       .then((cs) => {
         if (cs.charsets.length) setCharsetList(cs.charsets);
@@ -250,11 +262,7 @@ export function TableDesigner({ tab }: Props) {
       .catch(() => {
         /* keep defaults */
       });
-  }, [tab.connectionId, tab.connectionEngine, tab.mode]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  }, [tab.id, tab.connectionId, tab.connectionEngine]);
 
   function patchCol(key: string, patch: Partial<DesignerColumn>) {
     setColumns((prev) =>
@@ -611,8 +619,12 @@ export function TableDesigner({ tab }: Props) {
                 value={tableName}
                 disabled={saving}
                 onChange={(e) => {
-                  setTableName(e.target.value);
+                  const v = e.target.value;
+                  setTableName(v);
                   touch();
+                  updateTab(tab.id, {
+                    table: v.trim() || "new_table",
+                  });
                 }}
               />
             </label>
