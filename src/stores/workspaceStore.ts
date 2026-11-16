@@ -50,15 +50,20 @@ type WorkspaceState = {
   centerMode: CenterMode;
   toolbarAction: ToolbarAction;
   placeholderFeature: string | null;
+  objectListFilter: string;
+  focusObjectListFilter: boolean;
   tabs: TableTab[];
   activeTabId: string | null;
   openConnection: (conn: ConnectionDto) => void;
   clearConnection: () => void;
+  clearDatabaseSelection: () => void;
   selectDatabase: (database: string) => void;
   selectObjectFolder: (database: string, folder: ObjectFolder) => void;
   selectTableMeta: (table: string | null) => void;
   setCenterMode: (mode: CenterMode) => void;
   setToolbarAction: (action: ToolbarAction, placeholder?: string | null) => void;
+  setObjectListFilter: (filter: string, focus?: boolean) => void;
+  consumeObjectListFilterFocus: () => void;
   openTable: (table: string) => void;
   closeTab: (id: string) => boolean;
   setActiveTab: (id: string) => void;
@@ -75,6 +80,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   centerMode: "welcome",
   toolbarAction: "connection",
   placeholderFeature: null,
+  objectListFilter: "",
+  focusObjectListFilter: false,
   tabs: [],
   activeTabId: null,
   openConnection: (conn) =>
@@ -100,7 +107,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       centerMode: "welcome",
       toolbarAction: "connection",
       placeholderFeature: null,
+      objectListFilter: "",
+      focusObjectListFilter: false,
       tabs: [],
+      activeTabId: null,
+    }),
+  clearDatabaseSelection: () =>
+    set({
+      selectedDatabase: null,
+      selectedTable: null,
+      selectedFolder: null,
+      selectionKind: get().activeConnectionId ? "connection" : "none",
+      centerMode: "welcome",
+      toolbarAction: "connection",
+      placeholderFeature: null,
+      objectListFilter: "",
+      focusObjectListFilter: false,
       activeTabId: null,
     }),
   selectDatabase: (database) =>
@@ -112,6 +134,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       centerMode: "objectList",
       toolbarAction: "table",
       placeholderFeature: null,
+      objectListFilter: "",
+      focusObjectListFilter: false,
       activeTabId: null,
     }),
   selectObjectFolder: (database, folder) => {
@@ -169,6 +193,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             : "connection",
     }),
   setCenterMode: (mode) => set({ centerMode: mode, placeholderFeature: null }),
+  setObjectListFilter: (filter, focus = false) =>
+    set({
+      objectListFilter: filter,
+      focusObjectListFilter: focus,
+    }),
+  consumeObjectListFilterFocus: () => set({ focusObjectListFilter: false }),
   setToolbarAction: (action, placeholder = null) => {
     if (placeholder) {
       set({

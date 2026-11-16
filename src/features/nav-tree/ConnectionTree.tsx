@@ -24,6 +24,10 @@ import {
   type ObjectFolder,
 } from "../../stores/workspaceStore";
 import {
+  DatabaseContextMenu,
+  type DbMenuTarget,
+} from "./DatabaseContextMenu";
+import {
   IconBackups,
   IconDatabase,
   IconEvents,
@@ -59,6 +63,8 @@ export function ConnectionTree() {
     undefined,
   );
   const [filter, setFilter] = useState("");
+  const [dbMenu, setDbMenu] = useState<DbMenuTarget | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   const activeConnectionId = useWorkspaceStore((s) => s.activeConnectionId);
   const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
@@ -67,6 +73,49 @@ export function ConnectionTree() {
   const clearConnection = useWorkspaceStore((s) => s.clearConnection);
   const selectDatabase = useWorkspaceStore((s) => s.selectDatabase);
   const selectObjectFolder = useWorkspaceStore((s) => s.selectObjectFolder);
+  const clearDatabaseSelection = useWorkspaceStore(
+    (s) => s.clearDatabaseSelection,
+  );
+
+  useEffect(() => {
+    function onDocClick() {
+      setDbMenu(null);
+    }
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, []);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!selectedDatabase || !activeConnectionId) return;
+      const meta = e.metaKey || e.ctrlKey;
+      if (!meta) return;
+      // ⇧⌘. close database
+      if (e.shiftKey && (e.key === "." || e.code === "Period")) {
+        e.preventDefault();
+        closeDatabase(activeConnectionId, selectedDatabase);
+        return;
+      }
+      // ⌘Y new query
+      if (!e.shiftKey && (e.key === "y" || e.key === "Y")) {
+        e.preventDefault();
+        selectObjectFolder(selectedDatabase, "queries");
+        return;
+      }
+      // ⌘R refresh
+      if (!e.shiftKey && (e.key === "r" || e.key === "R")) {
+        e.preventDefault();
+        void refreshConnectionDatabases(activeConnectionId).then(() => {
+          setToast("已刷新");
+          window.setTimeout(() => setToast(null), 2000);
+        });
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // closeDatabase / refresh are stable enough via closure over latest state
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDatabase, activeConnectionId, selectObjectFolder]);
 
   const reload = useCallback(async () => {
     try {
@@ -153,6 +202,37 @@ export function ConnectionTree() {
             : n,
         ),
       );
+    }
+  }
+
+  async function refreshConnectionDatabases(connId: string) {
+    const node = nodes.find((n) => n.conn.id === connId);
+    if (!node) return;
+    openConn(node.conn);
+    await openConnection(node.conn.id);
+    const databases =
+      node.conn.engine === "sqlite"
+        ? [node.conn.host || "main"]
+        : await listDatabases(node.conn.id);
+    setNodes((prev) =>
+      prev.map((n) =>
+        n.conn.id === connId
+          ? { ...n, databases, expanded: true, error: null, loading: false }
+          : n,
+      ),
+    );
+  }
+
+  function closeDatabase(connId: string, database: string) {
+    setNodes((prev) =>
+      prev.map((n) =>
+        n.conn.id === connId
+          ? { ...n, openDbs: { ...n.openDbs, [database]: false } }
+          : n,
+      ),
+    );
+    if (activeConnectionId === connId && selectedDatabase === database) {
+      clearDatabaseSelection();
     }
   }
 
@@ -327,6 +407,18 @@ export function ConnectionTree() {
                       <li key={db}>
                         <div
                           className={`tree-row tree-db ${dbActive && !selectedFolder ? "is-active" : ""}`}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            openConn(n.conn);
+                            selectDatabase(db);
+                            setDbMenu({
+                              x: e.clientX,
+                              y: e.clientY,
+                              conn: n.conn,
+                              database: db,
+                            });
+                          }}
                         >
                           <button
                             type="button"
@@ -426,6 +518,21 @@ export function ConnectionTree() {
           </button>
         )}
       </div>
+
+      {toast && <p className="tree-toast">{toast}</p>}
+
+      {dbMenu && (
+        <DatabaseContextMenu
+          target={dbMenu}
+          onClose={() => setDbMenu(null)}
+          onRefresh={refreshConnectionDatabases}
+          onCloseDatabase={closeDatabase}
+          onMessage={(msg) => {
+            setToast(msg);
+            window.setTimeout(() => setToast(null), 2500);
+          }}
+        />
+      )}
 
       {editing !== undefined && (
         <ConnectionForm

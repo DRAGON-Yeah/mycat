@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   listTables,
   type DbObject,
@@ -24,11 +24,31 @@ export function ObjectListGrid() {
   const openTable = useWorkspaceStore((s) => s.openTable);
   const selectTableMeta = useWorkspaceStore((s) => s.selectTableMeta);
   const selectedTable = useWorkspaceStore((s) => s.selectedTable);
+  const objectListFilter = useWorkspaceStore((s) => s.objectListFilter);
+  const focusObjectListFilter = useWorkspaceStore(
+    (s) => s.focusObjectListFilter,
+  );
+  const setObjectListFilter = useWorkspaceStore((s) => s.setObjectListFilter);
+  const consumeObjectListFilterFocus = useWorkspaceStore(
+    (s) => s.consumeObjectListFilterFocus,
+  );
   const [tables, setTables] = useState<DbObject[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("");
   const [tick, setTick] = useState(0);
+  const filterRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setFilter(objectListFilter);
+  }, [objectListFilter]);
+
+  useEffect(() => {
+    if (!focusObjectListFilter) return;
+    filterRef.current?.focus();
+    filterRef.current?.select();
+    consumeObjectListFilterFocus();
+  }, [focusObjectListFilter, consumeObjectListFilterFocus]);
 
   const wantViews = folder === "views";
   const title = wantViews ? "视图" : "表";
@@ -108,10 +128,14 @@ export function ObjectListGrid() {
           </span>
         </div>
         <input
+          ref={filterRef}
           className="object-list-filter"
           value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="搜索"
+          onChange={(e) => {
+            setFilter(e.target.value);
+            setObjectListFilter(e.target.value);
+          }}
+          placeholder="搜索 / 在数据库中查找"
         />
       </div>
       {loading && <p className="pane-placeholder">加载中…</p>}

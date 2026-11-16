@@ -842,6 +842,38 @@ body,
   margin: 4px 0;
 }
 
+.menu-shortcut {
+  margin-left: 24px;
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.dg-context-menu > button:hover .menu-shortcut,
+.dg-menu-item.is-open > .dg-menu-trigger .menu-shortcut {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.tree-context-menu {
+  min-width: 220px;
+}
+
+.tree-toast {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 52px;
+  z-index: 20;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(20, 24, 30, 0.88);
+  color: #fff;
+  font-size: 12px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+}
+
 .navicat-grid .export-csv,
 .navicat-grid .import-csv {
   display: inline-flex;
@@ -1097,6 +1129,7 @@ tr.is-inserted {
 
 /* —— Navicat shell —— */
 .connection-tree {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
