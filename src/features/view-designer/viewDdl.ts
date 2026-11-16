@@ -1,17 +1,40 @@
 import { engineKey, identOk, quoteIdent, quoteTable } from "../nav-tree/sqlIdent";
 
-/** Extract SELECT body after the last top-level AS in CREATE VIEW DDL. */
+/**
+ * Extract SELECT/WITH body from CREATE VIEW DDL.
+ * Must find the AS that follows the VIEW name — not column aliases like `1 AS col`.
+ */
 export function parseViewSelectBody(createDdl: string): string {
   const sql = createDdl.replace(/;\s*$/, "").trim();
-  // Prefer matching " AS " after VIEW name block (case-insensitive).
-  const re = /\bAS\b/gi;
-  let match: RegExpExecArray | null;
-  let lastIdx = -1;
-  while ((match = re.exec(sql)) !== null) {
-    lastIdx = match.index;
+  // VIEW [IF NOT EXISTS] [[db.]name] [(cols)] AS <body>
+  const re =
+    /\bview\s+(?:if\s+not\s+exists\s+)?(?:(?:`[^`]+`|"[^"]+"|\w+)\s*\.\s*)?(?:`[^`]+`|"[^"]+"|\w+)\s*(?:\([^;]*?\))?\s+as\s+/i;
+  const m = sql.match(re);
+  if (m && m.index != null) {
+    return sql.slice(m.index + m[0].length).trim();
   }
-  if (lastIdx < 0) return sql;
-  return sql.slice(lastIdx + 2).trim();
+  // Fallback: first AS after the VIEW keyword only
+  const viewIdx = sql.search(/\bview\b/i);
+  if (viewIdx >= 0) {
+    const afterView = sql.slice(viewIdx);
+    const asMatch = /\bas\b/i.exec(afterView);
+    if (asMatch && asMatch.index != null) {
+      return afterView.slice(asMatch.index + asMatch[0].length).trim();
+    }
+  }
+  // Already a bare SELECT / WITH
+  if (/^\s*(select|with)\b/i.test(sql)) return sql;
+  return sql;
+}
+
+function normalizeViewBody(selectSql: string): string {
+  let body = selectSql.trim().replace(/;\s*$/, "");
+  // Unwrap a single pair of outer parentheses: (SELECT ...)
+  if (body.startsWith("(") && body.endsWith(")")) {
+    const inner = body.slice(1, -1).trim();
+    if (/^(select|with)\b/i.test(inner)) body = inner;
+  }
+  return body;
 }
 
 export function buildCreateViewSql(args: {
@@ -25,9 +48,9 @@ export function buildCreateViewSql(args: {
   if (!identOk(viewName)) {
     throw new Error("视图名仅允许字母、数字、下划线，且不能以数字开头");
   }
-  const body = selectSql.trim().replace(/;\s*$/, "");
+  const body = normalizeViewBody(selectSql);
   if (!body) throw new Error("请填写 SELECT 定义");
-  if (!/^\s*select\b/i.test(body) && !/^\s*with\b/i.test(body)) {
+  if (!/^(select|with)\b/i.test(body)) {
     throw new Error("视图定义应以 SELECT 或 WITH 开头");
   }
   const e = engineKey(engine);
@@ -63,7 +86,7 @@ export function rewriteCreateViewName(
     ? quoteTable(engine, database, newName)
     : quoteIdent(engine, newName);
   return ddl.replace(
-    /create\s+(or\s+replace\s+)?view\s+(if\s+not\s+exists\s+)?(?:`?[\w]+`?\.)?`?[\w]+`?/i,
+    /create\s+(or\s+replace\s+)?(?:algorithm\s*=\s*\w+\s+)?(?:definer\s*=\s*[^\s]+\s+)?(?:sql\s+security\s+\w+\s+)?view\s+(if\s+not\s+exists\s+)?(?:`?[\w]+`?\.)?`?[\w]+`?/i,
     (_m, orReplace?: string, ifNot?: string) =>
       `CREATE ${orReplace || ""}${ifNot || ""}VIEW ${qt}`,
   );

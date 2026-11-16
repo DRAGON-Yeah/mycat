@@ -83,6 +83,8 @@ export function ObjectListGrid() {
     useState<ViewsFolderMenuTarget | null>(null);
   const [groupMap, setGroupMap] = useState<Record<string, string>>({});
   const [viewMetaMap, setViewMetaMap] = useState<Record<string, ViewMeta>>({});
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const filterRef = useRef<HTMLInputElement>(null);
   const listResetKey = useMemo(
     () => `${connection?.id ?? ""}:${database ?? ""}:${folder ?? ""}`,
@@ -379,38 +381,10 @@ export function ObjectListGrid() {
               type="button"
               className="obj-tool-btn is-danger-text"
               title="删除视图"
-              disabled={!selectedTable}
+              disabled={!selectedTable || deleteBusy}
               onClick={() => {
-                if (!selectedTable || !connection || !database) return;
-                if (
-                  !window.confirm(
-                    `确定删除视图「${database}.${selectedTable}」？此操作不可恢复。`,
-                  )
-                ) {
-                  return;
-                }
-                void (async () => {
-                  try {
-                    await dropTableOrView({
-                      conn: connection,
-                      database,
-                      table: selectedTable,
-                      isView: true,
-                    });
-                    emitTableDataChanged({
-                      connectionId: connection.id,
-                      database,
-                      table: selectedTable,
-                    });
-                    selectTableMeta(null);
-                    setTick((x) => x + 1);
-                    setToast(`已删除视图 ${selectedTable}`);
-                    window.setTimeout(() => setToast(null), 2800);
-                  } catch (err) {
-                    setToast(err instanceof Error ? err.message : String(err));
-                    window.setTimeout(() => setToast(null), 2800);
-                  }
-                })();
+                if (!selectedTable) return;
+                setDeleteConfirm(selectedTable);
               }}
             >
               删除
@@ -554,6 +528,80 @@ export function ObjectListGrid() {
             window.setTimeout(() => setToast(null), 2800);
           }}
         />
+      )}
+
+      {deleteConfirm && connection && database && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !deleteBusy) {
+              setDeleteConfirm(null);
+            }
+          }}
+        >
+          <div
+            className="modal danger-confirm-modal"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h2>删除视图</h2>
+            <p className="danger-confirm-text">
+              确定删除视图{" "}
+              <strong>
+                {database}.{deleteConfirm}
+              </strong>{" "}
+              吗？此操作不可恢复。
+            </p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                disabled={deleteBusy}
+                onClick={() => setDeleteConfirm(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="is-danger"
+                disabled={deleteBusy}
+                autoFocus
+                onClick={() => {
+                  const name = deleteConfirm;
+                  void (async () => {
+                    setDeleteBusy(true);
+                    try {
+                      await dropTableOrView({
+                        conn: connection,
+                        database,
+                        table: name,
+                        isView: true,
+                      });
+                      emitTableDataChanged({
+                        connectionId: connection.id,
+                        database,
+                        table: name,
+                      });
+                      selectTableMeta(null);
+                      setDeleteConfirm(null);
+                      setTick((x) => x + 1);
+                      setToast(`已删除视图 ${name}`);
+                      window.setTimeout(() => setToast(null), 2800);
+                    } catch (err) {
+                      setToast(
+                        err instanceof Error ? err.message : String(err),
+                      );
+                      window.setTimeout(() => setToast(null), 2800);
+                    } finally {
+                      setDeleteBusy(false);
+                    }
+                  })();
+                }}
+              >
+                {deleteBusy ? "删除中…" : "删除"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

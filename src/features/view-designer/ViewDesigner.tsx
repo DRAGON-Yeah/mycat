@@ -66,13 +66,17 @@ export function ViewDesigner({ tab }: Props) {
   }
 
   function previewSql(): string {
-    return buildCreateViewSql({
-      engine,
-      database: tab.database,
-      viewName: viewName.trim() || "new_view",
-      selectSql,
-      replace: tab.mode === "alter",
-    });
+    try {
+      return buildCreateViewSql({
+        engine,
+        database: tab.database,
+        viewName: viewName.trim() || "new_view",
+        selectSql,
+        replace: tab.mode === "alter",
+      });
+    } catch (err) {
+      return `-- ${err instanceof Error ? err.message : String(err)}`;
+    }
   }
 
   async function save() {
