@@ -11,8 +11,10 @@ import {
 } from "./backupDump";
 import {
   defaultBackupProfile,
+  getCurrentProfileName,
   loadBackupProfile,
   saveBackupProfile,
+  saveBackupProfileAs,
   type BackupAdvancedOptions,
 } from "./backupProfile";
 
@@ -65,6 +67,9 @@ export function BackupWizard({
     lines: [],
   });
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [profileName, setProfileName] = useState<string | null>(null);
+  const [saveAsOpen, setSaveAsOpen] = useState(false);
+  const [saveAsName, setSaveAsName] = useState("");
 
   const title = `新建备份 @${database} (${conn.host || "localhost"}) - 备份`;
 
@@ -73,7 +78,21 @@ export function BackupWizard({
     setComment(p.comment);
     setSelectedKeys(p.selectedKeys);
     setAdvanced(p.advanced);
+    setProfileName(
+      getCurrentProfileName(conn.id, database) || p.name || null,
+    );
   }, [conn.id, database]);
+
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+    function onDoc(e: MouseEvent) {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.(".bak-split-btn")) return;
+      setProfileMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [profileMenuOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -147,14 +166,45 @@ export function BackupWizard({
     setSelectedKeys(groups.flatMap((g) => g.items.map((i) => i.key)));
   }
 
+  function currentPayload() {
+    return { comment, selectedKeys, advanced };
+  }
+
   function persistProfile() {
-    saveBackupProfile(conn.id, database, {
-      comment,
-      selectedKeys,
-      advanced,
+    const result = saveBackupProfile(conn.id, database, {
+      ...currentPayload(),
+      name: profileName ?? undefined,
     });
-    onMessage("已保存配置文件");
     setProfileMenuOpen(false);
+    if (!result.ok) {
+      setSaveAsName(profileName || "");
+      setSaveAsOpen(true);
+      return;
+    }
+    setProfileName(result.name);
+    onMessage(`已保存配置文件「${result.name}」`);
+  }
+
+  function openSaveAs() {
+    setProfileMenuOpen(false);
+    setSaveAsName(profileName || "");
+    setSaveAsOpen(true);
+  }
+
+  function confirmSaveAs() {
+    try {
+      const name = saveBackupProfileAs(
+        conn.id,
+        database,
+        saveAsName,
+        currentPayload(),
+      );
+      setProfileName(name);
+      setSaveAsOpen(false);
+      onMessage(`已另存为「${name}」`);
+    } catch (err) {
+      onMessage(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function startBackup() {
@@ -470,27 +520,18 @@ export function BackupWizard({
                 className="bak-split-arrow"
                 disabled={running}
                 aria-label="配置文件选项"
+                aria-expanded={profileMenuOpen}
                 onClick={() => setProfileMenuOpen((v) => !v)}
               >
-                ▾
+                <span className="bak-caret" aria-hidden />
               </button>
               {profileMenuOpen && (
-                <div className="bak-split-menu">
-                  <button type="button" onClick={() => persistProfile()}>
-                    保存配置文件
+                <div className="bak-split-menu" role="menu">
+                  <button type="button" role="menuitem" onClick={() => persistProfile()}>
+                    保存
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const p = loadBackupProfile(conn.id, database);
-                      setComment(p.comment);
-                      setSelectedKeys(p.selectedKeys);
-                      setAdvanced(p.advanced);
-                      onMessage("已加载配置文件");
-                      setProfileMenuOpen(false);
-                    }}
-                  >
-                    加载配置文件
+                  <button type="button" role="menuitem" onClick={() => openSaveAs()}>
+                    另存为...
                   </button>
                 </div>
               )}
@@ -510,6 +551,44 @@ export function BackupWizard({
             </button>
           </div>
         </footer>
+
+        {saveAsOpen && (
+          <div
+            className="modal-backdrop bak-save-as-backdrop"
+            role="presentation"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setSaveAsOpen(false);
+            }}
+          >
+            <form
+              className="modal bak-save-as-modal"
+              onMouseDown={(e) => e.stopPropagation()}
+              onSubmit={(e) => {
+                e.preventDefault();
+                confirmSaveAs();
+              }}
+            >
+              <h2>另存为配置文件</h2>
+              <label>
+                名称
+                <input
+                  value={saveAsName}
+                  onChange={(e) => setSaveAsName(e.target.value)}
+                  placeholder="例如：每日全量"
+                  autoFocus
+                />
+              </label>
+              <div className="modal-actions">
+                <button type="button" onClick={() => setSaveAsOpen(false)}>
+                  取消
+                </button>
+                <button type="submit" disabled={!saveAsName.trim()}>
+                  保存
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
       </div>
     </div>
   );
