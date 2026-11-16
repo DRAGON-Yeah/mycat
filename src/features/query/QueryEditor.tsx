@@ -17,6 +17,7 @@ import {
 } from "../connections/sessionApi";
 import type { ConnectionDto } from "../connections/types";
 import { downloadTextFile } from "../import-export/csv";
+import { Splitter } from "../../shell/Splitter";
 import { useUiStore } from "../../stores/uiStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import {
@@ -39,6 +40,11 @@ type RunMode = "all" | "selection" | "current";
 
 export function QueryEditor() {
   const theme = useUiStore((s) => s.theme);
+  const queryEditorRatio = useUiStore((s) => s.layout.queryEditorRatio);
+  const bumpQueryEditorRatioByPx = useUiStore(
+    (s) => s.bumpQueryEditorRatioByPx,
+  );
+  const queryBodyRef = useRef<HTMLDivElement>(null);
   const activeQueryId = useWorkspaceStore((s) => s.activeQueryId);
   const queryTabs = useWorkspaceStore((s) => s.queryTabs);
   const updateQueryTab = useWorkspaceStore((s) => s.updateQueryTab);
@@ -866,7 +872,17 @@ export function QueryEditor() {
         </button>
       </div>
 
-      <div className={`query-body ${resultCollapsed ? "is-result-collapsed" : ""}`}>
+      <div
+        ref={queryBodyRef}
+        className={`query-body ${resultCollapsed ? "is-result-collapsed" : ""}`}
+        style={
+          resultCollapsed
+            ? undefined
+            : {
+                gridTemplateRows: `minmax(120px, ${queryEditorRatio}fr) 5px minmax(100px, ${1 - queryEditorRatio}fr)`,
+              }
+        }
+      >
         <div className="query-editor">
           <Editor
             height="100%"
@@ -906,6 +922,17 @@ export function QueryEditor() {
             }}
           />
         </div>
+
+        {!resultCollapsed && (
+          <Splitter
+            orientation="horizontal"
+            title="拖动调整编辑区 / 结果区高度"
+            onDrag={(delta) => {
+              const h = queryBodyRef.current?.clientHeight ?? 0;
+              bumpQueryEditorRatioByPx(delta, h);
+            }}
+          />
+        )}
 
         {!resultCollapsed && (
           <div className="query-result">
