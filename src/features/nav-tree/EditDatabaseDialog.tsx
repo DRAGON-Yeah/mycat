@@ -1,7 +1,15 @@
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { loadMysqlCharsets } from "../table-designer/loadColumns";
+import {
+  MYSQL_CHARSETS,
+  MYSQL_COLLATIONS_BY_CHARSET,
+  collationsForCharset,
+  defaultCollationForCharset,
+} from "../table-designer/mysqlCharsets";
 
 type Props = {
   database: string;
+  connectionId?: string;
   busy?: boolean;
   onCancel: () => void;
   onSubmit: (charset: string, collate: string) => void;
@@ -9,13 +17,37 @@ type Props = {
 
 export function EditDatabaseDialog({
   database,
+  connectionId,
   busy = false,
   onCancel,
   onSubmit,
 }: Props) {
   const [charset, setCharset] = useState("utf8mb4");
-  const [collate, setCollate] = useState("utf8mb4_general_ci");
-  const charsetRef = useRef<HTMLInputElement>(null);
+  const [collate, setCollate] = useState("utf8mb4_unicode_ci");
+  const [charsetList, setCharsetList] = useState<string[]>([...MYSQL_CHARSETS]);
+  const [collationMap, setCollationMap] = useState<Record<string, string[]>>(
+    MYSQL_COLLATIONS_BY_CHARSET,
+  );
+
+  useEffect(() => {
+    if (!connectionId) return;
+    void loadMysqlCharsets({ connectionId })
+      .then((cs) => {
+        if (cs.charsets.length) setCharsetList(cs.charsets);
+        if (Object.keys(cs.collationsByCharset).length) {
+          setCollationMap(cs.collationsByCharset);
+        }
+      })
+      .catch(() => {
+        /* keep defaults */
+      });
+  }, [connectionId]);
+
+  const collationChoices = useMemo(() => {
+    const fromServer = collationMap[charset];
+    if (fromServer?.length) return fromServer;
+    return collationsForCharset(charset);
+  }, [collationMap, charset]);
 
   return (
     <div
@@ -31,30 +63,48 @@ export function EditDatabaseDialog({
           e.preventDefault();
           const cs = charset.trim();
           if (!cs) return;
-          onSubmit(cs, collate.trim());
+          onSubmit(cs, collate.trim() || defaultCollationForCharset(cs));
         }}
       >
         <h2>编辑数据库「{database}」</h2>
         <label>
           字符集
-          <input
-            ref={charsetRef}
+          <select
             value={charset}
-            onChange={(e) => setCharset(e.target.value)}
-            placeholder="utf8mb4"
             disabled={busy}
-            autoComplete="off"
-          />
+            onChange={(e) => {
+              const next = e.target.value;
+              setCharset(next);
+              const list = collationMap[next] || collationsForCharset(next);
+              setCollate(list[0] || defaultCollationForCharset(next));
+            }}
+          >
+            {!charsetList.includes(charset) && charset && (
+              <option value={charset}>{charset}</option>
+            )}
+            {charsetList.map((cs) => (
+              <option key={cs} value={cs}>
+                {cs}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           排序规则
-          <input
+          <select
             value={collate}
-            onChange={(e) => setCollate(e.target.value)}
-            placeholder="utf8mb4_general_ci"
             disabled={busy}
-            autoComplete="off"
-          />
+            onChange={(e) => setCollate(e.target.value)}
+          >
+            {!collationChoices.includes(collate) && collate && (
+              <option value={collate}>{collate}</option>
+            )}
+            {collationChoices.map((cl) => (
+              <option key={cl} value={cl}>
+                {cl}
+              </option>
+            ))}
+          </select>
         </label>
         <div className="modal-actions">
           <button type="button" disabled={busy} onClick={onCancel}>

@@ -585,14 +585,23 @@ export function ConnectionTree() {
     window.setTimeout(() => setToast(null), 2500);
   }
 
-  async function handleCreateDatabase(conn: ConnectionDto, name: string) {
+  async function handleCreateDatabase(
+    conn: ConnectionDto,
+    args: { name: string; charset: string; collate: string },
+  ) {
+    const { name, charset, collate } = args;
     if (!/^[A-Za-z0-9_]+$/.test(name)) {
       throw new Error("数据库名仅允许字母、数字、下划线");
     }
     setNewDbBusy(true);
     try {
       await openConnection(conn.id);
-      await executeSql(conn.id, `CREATE DATABASE \`${name}\``);
+      let sql = `CREATE DATABASE \`${name}\``;
+      if (String(conn.engine).toLowerCase() === "mysql") {
+        if (charset) sql += ` CHARACTER SET ${charset}`;
+        if (collate) sql += ` COLLATE ${collate}`;
+      }
+      await executeSql(conn.id, sql);
       setNewDbFor(null);
       setToast(`已创建数据库 ${name}`);
       window.setTimeout(() => setToast(null), 2500);
@@ -1103,6 +1112,7 @@ export function ConnectionTree() {
           onForceCloseDatabase={(connId, database) =>
             finalizeCloseDatabase(connId, database)
           }
+          onAskNewDatabase={(c) => setNewDbFor(c)}
           onMessage={(msg) => {
             setToast(msg);
             window.setTimeout(() => setToast(null), 2500);
@@ -1129,6 +1139,7 @@ export function ConnectionTree() {
       {pendingEdit && (
         <EditDatabaseDialog
           database={pendingEdit.database}
+          connectionId={pendingEdit.connId}
           busy={editBusy}
           onCancel={() => setPendingEdit(null)}
           onSubmit={(charset, collate) =>
@@ -1139,10 +1150,11 @@ export function ConnectionTree() {
 
       {newDbFor && (
         <NewDatabaseDialog
+          connectionId={newDbFor.id}
           busy={newDbBusy}
           onCancel={() => setNewDbFor(null)}
-          onSubmit={(name) => {
-            void handleCreateDatabase(newDbFor, name).catch((err) => {
+          onSubmit={(args) => {
+            void handleCreateDatabase(newDbFor, args).catch((err) => {
               setToast(err instanceof Error ? err.message : String(err));
               window.setTimeout(() => setToast(null), 2800);
             });

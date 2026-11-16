@@ -26,6 +26,8 @@ type Props = {
   onRequestEditDatabase: (connId: string, database: string) => void;
   /** Force-close after DROP (no dirty prompt). */
   onForceCloseDatabase: (connId: string, database: string) => void;
+  /** Open new-database dialog (charset dropdown). */
+  onAskNewDatabase?: (conn: ConnectionDto) => void;
   onMessage: (msg: string) => void;
 };
 
@@ -40,6 +42,7 @@ export function DatabaseContextMenu({
   onRequestCloseDatabase,
   onRequestEditDatabase,
   onForceCloseDatabase,
+  onAskNewDatabase,
   onMessage,
 }: Props) {
   const [dumpOpen, setDumpOpen] = useState(false);
@@ -218,7 +221,12 @@ export function DatabaseContextMenu({
       <button
         type="button"
         disabled={busy}
-        onClick={() =>
+        onClick={() => {
+          if (onAskNewDatabase) {
+            onAskNewDatabase(conn);
+            onClose();
+            return;
+          }
           void run(async () => {
             const name = window.prompt("新数据库名称")?.trim();
             if (!name) return;
@@ -226,11 +234,14 @@ export function DatabaseContextMenu({
               throw new Error("数据库名仅允许字母、数字、下划线");
             }
             ensureContext();
-            await executeSql(conn.id, `CREATE DATABASE \`${name}\``);
+            await executeSql(
+              conn.id,
+              `CREATE DATABASE \`${name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+            );
             onMessage(`已创建数据库 ${name}`);
             await onRefresh(conn.id);
-          })
-        }
+          });
+        }}
       >
         新建数据库…
       </button>
