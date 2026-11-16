@@ -321,12 +321,17 @@ impl DriverSession for MysqlSession {
             .map_err(|_| AppError::Message("mysql lock".into()))?;
 
         let upper = trimmed.to_uppercase();
+        // CHECK/ANALYZE/OPTIMIZE/REPAIR TABLE return result sets (Msg_text).
         if upper.starts_with("SELECT")
             || upper.starts_with("SHOW")
             || upper.starts_with("DESCRIBE")
             || upper.starts_with("DESC")
             || upper.starts_with("EXPLAIN")
             || upper.starts_with("WITH")
+            || upper.starts_with("CHECK TABLE")
+            || upper.starts_with("ANALYZE TABLE")
+            || upper.starts_with("OPTIMIZE TABLE")
+            || upper.starts_with("REPAIR TABLE")
         {
             let result = conn.query_iter(trimmed)?;
             let columns = result

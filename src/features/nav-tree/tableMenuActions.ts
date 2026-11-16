@@ -7,6 +7,12 @@ import {
 } from "../connections/sessionApi";
 import { downloadTextFile, rowsToCsv, parseCsv } from "../import-export/csv";
 import { applyRowChanges } from "../connections/sessionApi";
+import {
+  loadDesignerColumns,
+  loadDesignerForeignKeys,
+  loadDesignerIndexes,
+  loadTableOptions,
+} from "../table-designer/loadColumns";
 import { engineKey, identOk, quoteIdent, quoteTable } from "./sqlIdent";
 
 export async function dumpSingleTable(args: {
@@ -37,21 +43,48 @@ export async function exportTableDictionary(args: {
   table: string;
 }) {
   const { conn, database, table } = args;
-  await openConnection(conn.id);
-  const page = await fetchTablePage({
-    connectionId: conn.id,
-    table,
-    page: 1,
-    pageSize: 1,
-    database,
-  });
+  const engine = String(conn.engine);
+  const [cols, meta, indexes] = await Promise.all([
+    loadDesignerColumns({
+      connectionId: conn.id,
+      engine,
+      database,
+      table,
+    }),
+    loadTableOptions({
+      connectionId: conn.id,
+      engine,
+      database,
+      table,
+    }),
+    loadDesignerIndexes({
+      connectionId: conn.id,
+      engine,
+      database,
+      table,
+    }),
+  ]);
   const lines = [
     `# 数据字典 · ${database}.${table}`,
     "",
-    `| 列名 | 类型 | 可空 |`,
-    `| --- | --- | --- |`,
-    ...page.columns.map(
-      (c) => `| ${c.name} | ${c.dataType} | ${c.nullable ? "YES" : "NO"} |`,
+    `- 引擎: ${meta.options.engine || "—"}`,
+    `- 校对: ${meta.options.collation || "—"}`,
+    `- 约行数: ${meta.stats.tableRows}`,
+    `- 注释: ${meta.options.comment || "—"}`,
+    "",
+    `| 列名 | 类型 | 可空 | 主键 | 默认 | Extra | 注释 |`,
+    `| --- | --- | --- | --- | --- | --- | --- |`,
+    ...cols.map((c) => {
+      const typ = [c.typeName, c.length ? `(${c.length}${c.decimals ? `,${c.decimals}` : ""})` : ""]
+        .join("");
+      return `| ${c.name} | ${typ} | ${c.notNull ? "NO" : "YES"} | ${c.isPk ? "YES" : ""} | ${c.defaultValue ?? ""} | ${c.extra || ""} | ${c.comment || ""} |`;
+    }),
+    "",
+    `## 索引`,
+    "",
+    ...indexes.map(
+      (ix) =>
+        `- **${ix.name}** (${ix.unique ? "UNIQUE " : ""}${ix.indexType || "BTREE"}): ${ix.columns}`,
     ),
     "",
   ];
@@ -68,26 +101,41 @@ export async function reverseSingleTableModel(args: {
   table: string;
 }): Promise<string> {
   const { conn, database, table } = args;
-  await openConnection(conn.id);
-  const page = await fetchTablePage({
-    connectionId: conn.id,
-    table,
-    page: 1,
-    pageSize: 1,
-    database,
-  });
-  const safe = table.replace(/[^A-Za-z0-9_]/g, "_");
+  const engine = String(conn.engine);
+  const [cols, fks] = await Promise.all([
+    loadDesignerColumns({
+      connectionId: conn.id,
+      engine,
+      database,
+      table,
+    }),
+    loadDesignerForeignKeys({
+      connectionId: conn.id,
+      engine,
+      database,
+      table,
+    }),
+  ]);
+  const safe = (n: string) => n.replace(/[^A-Za-z0-9_]/g, "_") || "t";
+  const t = safe(table);
   const lines = [
     `# 逆向模型 · ${database}.${table}`,
     "",
     "```mermaid",
     "erDiagram",
-    `  ${safe} {`,
-    ...page.columns.slice(0, 24).map((col) => {
-      const typ = col.dataType.replace(/\s+/g, "_").replace(/[^A-Za-z0-9_]/g, "");
-      return `    ${typ || "string"} ${col.name}`;
+    `  ${t} {`,
+    ...cols.slice(0, 32).map((col) => {
+      const typ = (col.typeName || "string").replace(/[^A-Za-z0-9_]/g, "");
+      const pk = col.isPk ? " PK" : "";
+      return `    ${typ || "string"} ${safe(col.name)}${pk}`;
     }),
     "  }",
+    ...fks
+      .filter((fk) => fk.refTable.trim())
+      .map((fk) => {
+        const other = safe(fk.refTable);
+        return `  ${other} ||--o{ ${t} : "${safe(fk.name)}"`;
+      }),
     "```",
     "",
   ];
@@ -96,16 +144,57 @@ export async function reverseSingleTableModel(args: {
   return md;
 }
 
+/** Return SHOW CREATE TABLE/VIEW DDL text. */
+export async function fetchCreateDdl(args: {
+  conn: ConnectionDto;
+  database: string;
+  table: string;
+  isView?: boolean;
+}): Promise<string> {
+  const { conn, database, table, isView } = args;
+  await openConnection(conn.id);
+  const e = engineKey(conn.engine);
+  if (e === "mysql") {
+    const qt = quoteTable(String(conn.engine), database, table);
+    const kind = isView ? "VIEW" : "TABLE";
+    const out = await executeSql(
+      conn.id,
+      `SHOW CREATE ${kind} ${qt}`,
+      database,
+    );
+    const row = out.rows[0];
+    if (!row) throw new Error("无法获取 DDL");
+    const sql = String(row[1] ?? row[0] ?? "");
+    if (!sql) throw new Error("无法获取 DDL");
+    return sql.endsWith(";") ? sql : `${sql};`;
+  }
+  if (e === "sqlite") {
+    const out = await executeSql(
+      conn.id,
+      `SELECT sql FROM sqlite_master WHERE name = '${table.replace(/'/g, "''")}' AND type IN ('table','view')`,
+      database,
+    );
+    const sql = String(out.rows[0]?.[0] ?? "");
+    if (!sql) throw new Error("无法获取 DDL");
+    return sql.endsWith(";") ? sql : `${sql};`;
+  }
+  // Postgres fallback
+  const qt = quoteTable(String(conn.engine), null, table);
+  return `-- Postgres: use pg_dump for full DDL\n-- Table: ${qt}\n`;
+}
+
 export async function exportTableCsv(args: {
   connectionId: string;
   table: string;
   database?: string;
+  columns?: string[];
+  bom?: boolean;
 }) {
-  const { connectionId, table, database } = args;
+  const { connectionId, table, database, bom = true } = args;
   await openConnection(connectionId);
   const pageSize = 500;
   let page = 1;
-  let columns: string[] = [];
+  let allColumns: string[] = [];
   const allRows: unknown[][] = [];
   let total = 0;
   while (true) {
@@ -117,16 +206,25 @@ export async function exportTableCsv(args: {
       database,
     });
     if (page === 1) {
-      columns = chunk.columns.map((c) => c.name);
+      allColumns = chunk.columns.map((c) => c.name);
       total = chunk.total;
     }
     allRows.push(...chunk.rows);
     if (allRows.length >= total || chunk.rows.length === 0) break;
     page += 1;
   }
+  const selected =
+    args.columns && args.columns.length > 0
+      ? args.columns.filter((c) => allColumns.includes(c))
+      : allColumns;
+  if (selected.length === 0) {
+    throw new Error("请至少选择一列导出");
+  }
+  const idxs = selected.map((c) => allColumns.indexOf(c));
+  const projected = allRows.map((row) => idxs.map((i) => row[i]));
   downloadTextFile(
     `${table}.csv`,
-    rowsToCsv(columns, allRows),
+    rowsToCsv(selected, projected, { bom }),
     "text/csv;charset=utf-8",
   );
   return allRows.length;
@@ -137,8 +235,20 @@ export async function importTableCsv(args: {
   table: string;
   database?: string;
   file: File;
+  /** Map CSV header → table column; omit/empty to skip */
+  columnMap?: Record<string, string>;
+  truncateFirst?: boolean;
+  engine?: string;
 }): Promise<{ ok: number; failed: number }> {
-  const { connectionId, table, database, file } = args;
+  const {
+    connectionId,
+    table,
+    database,
+    file,
+    columnMap,
+    truncateFirst,
+    engine,
+  } = args;
   await openConnection(connectionId);
   const meta = await fetchTablePage({
     connectionId,
@@ -150,26 +260,50 @@ export async function importTableCsv(args: {
   const tableColumns = meta.columns.map((c) => c.name);
   const text = await file.text();
   const parsed = parseCsv(text);
-  const mappedCols = parsed.columns.map((c) => c.trim());
-  const unknown = mappedCols.filter((c) => c && !tableColumns.includes(c));
-  if (unknown.length > 0) {
-    throw new Error(`CSV 列不在表中: ${unknown.join(", ")}`);
+  const csvCols = parsed.columns.map((c) => c.trim());
+
+  const usable: { csvIdx: number; tableCol: string }[] = [];
+  if (columnMap) {
+    for (let i = 0; i < csvCols.length; i++) {
+      const csvName = csvCols[i]!;
+      const target = columnMap[csvName];
+      if (!target) continue;
+      if (!tableColumns.includes(target)) {
+        throw new Error(`目标列不存在: ${target}`);
+      }
+      usable.push({ csvIdx: i, tableCol: target });
+    }
+  } else {
+    for (let i = 0; i < csvCols.length; i++) {
+      const name = csvCols[i]!;
+      if (name && tableColumns.includes(name)) {
+        usable.push({ csvIdx: i, tableCol: name });
+      }
+    }
   }
-  const usable = mappedCols
-    .map((name, idx) => ({ name, idx }))
-    .filter((c) => c.name && tableColumns.includes(c.name));
   if (usable.length === 0) {
     throw new Error("没有可映射的列");
   }
+
+  if (truncateFirst) {
+    const e = engineKey(engine || "mysql");
+    const qt = quoteTable(e, database || null, table);
+    if (e === "sqlite") {
+      await executeSql(connectionId, `DELETE FROM ${qt}`, database);
+    } else {
+      await executeSql(connectionId, `TRUNCATE TABLE ${qt}`, database);
+    }
+  }
+
   let ok = 0;
   let failed = 0;
   const batch: { columns: string[]; values: unknown[] }[] = [];
   for (const row of parsed.rows) {
     if (row.every((c) => c.trim() === "")) continue;
     batch.push({
-      columns: usable.map((c) => c.name),
+      columns: usable.map((c) => c.tableCol),
       values: usable.map((c) => {
-        const raw = row[c.idx] ?? "";
+        const raw = row[c.csvIdx] ?? "";
         if (raw === "" || raw === "NULL") return null;
         return raw;
       }),

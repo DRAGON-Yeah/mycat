@@ -20,13 +20,16 @@ import {
   generateTableRows,
   grantTablePrivilege,
   listTableGrants,
+  revokeTablePrivilege,
 } from "./tableDataTools";
+import { getGridViewSnapshot } from "../data-grid/gridViewSnapshot";
 import {
   copyTable,
   dropTableOrView,
   dumpSingleTable,
   emptyTable,
   exportTableDictionary,
+  fetchCreateDdl,
   maintainOpsForEngine,
   maintainTable,
   renameTable,
@@ -34,6 +37,7 @@ import {
   truncateTable,
   type MaintainOp,
 } from "./tableMenuActions";
+import { SimpleChartDialog } from "./SimpleChartDialog";
 
 export type TableMenuTarget = {
   x: number;
@@ -85,6 +89,13 @@ export function TableContextMenu({
   );
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteSql, setPasteSql] = useState("");
+  const [pasteTableName, setPasteTableName] = useState("");
+  const [maintainResult, setMaintainResult] = useState<{
+    op: string;
+    columns: string[];
+    rows: unknown[][];
+  } | null>(null);
+  const [chartOpen, setChartOpen] = useState(false);
 
   const openTable = useWorkspaceStore((s) => s.openTable);
   const openConn = useWorkspaceStore((s) => s.openConnection);
@@ -161,22 +172,38 @@ export function TableContextMenu({
         t.database === database &&
         t.table === table,
     );
-    const name = `配置 ${profiles.length + 1}`;
+    const snap =
+      (active && getGridViewSnapshot(active.id)) ||
+      active?.openOptions ||
+      null;
+    const raw = window.prompt(
+      "配置名称",
+      `配置 ${profiles.length + 1}`,
+    );
+    if (!raw?.trim()) return;
+    const name = raw.trim();
     const next: TableOpenProfile[] = [
       ...profiles,
       {
         id: newTableProfileId(),
         name,
-        sortCol: active?.openOptions?.sortCol,
-        sortDir: active?.openOptions?.sortDir,
-        filterCol: active?.openOptions?.filterCol,
-        filterValue: active?.openOptions?.filterValue,
-        pageSize: active?.openOptions?.pageSize ?? 1000,
+        sortCol: snap?.sortCol,
+        sortDir: snap?.sortDir,
+        filterCol: snap?.filterCol,
+        filterValue: snap?.filterValue,
+        pageSize: snap?.pageSize ?? 1000,
       },
     ];
     await saveTableProfiles(conn.id, database, table, next);
     setProfiles(next);
     onMessage(`已保存打开配置「${name}」`);
+  }
+
+  async function deleteProfile(id: string) {
+    const next = profiles.filter((p) => p.id !== id);
+    await saveTableProfiles(conn.id, database, table, next);
+    setProfiles(next);
+    onMessage("已删除配置");
   }
 
   async function assignGroup(groupName: string | null) {
@@ -195,6 +222,44 @@ export function TableContextMenu({
     setGroups(nextGroups);
     setMembership(nextMembership);
     onMessage(groupName ? `已加入组「${groupName}」` : "已移出组");
+    onRefresh();
+  }
+
+  async function renameGroup(oldName: string) {
+    const raw = window.prompt("新组名", oldName);
+    if (!raw?.trim() || raw.trim() === oldName) return;
+    const nextName = raw.trim();
+    const nextMembership = { ...membership };
+    for (const [k, v] of Object.entries(nextMembership)) {
+      if (v === oldName) nextMembership[k] = nextName;
+    }
+    const nextGroups = Array.from(
+      new Set(groups.map((g) => (g === oldName ? nextName : g))),
+    ).sort((a, b) => a.localeCompare(b, "zh"));
+    await saveTableGroups(conn.id, database, {
+      groups: nextGroups,
+      membership: nextMembership,
+    });
+    setGroups(nextGroups);
+    setMembership(nextMembership);
+    onMessage(`组已改名为「${nextName}」`);
+    onRefresh();
+  }
+
+  async function deleteGroup(groupName: string) {
+    if (!window.confirm(`删除组「${groupName}」？（表不会被删除）`)) return;
+    const nextMembership = { ...membership };
+    for (const [k, v] of Object.entries(nextMembership)) {
+      if (v === groupName) delete nextMembership[k];
+    }
+    const nextGroups = groups.filter((g) => g !== groupName);
+    await saveTableGroups(conn.id, database, {
+      groups: nextGroups,
+      membership: nextMembership,
+    });
+    setGroups(nextGroups);
+    setMembership(nextMembership);
+    onMessage(`已删除组「${groupName}」`);
     onRefresh();
   }
 
@@ -242,23 +307,35 @@ export function TableContextMenu({
                 默认打开
               </button>
               {profiles.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => {
-                    ensureContext();
-                    openTable(table, {
-                      sortCol: p.sortCol,
-                      sortDir: p.sortDir,
-                      filterCol: p.filterCol,
-                      filterValue: p.filterValue,
-                      pageSize: p.pageSize,
-                    });
-                    onClose();
-                  }}
-                >
-                  {p.name}
-                </button>
+                <div key={p.id} className="dg-submenu-row">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      ensureContext();
+                      openTable(table, {
+                        sortCol: p.sortCol,
+                        sortDir: p.sortDir,
+                        filterCol: p.filterCol,
+                        filterValue: p.filterValue,
+                        pageSize: p.pageSize,
+                      });
+                      onClose();
+                    }}
+                  >
+                    {p.name}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    title="删除配置"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void run(() => deleteProfile(p.id));
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
               ))}
               <div className="dg-menu-sep" />
               <button
@@ -568,10 +645,35 @@ export function TableContextMenu({
                       ) {
                         return;
                       }
-                      void run(async () => {
-                        await maintainTable({ conn, database, table, op });
-                        onMessage(`已完成：${label}`);
-                      });
+                      void (async () => {
+                        try {
+                          setBusy(true);
+                          const out = await maintainTable({
+                            conn,
+                            database,
+                            table,
+                            op,
+                          });
+                          if (out.columns.length > 0) {
+                            setMaintainResult({
+                              op: label,
+                              columns: out.columns,
+                              rows: out.rows,
+                            });
+                          } else {
+                            onMessage(
+                              `已完成：${label}（${out.rowsAffected} 行）`,
+                            );
+                            onClose();
+                          }
+                        } catch (err) {
+                          onMessage(
+                            err instanceof Error ? err.message : String(err),
+                          );
+                        } finally {
+                          setBusy(false);
+                        }
+                      })();
                     }}
                   >
                     {label}
@@ -597,10 +699,13 @@ export function TableContextMenu({
         </button>
         <button
           type="button"
-          disabled
-          title="稍后：BI 工作区尚未实现"
+          disabled={busy || isView}
+          title="按当前表生成简易统计图"
+          onClick={() => {
+            setChartOpen(true);
+          }}
         >
-          创建 BI 工作区…（稍后）
+          生成简易图表…
         </button>
 
         <div className="dg-menu-sep" />
@@ -624,14 +729,37 @@ export function TableContextMenu({
                 无组
               </button>
               {groups.map((g) => (
-                <button
-                  key={g}
-                  type="button"
-                  className={membership[table] === g ? "is-checked" : ""}
-                  onClick={() => void run(() => assignGroup(g))}
-                >
-                  {g}
-                </button>
+                <div key={g} className="dg-submenu-row">
+                  <button
+                    type="button"
+                    className={membership[table] === g ? "is-checked" : ""}
+                    onClick={() => void run(() => assignGroup(g))}
+                  >
+                    {g}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    title="改名"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void run(() => renameGroup(g));
+                    }}
+                  >
+                    ✎
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    title="删除组"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void run(() => deleteGroup(g));
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
               ))}
               <div className="dg-menu-sep" />
               <div className="dg-submenu-inline">
@@ -660,14 +788,17 @@ export function TableContextMenu({
         <button
           type="button"
           disabled={busy}
+          title="复制 CREATE TABLE/VIEW DDL"
           onClick={() =>
             void run(async () => {
-              try {
-                await navigator.clipboard.writeText(table);
-              } catch {
-                /* ignore */
-              }
-              onMessage(`已复制表名 ${table}`);
+              const ddl = await fetchCreateDdl({
+                conn,
+                database,
+                table,
+                isView,
+              });
+              await navigator.clipboard.writeText(ddl);
+              onMessage("已复制表结构 DDL");
             })
           }
         >
@@ -685,10 +816,15 @@ export function TableContextMenu({
                   return;
                 }
                 setPasteSql(text);
+                const m = text.match(
+                  /create\s+(?:table|view)\s+(?:if\s+not\s+exists\s+)?(?:`?[\w]+`?\.)?`?([\w]+)`?/i,
+                );
+                setPasteTableName(m?.[1] ? `${m[1]}_copy` : `${table}_paste`);
                 setPasteOpen(true);
               } catch {
                 onMessage("无法读取剪贴板，请粘贴到对话框");
                 setPasteSql("");
+                setPasteTableName(`${table}_paste`);
                 setPasteOpen(true);
               }
             })()
@@ -701,25 +837,28 @@ export function TableContextMenu({
           disabled={busy}
           onClick={() =>
             void run(async () => {
-              await dumpSingleTable({
+              const ddl = await fetchCreateDdl({
                 conn,
                 database,
                 table,
-                includeData: false,
+                isView,
               });
-              const meta = {
-                connection: conn.name,
-                engine: conn.engine,
-                database,
-                table,
-                sharedAt: new Date().toISOString(),
-              };
+              const header = [
+                `-- Mycat share package`,
+                `-- connection: ${conn.name}`,
+                `-- engine: ${conn.engine}`,
+                `-- database: ${database}`,
+                `-- table: ${table}`,
+                `-- sharedAt: ${new Date().toISOString()}`,
+                `-- Restore: open SQL file or use Paste on table menu`,
+                "",
+              ].join("\n");
               downloadTextFile(
-                `${table}-share.json`,
-                `${JSON.stringify(meta, null, 2)}\n`,
-                "application/json",
+                `${table}-share.sql`,
+                `${header}${ddl}\n`,
+                "application/sql",
               );
-              onMessage("已导出共享包（结构 SQL + 元数据 JSON）");
+              onMessage("已导出共享包（可恢复的结构 SQL）");
             })
           }
         >
@@ -864,6 +1003,7 @@ export function TableContextMenu({
                   database,
                   table,
                   count: genCount,
+                  engine: String(conn.engine),
                 });
                 emitTableDataChanged({
                   connectionId: conn.id,
@@ -942,6 +1082,26 @@ export function TableContextMenu({
                 disabled={busy}
                 onClick={() =>
                   void run(async () => {
+                    await revokeTablePrivilege({
+                      connectionId: conn.id,
+                      engine: String(conn.engine),
+                      database,
+                      table,
+                      userHost: grantUser,
+                      privilege: grantPriv,
+                    });
+                    onMessage("已执行 REVOKE");
+                    setPermOpen(false);
+                  })
+                }
+              >
+                撤销
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
                     await grantTablePrivilege({
                       connectionId: conn.id,
                       engine: String(conn.engine),
@@ -969,24 +1129,45 @@ export function TableContextMenu({
             onSubmit={(e) => {
               e.preventDefault();
               void run(async () => {
+                if (!identOk(pasteTableName.trim())) {
+                  throw new Error(
+                    "新表名仅允许字母、数字、下划线，且不能以数字开头",
+                  );
+                }
+                const name = pasteTableName.trim();
+                const sql = pasteSql.replace(
+                  /create\s+(table|view)\s+(if\s+not\s+exists\s+)?(?:`?[\w]+`?\.)?`?[\w]+`?/i,
+                  (_m, kind: string, ifNot?: string) =>
+                    `CREATE ${String(kind).toUpperCase()} ${ifNot || ""}\`${name}\``,
+                );
                 await openConnection(conn.id);
                 if (isMysql) {
-                  await executeSql(conn.id, `USE \`${database.replace(/`/g, "``")}\``);
+                  await executeSql(
+                    conn.id,
+                    `USE \`${database.replace(/`/g, "``")}\``,
+                  );
                 }
-                await executeSql(conn.id, pasteSql);
-                onMessage("已执行粘贴的 DDL");
+                await executeSql(conn.id, sql, database);
+                onMessage(`已创建 ${name}`);
                 onRefresh();
                 setPasteOpen(false);
               });
             }}
           >
             <h2>粘贴 DDL</h2>
+            <label>
+              目标表名
+              <input
+                value={pasteTableName}
+                onChange={(e) => setPasteTableName(e.target.value)}
+                autoFocus
+              />
+            </label>
             <textarea
               rows={8}
               value={pasteSql}
               onChange={(e) => setPasteSql(e.target.value)}
               placeholder="CREATE TABLE ..."
-              autoFocus
             />
             <div className="modal-actions">
               <button
@@ -998,12 +1179,69 @@ export function TableContextMenu({
               >
                 取消
               </button>
-              <button type="submit" disabled={busy || !pasteSql.trim()}>
+              <button
+                type="submit"
+                disabled={busy || !pasteSql.trim() || !pasteTableName.trim()}
+              >
                 执行
               </button>
             </div>
           </form>
         </div>
+      )}
+
+      {maintainResult && (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal" style={{ minWidth: 480 }}>
+            <h2>
+              维护结果 · {maintainResult.op} · {table}
+            </h2>
+            <div className="maintain-result-table-wrap">
+              <table className="maintain-result-table">
+                <thead>
+                  <tr>
+                    {maintainResult.columns.map((c) => (
+                      <th key={c}>{c}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {maintainResult.rows.map((row, i) => (
+                    <tr key={i}>
+                      {row.map((cell, j) => (
+                        <td key={j}>{cell == null ? "NULL" : String(cell)}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="modal-actions">
+              <button
+                type="button"
+                onClick={() => {
+                  setMaintainResult(null);
+                  onClose();
+                }}
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {chartOpen && (
+        <SimpleChartDialog
+          connectionId={conn.id}
+          database={database}
+          table={table}
+          onClose={() => {
+            setChartOpen(false);
+            onClose();
+          }}
+          onMessage={onMessage}
+        />
       )}
 
       {ioWizard && (
@@ -1012,6 +1250,7 @@ export function TableContextMenu({
           connectionId={conn.id}
           database={database}
           table={table}
+          engine={String(conn.engine)}
           onClose={() => {
             setIoWizard(null);
             onClose();

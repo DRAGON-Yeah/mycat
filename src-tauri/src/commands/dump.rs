@@ -18,21 +18,38 @@ fn sql_literal(v: &Value) -> String {
     }
 }
 
-fn dump_inserts(table: &str, page: &RowsPage) -> String {
+fn quote_ident(engine: &str, name: &str) -> String {
+    if engine == "mysql" {
+        format!("`{}`", name.replace('`', "``"))
+    } else {
+        format!("\"{}\"", name.replace('"', "\"\""))
+    }
+}
+
+fn dump_inserts(engine: &str, table: &str, page: &RowsPage) -> String {
     if page.rows.is_empty() {
         return String::new();
     }
+    let table_q = quote_ident(engine, table);
     let cols = page
         .columns
         .iter()
-        .map(|c| format!("\"{}\"", c.name))
+        .map(|c| quote_ident(engine, &c.name))
         .collect::<Vec<_>>()
         .join(", ");
     let mut out = String::new();
-    for row in &page.rows {
-        let values = row.iter().map(sql_literal).collect::<Vec<_>>().join(", ");
+    const BATCH: usize = 100;
+    for chunk in page.rows.chunks(BATCH) {
+        let values_list = chunk
+            .iter()
+            .map(|row| {
+                let values = row.iter().map(sql_literal).collect::<Vec<_>>().join(", ");
+                format!("({values})")
+            })
+            .collect::<Vec<_>>()
+            .join(",\n  ");
         out.push_str(&format!(
-            "INSERT INTO \"{table}\" ({cols}) VALUES ({values});\n"
+            "INSERT INTO {table_q} ({cols}) VALUES\n  {values_list};\n"
         ));
     }
     out
@@ -135,8 +152,14 @@ pub fn dump_table_sql(
             &table,
         )?);
         if include_data {
+            if engine == "mysql" {
+                out.push_str("SET FOREIGN_KEY_CHECKS=0;\n");
+            }
             let data = export_all_pages(session, database.as_deref(), &table)?;
-            out.push_str(&dump_inserts(&table, &data));
+            out.push_str(&dump_inserts(&engine, &table, &data));
+            if engine == "mysql" {
+                out.push_str("SET FOREIGN_KEY_CHECKS=1;\n");
+            }
         }
         Ok(out)
     })
@@ -180,7 +203,7 @@ mod tests {
         let mut sql = String::new();
         sql.push_str(&dump_structure(&session, "sqlite", None, "demo").unwrap());
         let data = export_all_pages(&session, None, "demo").unwrap();
-        sql.push_str(&dump_inserts("demo", &data));
+        sql.push_str(&dump_inserts("sqlite", "demo", &data));
         assert!(sql.contains("CREATE TABLE"));
         assert!(sql.contains("INSERT INTO"));
         let _ = fs::remove_file(&path);

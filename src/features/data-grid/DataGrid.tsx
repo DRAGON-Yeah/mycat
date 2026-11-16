@@ -29,6 +29,7 @@ import {
   type EditorKind,
 } from "./columnEditors";
 import { useModSaveShortcut } from "../../hooks/useModSaveShortcut";
+import { setGridViewSnapshot } from "./gridViewSnapshot";
 import { useColumnResize } from "./useColumnResize";
 import {
   buildCsvData,
@@ -357,18 +358,40 @@ ORDER BY ordinal_position`;
     return () => window.removeEventListener(TABLE_DATA_CHANGED, onChanged);
   }, [tab.connectionId, tab.table, database, load]);
 
+  // Apply openOptions (profiles) without a competing reset effect.
+  const appliedOpenOptionsRef = useRef<string | null>(null);
   useEffect(() => {
     const opt = tab.openOptions;
-    if (!opt) return;
+    const sig = `${tab.id}:${JSON.stringify(opt ?? null)}`;
+    if (appliedOpenOptionsRef.current === sig) return;
+    appliedOpenOptionsRef.current = sig;
     setPage(1);
-    if (opt.pageSize) setPageSize(opt.pageSize);
-    setSortCol(opt.sortCol);
-    setSortDir(opt.sortDir ?? "ASC");
-    setFilterCol(opt.filterCol ?? "");
-    setFilterValue(opt.filterValue ?? "");
-    setShowFilter(Boolean(opt.filterCol || opt.filterValue));
-    setAppliedFilter({ col: opt.filterCol, value: opt.filterValue });
+    if (opt?.pageSize) setPageSize(opt.pageSize);
+    else setPageSize(1000);
+    setSortCol(opt?.sortCol);
+    setSortDir(opt?.sortDir ?? "ASC");
+    setFilterCol(opt?.filterCol ?? "");
+    setFilterValue(opt?.filterValue ?? "");
+    setShowFilter(Boolean(opt?.filterCol || opt?.filterValue));
+    setAppliedFilter({ col: opt?.filterCol, value: opt?.filterValue });
   }, [tab.id, tab.openOptions]);
+
+  useEffect(() => {
+    setGridViewSnapshot(tab.id, {
+      sortCol,
+      sortDir,
+      filterCol: appliedFilter.col,
+      filterValue: appliedFilter.value,
+      pageSize,
+    });
+  }, [
+    tab.id,
+    sortCol,
+    sortDir,
+    appliedFilter.col,
+    appliedFilter.value,
+    pageSize,
+  ]);
 
   function editorKindForCol(colIndex: number): EditorKind {
     const col = data?.columns[colIndex];
@@ -392,16 +415,6 @@ ORDER BY ordinal_position`;
   useEffect(() => {
     void load();
   }, [load]);
-
-  useEffect(() => {
-    setPage(1);
-    setSortCol(undefined);
-    setSortDir("ASC");
-    setFilterCol("");
-    setFilterValue("");
-    setAppliedFilter({});
-    setShowFilter(false);
-  }, [tab.id]);
 
   const totalPages = data
     ? Math.max(1, Math.ceil(data.total / Math.max(1, data.pageSize)))

@@ -5,6 +5,8 @@ import {
   openConnection,
 } from "../connections/sessionApi";
 import { downloadTextFile, rowsToCsv } from "../import-export/csv";
+import { loadDesignerColumns } from "../table-designer/loadColumns";
+import { composedType } from "../table-designer/types";
 import { engineKey, quoteTable } from "./sqlIdent";
 
 function randInt(min: number, max: number) {
@@ -48,52 +50,65 @@ export async function generateTableRows(args: {
   database: string;
   table: string;
   count: number;
+  engine?: string;
 }): Promise<number> {
   const { connectionId, database, table, count } = args;
   if (count < 1 || count > 5000) {
     throw new Error("生成行数需在 1~5000");
   }
-  await openConnection(connectionId);
-  const page = await fetchTablePage({
+  const engine = args.engine || "mysql";
+  const cols = await loadDesignerColumns({
     connectionId,
-    table,
-    page: 1,
-    pageSize: 1,
+    engine,
     database,
+    table,
   });
-  const cols = page.columns.filter(
-    (c) => !/auto_increment/i.test(c.dataType) && c.name.toLowerCase() !== "id",
+  const useCols = cols.filter(
+    (c) =>
+      !c.virtual &&
+      !/auto_increment/i.test(c.extra) &&
+      !(c.isPk && /int/i.test(c.typeName)),
   );
-  // Prefer non-auto columns; if empty use all except first if looks like id
-  let useCols = cols.length
-    ? cols
-    : page.columns.filter((c) => c.name.toLowerCase() !== "id");
-  if (useCols.length === 0) useCols = page.columns;
-
-  const batch: { columns: string[]; values: unknown[] }[] = [];
-  for (let i = 1; i <= count; i++) {
-    batch.push({
-      columns: useCols.map((c) => c.name),
-      values: useCols.map((c) => sampleValue(c.name, c.dataType, i)),
-    });
+  if (useCols.length === 0) {
+    throw new Error("没有可写入的列（可能全是自增/虚拟列）");
   }
+
   let ok = 0;
-  const chunkSize = 100;
-  for (let i = 0; i < batch.length; i += chunkSize) {
-    const slice = batch.slice(i, i + chunkSize);
-    await applyRowChanges({
-      connectionId,
-      table,
-      database,
-      changes: slice.map((item) => ({
-        op: "insert",
-        pkColumns: [],
-        pkValues: [],
-        columns: item.columns,
-        values: item.values,
-      })),
-    });
-    ok += slice.length;
+  const chunkSize = 50;
+  for (let start = 1; start <= count; start += chunkSize) {
+    const end = Math.min(count, start + chunkSize - 1);
+    const changes = [];
+    for (let i = start; i <= end; i++) {
+      changes.push({
+        op: "insert" as const,
+        pkColumns: [] as string[],
+        pkValues: [] as unknown[],
+        columns: useCols.map((c) => c.name),
+        values: useCols.map((c) =>
+          sampleValue(c.name, composedType(c) || c.typeName, i),
+        ),
+      });
+    }
+    try {
+      await applyRowChanges({ connectionId, table, database, changes });
+      ok += changes.length;
+    } catch (err) {
+      // Row-level retry on unique conflicts
+      for (const ch of changes) {
+        try {
+          await applyRowChanges({
+            connectionId,
+            table,
+            database,
+            changes: [ch],
+          });
+          ok += 1;
+        } catch {
+          /* skip conflicting row */
+        }
+      }
+      if (ok === 0) throw err;
+    }
   }
   return ok;
 }
@@ -117,13 +132,19 @@ export async function exportMaskedCsv(args: {
   table: string;
   maskColumns: string[];
   mode?: "stars" | "hash";
-}): Promise<number> {
+  fileName?: string;
+  bom?: boolean;
+  previewLimit?: number;
+}): Promise<{ count: number; preview: { columns: string[]; rows: unknown[][] } }> {
   const {
     connectionId,
     database,
     table,
     maskColumns,
     mode = "stars",
+    fileName,
+    bom = true,
+    previewLimit = 5,
   } = args;
   await openConnection(connectionId);
   const mask = new Set(maskColumns);
@@ -156,12 +177,73 @@ export async function exportMaskedCsv(args: {
     if (allRows.length >= total || chunk.rows.length === 0) break;
     page += 1;
   }
+  const name = (fileName || `${table}-masked`).replace(/\.csv$/i, "");
   downloadTextFile(
-    `${table}-masked.csv`,
-    rowsToCsv(columns, allRows),
+    `${name}.csv`,
+    rowsToCsv(columns, allRows, { bom }),
     "text/csv;charset=utf-8",
   );
-  return allRows.length;
+  return {
+    count: allRows.length,
+    preview: {
+      columns,
+      rows: allRows.slice(0, previewLimit),
+    },
+  };
+}
+
+export async function previewMaskedRows(args: {
+  connectionId: string;
+  database: string;
+  table: string;
+  maskColumns: string[];
+  mode?: "stars" | "hash";
+  limit?: number;
+}): Promise<{ columns: string[]; rows: unknown[][] }> {
+  const {
+    connectionId,
+    database,
+    table,
+    maskColumns,
+    mode = "stars",
+    limit = 5,
+  } = args;
+  await openConnection(connectionId);
+  const chunk = await fetchTablePage({
+    connectionId,
+    table,
+    page: 1,
+    pageSize: limit,
+    database,
+  });
+  const columns = chunk.columns.map((c) => c.name);
+  const mask = new Set(maskColumns);
+  const rows = chunk.rows.map((row) =>
+    row.map((cell, idx) => {
+      const col = columns[idx];
+      if (col && mask.has(col)) return maskCell(cell, mode);
+      return cell;
+    }),
+  );
+  return { columns, rows };
+}
+
+function formatUserHost(userHost: string): string {
+  const user = userHost.trim();
+  if (!/^'[^']+'@'[^']+'$/.test(user) && !/^[\w.-]+@[\w.%-]+$/.test(user)) {
+    throw new Error("用户格式应为 user@host 或 'user'@'host'");
+  }
+  return user.includes("@") && !user.startsWith("'")
+    ? `'${user.split("@")[0]}'@'${user.split("@").slice(1).join("@")}'`
+    : user;
+}
+
+function normalizePriv(privilege: string): string {
+  const priv = privilege.trim().toUpperCase() || "SELECT";
+  if (!/^[A-Z]+(,\s*[A-Z]+)*$/.test(priv) && priv !== "ALL PRIVILEGES") {
+    throw new Error("权限仅允许如 SELECT,INSERT 或 ALL PRIVILEGES");
+  }
+  return priv;
 }
 
 export async function listTableGrants(args: {
@@ -174,19 +256,43 @@ export async function listTableGrants(args: {
   await openConnection(connectionId);
   const e = engineKey(engine);
   if (e !== "mysql") {
-    throw new Error("表权限查看目前仅支持 MySQL（SHOW GRANTS）");
+    throw new Error("表权限查看目前仅支持 MySQL");
+  }
+  const lines: string[] = [];
+  try {
+    const priv = await executeSql(
+      connectionId,
+      `SELECT GRANTEE, PRIVILEGE_TYPE, IS_GRANTABLE
+       FROM information_schema.TABLE_PRIVILEGES
+       WHERE TABLE_SCHEMA = '${database.replace(/'/g, "''")}'
+         AND TABLE_NAME = '${table.replace(/'/g, "''")}'
+       ORDER BY GRANTEE, PRIVILEGE_TYPE`,
+      database,
+    );
+    for (const row of priv.rows) {
+      lines.push(
+        `${String(row[0] ?? "")} → ${String(row[1] ?? "")}${
+          String(row[2] ?? "").toUpperCase() === "YES" ? " (WITH GRANT)" : ""
+        }`,
+      );
+    }
+  } catch {
+    /* fall through to SHOW GRANTS */
   }
   const out = await executeSql(connectionId, "SHOW GRANTS");
-  const lines = out.rows.map((r) => String(r[0] ?? ""));
+  const grants = out.rows.map((r) => String(r[0] ?? ""));
   const needle = `${database}.${table}`;
-  const related = lines.filter(
+  const related = grants.filter(
     (l) =>
       l.includes(needle) ||
       l.includes(`\`${database}\`.\`${table}\``) ||
       /ON \*\.\*/i.test(l) ||
       l.includes(`\`${database}\`.*`),
   );
-  return related.length ? related : lines;
+  for (const g of related.length ? related : grants) {
+    if (!lines.includes(g)) lines.push(g);
+  }
+  return lines;
 }
 
 export async function grantTablePrivilege(args: {
@@ -201,22 +307,29 @@ export async function grantTablePrivilege(args: {
   if (engineKey(engine) !== "mysql") {
     throw new Error("GRANT 目前仅支持 MySQL");
   }
-  const user = userHost.trim();
-  if (!/^'[^']+'@'[^']+'$/.test(user) && !/^[\w.-]+@[\w.%-]+$/.test(user)) {
-    throw new Error("用户格式应为 user@host 或 'user'@'host'");
-  }
-  const priv = privilege.trim().toUpperCase() || "SELECT";
-  if (!/^[A-Z]+(,\s*[A-Z]+)*$/.test(priv) && priv !== "ALL PRIVILEGES") {
-    throw new Error("权限仅允许如 SELECT,INSERT 或 ALL PRIVILEGES");
-  }
+  const priv = normalizePriv(privilege);
+  const userSql = formatUserHost(userHost);
   await openConnection(connectionId);
   const qt = quoteTable(engine, database, table);
-  const userSql = user.includes("@") && !user.startsWith("'")
-    ? `'${user.split("@")[0]}'@'${user.split("@").slice(1).join("@")}'`
-    : user;
-  await executeSql(
-    connectionId,
-    `GRANT ${priv} ON ${qt} TO ${userSql}`,
-  );
+  await executeSql(connectionId, `GRANT ${priv} ON ${qt} TO ${userSql}`);
+}
+
+export async function revokeTablePrivilege(args: {
+  connectionId: string;
+  engine: string;
+  database: string;
+  table: string;
+  userHost: string;
+  privilege: string;
+}) {
+  const { connectionId, engine, database, table, userHost, privilege } = args;
+  if (engineKey(engine) !== "mysql") {
+    throw new Error("REVOKE 目前仅支持 MySQL");
+  }
+  const priv = normalizePriv(privilege);
+  const userSql = formatUserHost(userHost);
+  await openConnection(connectionId);
+  const qt = quoteTable(engine, database, table);
+  await executeSql(connectionId, `REVOKE ${priv} ON ${qt} FROM ${userSql}`);
 }
 

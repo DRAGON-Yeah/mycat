@@ -8,10 +8,21 @@ export function escapeCsvCell(value: unknown): string {
   return text;
 }
 
-export function rowsToCsv(columns: string[], rows: unknown[][]): string {
+const UTF8_BOM = "\uFEFF";
+
+export function stripBom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
+export function rowsToCsv(
+  columns: string[],
+  rows: unknown[][],
+  opts?: { bom?: boolean },
+): string {
   const header = columns.map(escapeCsvCell).join(",");
   const body = rows.map((row) => row.map(escapeCsvCell).join(",")).join("\n");
-  return `${header}\n${body}\n`;
+  const csv = `${header}\n${body}\n`;
+  return opts?.bom ? `${UTF8_BOM}${csv}` : csv;
 }
 
 export function parseCsv(text: string): { columns: string[]; rows: string[][] } {
@@ -20,6 +31,7 @@ export function parseCsv(text: string): { columns: string[]; rows: string[][] } 
   let cell = "";
   let i = 0;
   let inQuotes = false;
+  text = stripBom(text);
 
   const pushCell = () => {
     row.push(cell);
