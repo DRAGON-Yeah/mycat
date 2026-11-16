@@ -12,6 +12,17 @@ import { ImportCsvButton } from "../import-export/ImportCsvButton";
 import { downloadTextFile } from "../import-export/csv";
 import type { TableTab } from "../../stores/workspaceStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import {
+  buildCsvData,
+  buildCsvHeaders,
+  buildCsvHeadersAndData,
+  buildInsertSql,
+  buildJsonRow,
+  buildTsvData,
+  buildTsvHeaders,
+  buildTsvHeadersAndData,
+  buildUpdateSql,
+} from "./copyAs";
 
 type Props = {
   tab: TableTab;
@@ -84,6 +95,11 @@ export function DataGrid({ tab }: Props) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [menu, setMenu] = useState<MenuState>(null);
+  const [copyAsOpen, setCopyAsOpen] = useState(false);
+  const [zoomOpen, setZoomOpen] = useState(false);
+  const [rowHeight, setRowHeight] = useState(24);
+  const [zoom, setZoom] = useState(100);
+  const [clipboard, setClipboard] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const dirty = useMemo(() => {
@@ -103,6 +119,8 @@ export function DataGrid({ tab }: Props) {
   useEffect(() => {
     function onDocClick() {
       setMenu(null);
+      setCopyAsOpen(false);
+      setZoomOpen(false);
     }
     document.addEventListener("click", onDocClick);
     return () => document.removeEventListener("click", onDocClick);
@@ -301,11 +319,58 @@ export function DataGrid({ tab }: Props) {
   }
 
   async function copyText(text: string) {
+    setClipboard(text);
     try {
       await navigator.clipboard.writeText(text);
     } catch {
       // ignore
     }
+  }
+
+  function currentRowValues(): unknown[] | null {
+    if (!menu) return null;
+    return rows[menu.rowIndex]?.values ?? null;
+  }
+
+  async function copyAs(
+    kind:
+      | "insert"
+      | "update"
+      | "tsv-data"
+      | "tsv-headers"
+      | "tsv-both"
+      | "csv-data"
+      | "csv-headers"
+      | "csv-both"
+      | "json",
+  ) {
+    if (!data || !menu) return;
+    const values = currentRowValues();
+    if (!values) return;
+    const cols = data.columns.map((c) => c.name);
+    let text = "";
+    if (kind === "insert") {
+      text = buildInsertSql(tab.table, cols, values);
+    } else if (kind === "update") {
+      const pk = pickPkColumn(data.columns);
+      const pkIdx = cols.indexOf(pk);
+      text = buildUpdateSql(tab.table, cols, values, pk, values[pkIdx]);
+    } else if (kind === "tsv-data") text = buildTsvData(values);
+    else if (kind === "tsv-headers") text = buildTsvHeaders(cols);
+    else if (kind === "tsv-both") text = buildTsvHeadersAndData(cols, values);
+    else if (kind === "csv-data") text = buildCsvData(values);
+    else if (kind === "csv-headers") text = buildCsvHeaders(cols);
+    else if (kind === "csv-both") text = buildCsvHeadersAndData(cols, values);
+    else text = buildJsonRow(cols, values);
+    await copyText(text);
+    setMenu(null);
+    setCopyAsOpen(false);
+  }
+
+  function pasteIntoCell() {
+    if (!menu || !clipboard) return;
+    updateCell(menu.rowIndex, menu.colIndex, clipboard);
+    setMenu(null);
   }
 
   const visibleCount = rows.filter((r) => !r.deleted).length;
@@ -447,7 +512,13 @@ export function DataGrid({ tab }: Props) {
       {error && <p className="pane-error">{error}</p>}
       {loading && !data && <p className="pane-placeholder">加载中…</p>}
 
-      <div className="data-grid-scroll">
+      <div
+        className="data-grid-scroll"
+        style={{
+          ["--dg-row-height" as string]: `${rowHeight}px`,
+          zoom: `${zoom}%`,
+        }}
+      >
         <table>
           <thead>
             <tr>
@@ -554,7 +625,13 @@ export function DataGrid({ tab }: Props) {
           style={{ left: menu.x, top: menu.y }}
           onClick={(e) => e.stopPropagation()}
         >
-          <button type="button" onClick={() => { addRow(); setMenu(null); }}>
+          <button
+            type="button"
+            onClick={() => {
+              addRow();
+              setMenu(null);
+            }}
+          >
             添加记录
           </button>
           <button
@@ -585,6 +662,96 @@ export function DataGrid({ tab }: Props) {
           >
             复制字段名称
           </button>
+          <div
+            className={`dg-menu-item has-sub ${copyAsOpen ? "is-open" : ""}`}
+            onMouseEnter={() => {
+              setCopyAsOpen(true);
+              setZoomOpen(false);
+            }}
+          >
+            <button type="button" className="dg-menu-trigger">
+              复制为<span className="dg-menu-arrow">›</span>
+            </button>
+            {copyAsOpen && (
+              <div className="dg-submenu">
+                <button type="button" onClick={() => void copyAs("insert")}>
+                  Insert 语句
+                </button>
+                <button type="button" onClick={() => void copyAs("update")}>
+                  Update 语句
+                </button>
+                <div className="dg-menu-sep" />
+                <button type="button" onClick={() => void copyAs("tsv-data")}>
+                  制表符分隔值（数据）
+                </button>
+                <button type="button" onClick={() => void copyAs("tsv-headers")}>
+                  制表符分隔值（字段名称）
+                </button>
+                <button type="button" onClick={() => void copyAs("tsv-both")}>
+                  制表符分隔值（字段名称和数据）
+                </button>
+                <div className="dg-menu-sep" />
+                <button type="button" onClick={() => void copyAs("csv-data")}>
+                  逗号分隔值（数据）
+                </button>
+                <button type="button" onClick={() => void copyAs("csv-headers")}>
+                  逗号分隔值（字段名称）
+                </button>
+                <button type="button" onClick={() => void copyAs("csv-both")}>
+                  逗号分隔值（字段名称和数据）
+                </button>
+                <div className="dg-menu-sep" />
+                <button type="button" onClick={() => void copyAs("json")}>
+                  JSON
+                </button>
+              </div>
+            )}
+          </div>
+          <button type="button" onClick={pasteIntoCell} disabled={!clipboard}>
+            粘贴
+          </button>
+          <div className="dg-menu-sep" />
+          <button
+            type="button"
+            onClick={() => {
+              const next = window.prompt("行高（像素）", String(rowHeight));
+              if (!next) return;
+              const n = Number(next);
+              if (!Number.isNaN(n) && n >= 18 && n <= 64) setRowHeight(n);
+              setMenu(null);
+            }}
+          >
+            设置行高…
+          </button>
+          <div
+            className={`dg-menu-item has-sub ${zoomOpen ? "is-open" : ""}`}
+            onMouseEnter={() => {
+              setZoomOpen(true);
+              setCopyAsOpen(false);
+            }}
+          >
+            <button type="button" className="dg-menu-trigger">
+              缩放<span className="dg-menu-arrow">›</span>
+            </button>
+            {zoomOpen && (
+              <div className="dg-submenu">
+                {[75, 90, 100, 110, 125, 150].map((z) => (
+                  <button
+                    key={z}
+                    type="button"
+                    className={zoom === z ? "is-checked" : undefined}
+                    onClick={() => {
+                      setZoom(z);
+                      setMenu(null);
+                      setZoomOpen(false);
+                    }}
+                  >
+                    {z}%
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
