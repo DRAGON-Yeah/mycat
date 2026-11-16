@@ -44,10 +44,18 @@ pub fn list_schemas(
 
 #[tauri::command]
 pub fn list_tables(
+    meta: State<'_, MetaDb>,
     pool: State<'_, SessionPool>,
     connection_id: String,
+    database: Option<String>,
 ) -> Result<Vec<DbObject>, String> {
-    pool.with_session(&connection_id, |s| s.list_tables(None, None))
+    let database = match database.filter(|d| !d.trim().is_empty()) {
+        Some(db) => Some(db),
+        None => opts_from_connection(&meta, &connection_id)
+            .map_err(|e| e.to_string())?
+            .database,
+    };
+    pool.with_session(&connection_id, |s| s.list_tables(database.as_deref(), None))
         .map_err(|e| e.to_string())
 }
 

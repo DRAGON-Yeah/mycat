@@ -43,6 +43,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let _ = logging::init();
+            #[cfg(target_os = "macos")]
+            {
+                let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+            }
             let db = MetaDb::open().map_err(|e| {
                 logging::log_line("ERROR", &format!("meta open failed: {e}"));
                 e.to_string()
@@ -50,6 +54,15 @@ pub fn run() {
             migrate_legacy_settings(&db);
             app.manage(db);
             app.manage(SessionPool::new());
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.center();
+                let _ = window.set_focus();
+                logging::log_line("INFO", "main window focused");
+            } else {
+                logging::log_line("ERROR", "main window missing after setup");
+            }
             logging::log_line("INFO", "application setup complete");
             Ok(())
         })

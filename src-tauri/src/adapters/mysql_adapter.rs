@@ -3,7 +3,7 @@ use super::{
 };
 use crate::error::{AppError, AppResult};
 use mysql::prelude::*;
-use mysql::{Opts, OptsBuilder, Row, SslOpts, Value as MysqlValue};
+use mysql::{Opts, OptsBuilder, SslOpts, Value as MysqlValue};
 use serde_json::{Number, Value};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -95,42 +95,28 @@ impl DriverSession for MysqlSession {
             .conn
             .lock()
             .map_err(|_| AppError::Message("mysql lock".into()))?;
-        let sql = if let Some(db) = database.filter(|d| ident_ok(d)) {
-            format!(
-                "SELECT TABLE_NAME, TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA = '{db}' ORDER BY TABLE_NAME"
-            )
-        } else {
-            "SHOW FULL TABLES".to_string()
-        };
 
-        if sql.starts_with("SHOW") {
-            let result = conn.query_iter(sql)?;
-            let mut out = Vec::new();
-            for row in result {
-                let row: Row = row?;
-                let name: String = row.get(0).unwrap_or_default();
-                let kind: String = row.get::<String, _>(1).unwrap_or_else(|| "BASE TABLE".into());
-                out.push(DbObject {
-                    name,
-                    kind: if kind.to_uppercase().contains("VIEW") {
-                        "view".into()
-                    } else {
-                        "table".into()
-                    },
-                });
-            }
-            return Ok(out);
+        if let Some(db) = database.filter(|d| ident_ok(d)) {
+            // Select schema so subsequent unqualified queries work.
+            conn.query_drop(format!("USE `{db}`"))?;
+            let sql = format!(
+                "SELECT TABLE_NAME, TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA = '{db}' ORDER BY TABLE_NAME"
+            );
+            let result = conn.query_map(sql, |(name, kind): (String, String)| DbObject {
+                name,
+                kind: if kind.to_uppercase().contains("VIEW") {
+                    "view".into()
+                } else {
+                    "table".into()
+                },
+            })?;
+            return Ok(result);
         }
 
-        let result = conn.query_map(sql, |(name, kind): (String, String)| DbObject {
-            name,
-            kind: if kind.to_uppercase().contains("VIEW") {
-                "view".into()
-            } else {
-                "table".into()
-            },
-        })?;
-        Ok(result)
+        // No database on the connection: avoid SHOW FULL TABLES (ERROR 1046).
+        Err(AppError::Validation(
+            "未选择数据库：请在连接里填写数据库名，或先展开库列表选择一个库".into(),
+        ))
     }
 
     fn query_page(

@@ -11,10 +11,13 @@ pub fn init() -> AppResult<()> {
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("app.log");
     let file = OpenOptions::new().create(true).append(true).open(path)?;
-    let mut guard = LOGGER
-        .lock()
-        .map_err(|_| crate::error::AppError::Message("log lock".into()))?;
-    *guard = Some(file);
+    {
+        // Must release the mutex before calling log_line (same lock, non-reentrant).
+        let mut guard = LOGGER
+            .lock()
+            .map_err(|_| crate::error::AppError::Message("log lock".into()))?;
+        *guard = Some(file);
+    }
     log_line("INFO", "logger initialized");
     Ok(())
 }

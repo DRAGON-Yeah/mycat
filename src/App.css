@@ -263,6 +263,22 @@ body,
   color: var(--accent);
 }
 
+.object-section {
+  margin-top: 4px;
+}
+
+.object-section-title {
+  padding: 6px 12px 2px;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.object-item.is-active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
 .object-list {
   list-style: none;
   margin: 0;

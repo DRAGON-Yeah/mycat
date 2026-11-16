@@ -21,8 +21,15 @@ export function closeConnection(connectionId: string) {
   return invoke<void>("close_connection", { connectionId });
 }
 
-export function listTables(connectionId: string) {
-  return invoke<DbObject[]>("list_tables", { connectionId });
+export function listDatabases(connectionId: string) {
+  return invoke<string[]>("list_databases", { connectionId });
+}
+
+export function listTables(connectionId: string, database?: string) {
+  return invoke<DbObject[]>("list_tables", {
+    connectionId,
+    database: database || null,
+  });
 }
 
 export function fetchTablePage(args: {

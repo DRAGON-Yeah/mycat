@@ -16,10 +16,20 @@ struct EncFile {
     secrets: HashMap<String, String>,
 }
 
-fn try_keyring_set(account: &str, secret: &str) -> AppResult<()> {
-    // Unit tests must not block on macOS Keychain UI prompts.
+/// Dev/unsigned binaries repeatedly trigger macOS Keychain auth dialogs.
+/// Default to local AES file vault; set `MY_NAVICAT_USE_KEYRING=1` to opt in.
+fn keyring_enabled() -> bool {
     if cfg!(test) {
-        return Err(AppError::Vault("keyring skipped in tests".into()));
+        return false;
+    }
+    std::env::var("MY_NAVICAT_USE_KEYRING")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+fn try_keyring_set(account: &str, secret: &str) -> AppResult<()> {
+    if !keyring_enabled() {
+        return Err(AppError::Vault("keyring disabled".into()));
     }
     let entry = keyring::Entry::new(SERVICE, account)
         .map_err(|e| AppError::Vault(e.to_string()))?;
@@ -29,7 +39,7 @@ fn try_keyring_set(account: &str, secret: &str) -> AppResult<()> {
 }
 
 fn try_keyring_get(account: &str) -> AppResult<Option<String>> {
-    if cfg!(test) {
+    if !keyring_enabled() {
         return Ok(None);
     }
     let entry = keyring::Entry::new(SERVICE, account)
@@ -42,7 +52,7 @@ fn try_keyring_get(account: &str) -> AppResult<Option<String>> {
 }
 
 fn try_keyring_delete(account: &str) -> AppResult<()> {
-    if cfg!(test) {
+    if !keyring_enabled() {
         return Ok(());
     }
     let entry = keyring::Entry::new(SERVICE, account)
@@ -70,7 +80,6 @@ fn load_or_create_master_key() -> AppResult<[u8; 32]> {
         if bytes.len() == 32 {
             let mut key = [0u8; 32];
             key.copy_from_slice(&bytes);
-            let _ = try_keyring_set(MASTER_ACCOUNT, &hex::encode(key));
             return Ok(key);
         }
     }
@@ -78,9 +87,9 @@ fn load_or_create_master_key() -> AppResult<[u8; 32]> {
     let mut key = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut key);
     let encoded = hex::encode(key);
-    if try_keyring_set(MASTER_ACCOUNT, &encoded).is_err() {
-        fs::write(path, &encoded)?;
-    }
+    // Prefer local encrypted-key file to avoid Keychain prompts in `tauri dev`.
+    fs::write(&path, &encoded)?;
+    let _ = try_keyring_set(MASTER_ACCOUNT, &encoded);
     Ok(key)
 }
 
@@ -128,7 +137,7 @@ fn decrypt_from_hex(key: &[u8; 32], payload: &str) -> AppResult<String> {
     String::from_utf8(plain).map_err(|e| AppError::Crypto(e.to_string()))
 }
 
-/// Store secret. Prefer OS keyring; always mirror into encrypted file for CI/fallback.
+/// Store secret in AES-encrypted local file. Optional OS keyring mirror when enabled.
 pub fn set_secret(secret_ref: &str, secret: &str) -> AppResult<()> {
     let account = format!("conn:{secret_ref}");
     let _ = try_keyring_set(&account, secret);

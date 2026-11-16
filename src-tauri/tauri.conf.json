@@ -16,7 +16,13 @@
         "label": "main",
         "title": "My Navicat",
         "width": 1280,
-        "height": 800
+        "height": 800,
+        "resizable": true,
+        "visible": true,
+        "focus": true,
+        "center": true,
+        "maximized": false,
+        "decorations": true
       }
     ],
     "security": {
