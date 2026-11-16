@@ -13,6 +13,14 @@ function queryTabLabel(title: string, database: string, connectionName: string) 
   return full.length > 40 ? `${full.slice(0, 38)}…` : full;
 }
 
+/** Navicat-style: table@database (connection) */
+function tableTabLabel(table: string, database: string, connectionName: string) {
+  const db = database || "?";
+  const conn = connectionName || "?";
+  const full = `${table}@${db} (${conn})`;
+  return full.length > 42 ? `${full.slice(0, 40)}…` : full;
+}
+
 export function MainWorkspace() {
   const centerMode = useWorkspaceStore((s) => s.centerMode);
   const placeholderFeature = useWorkspaceStore((s) => s.placeholderFeature);
@@ -130,30 +138,25 @@ export function MainWorkspace() {
 
           {tabs.map((t) => {
             const active = centerMode === "table" && t.id === activeTabId;
+            const label = tableTabLabel(
+              t.table,
+              t.database,
+              t.connectionName,
+            );
+            const fullTitle = `${t.table}@${t.database || "?"} (${t.connectionName || "?"})`;
             return (
               <div
                 key={t.id}
                 className={`ws-tab ws-tab-doc ${active ? "is-active" : ""}`}
                 role="tab"
                 aria-selected={active}
-                title={t.table}
+                title={fullTitle}
               >
-                <button
-                  type="button"
-                  className="ws-tab-main"
-                  onClick={() => setActiveTab(t.id)}
-                >
-                  <span className="ws-tab-table-icon" aria-hidden />
-                  <span className="ws-tab-label">
-                    {t.dirty ? "• " : ""}
-                    {t.table}
-                  </span>
-                </button>
                 <button
                   type="button"
                   className="ws-tab-close"
                   title="关闭"
-                  aria-label={`关闭 ${t.table}`}
+                  aria-label={`关闭 ${fullTitle}`}
                   onMouseDown={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -166,6 +169,17 @@ export function MainWorkspace() {
                 >
                   ×
                 </button>
+                <button
+                  type="button"
+                  className="ws-tab-main"
+                  onClick={() => setActiveTab(t.id)}
+                >
+                  <span className="ws-tab-table-icon" aria-hidden />
+                  <span className="ws-tab-label">
+                    {t.dirty ? "• " : ""}
+                    {label}
+                  </span>
+                </button>
               </div>
             );
           })}
@@ -173,8 +187,13 @@ export function MainWorkspace() {
           {designerTabs.map((t) => {
             const active =
               centerMode === "table-designer" && t.id === activeDesignerId;
+            const base = tableTabLabel(
+              t.table,
+              t.database,
+              t.connectionName,
+            );
             const label =
-              t.mode === "create" ? `设计·${t.table}` : `设计 ${t.table}`;
+              t.mode === "create" ? `设计·${base}` : `设计 ${base}`;
             return (
               <div
                 key={t.id}
@@ -183,16 +202,6 @@ export function MainWorkspace() {
                 aria-selected={active}
                 title={label}
               >
-                <button
-                  type="button"
-                  className="ws-tab-main"
-                  onClick={() => setActiveDesigner(t.id)}
-                >
-                  <span className="ws-tab-label">
-                    {t.dirty ? "• " : ""}
-                    {label}
-                  </span>
-                </button>
                 <button
                   type="button"
                   className="ws-tab-close"
@@ -205,6 +214,17 @@ export function MainWorkspace() {
                   }}
                 >
                   ×
+                </button>
+                <button
+                  type="button"
+                  className="ws-tab-main"
+                  onClick={() => setActiveDesigner(t.id)}
+                >
+                  <span className="ws-tab-table-icon" aria-hidden />
+                  <span className="ws-tab-label">
+                    {t.dirty ? "• " : ""}
+                    {label}
+                  </span>
                 </button>
               </div>
             );

@@ -113,10 +113,12 @@ impl DriverSession for MysqlSession {
         if let Some(db) = database.filter(|d| ident_ok(d)) {
             // Select schema so subsequent unqualified queries work.
             conn.query_drop(format!("USE `{db}`"))?;
+            // InnoDB often leaves information_schema.UPDATE_TIME NULL; COALESCE to
+            // CREATE_TIME so「修改日期」still shows a usable timestamp (Navicat-like).
             let sql = format!(
                 "SELECT TABLE_NAME, TABLE_TYPE, TABLE_ROWS, DATA_LENGTH, ENGINE,
                         DATE_FORMAT(CREATE_TIME, '%Y-%m-%d %H:%i:%s'),
-                        DATE_FORMAT(UPDATE_TIME, '%Y-%m-%d %H:%i:%s'),
+                        DATE_FORMAT(COALESCE(UPDATE_TIME, CHECK_TIME, CREATE_TIME), '%Y-%m-%d %H:%i:%s'),
                         TABLE_COLLATION, TABLE_COMMENT
                  FROM information_schema.TABLES
                  WHERE TABLE_SCHEMA = '{db}'
@@ -145,8 +147,8 @@ impl DriverSession for MysqlSession {
                         table_rows: rows,
                         data_length: data_len,
                         engine,
-                        create_time: created,
-                        update_time: updated,
+                        create_time: created.clone(),
+                        update_time: updated.or(created),
                         collation,
                         comment,
                     }
