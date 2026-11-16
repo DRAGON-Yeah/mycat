@@ -2846,16 +2846,21 @@ tr.is-inserted {
 }
 
 .tree-children {
-  padding-left: 14px;
+  padding-left: 12px;
 }
 
-/* Saved queries: clearly nested under「查询」 */
+/* Saved queries / folder children: keep close under parent */
 .tree-query-list {
-  padding-left: 28px;
+  padding-left: 20px;
 }
 
 .tree-query-list .tree-row {
   padding-left: 0;
+}
+
+.tree-query-list .tree-twist-spacer {
+  width: 0;
+  display: none;
 }
 
 .tree-row {
@@ -2894,8 +2899,8 @@ tr.is-inserted {
 }
 
 .tree-query-empty {
-  margin: 2px 4px 6px 12px !important;
-  padding-left: 12px !important;
+  margin: 2px 4px 6px 4px !important;
+  padding-left: 4px !important;
   font-size: 11px !important;
 }
 
