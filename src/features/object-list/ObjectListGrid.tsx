@@ -8,6 +8,10 @@ import {
   TableContextMenu,
   type TableMenuTarget,
 } from "../nav-tree/TableContextMenu";
+import {
+  ViewsFolderContextMenu,
+  type ViewsFolderMenuTarget,
+} from "../nav-tree/ViewsFolderContextMenu";
 import { loadTableGroups } from "../nav-tree/tableGroups";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 
@@ -41,6 +45,7 @@ export function ObjectListGrid() {
   const folder = useWorkspaceStore((s) => s.selectedFolder);
   const openTable = useWorkspaceStore((s) => s.openTable);
   const openTableDesigner = useWorkspaceStore((s) => s.openTableDesigner);
+  const openViewDesigner = useWorkspaceStore((s) => s.openViewDesigner);
   const selectTableMeta = useWorkspaceStore((s) => s.selectTableMeta);
   const selectedTable = useWorkspaceStore((s) => s.selectedTable);
   const objectListFilter = useWorkspaceStore((s) => s.objectListFilter);
@@ -58,6 +63,8 @@ export function ObjectListGrid() {
   const [tick, setTick] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [menu, setMenu] = useState<TableMenuTarget | null>(null);
+  const [viewsFolderMenu, setViewsFolderMenu] =
+    useState<ViewsFolderMenuTarget | null>(null);
   const [groupMap, setGroupMap] = useState<Record<string, string>>({});
   const filterRef = useRef<HTMLInputElement>(null);
   const listResetKey = useMemo(
@@ -89,6 +96,7 @@ export function ObjectListGrid() {
       const t = e.target as HTMLElement | null;
       if (t?.closest?.(".dg-context-menu, .modal, .modal-backdrop")) return;
       setMenu(null);
+      setViewsFolderMenu(null);
     }
     document.addEventListener("click", onDoc);
     return () => document.removeEventListener("click", onDoc);
@@ -124,24 +132,42 @@ export function ObjectListGrid() {
         openTable(selectedTable);
         return;
       }
-      if (key === "d" && selectedTable && folder !== "views") {
+      if (key === "d" && selectedTable) {
         e.preventDefault();
-        openTableDesigner({
-          connection,
-          database,
-          table: selectedTable,
-          mode: "alter",
-        });
+        if (folder === "views") {
+          openViewDesigner({
+            connection,
+            database,
+            view: selectedTable,
+            mode: "alter",
+          });
+        } else {
+          openTableDesigner({
+            connection,
+            database,
+            table: selectedTable,
+            mode: "alter",
+          });
+        }
         return;
       }
-      if (key === "n" && folder !== "views") {
+      if (key === "n") {
         e.preventDefault();
-        openTableDesigner({
-          connection,
-          database,
-          table: "new_table",
-          mode: "create",
-        });
+        if (folder === "views") {
+          openViewDesigner({
+            connection,
+            database,
+            view: "new_view",
+            mode: "create",
+          });
+        } else if (folder === "tables" || !folder) {
+          openTableDesigner({
+            connection,
+            database,
+            table: "new_table",
+            mode: "create",
+          });
+        }
       }
     }
     window.addEventListener("keydown", onKey);
@@ -153,6 +179,7 @@ export function ObjectListGrid() {
     folder,
     openTable,
     openTableDesigner,
+    openViewDesigner,
   ]);
 
   const wantViews = folder === "views";
@@ -227,7 +254,22 @@ export function ObjectListGrid() {
     });
 
   return (
-    <div className="object-list-grid">
+    <div
+      className="object-list-grid"
+      onContextMenu={(e) => {
+        if (!wantViews || !connection || !database) return;
+        const t = e.target as HTMLElement | null;
+        if (t?.closest?.("tr, .dg-context-menu, .modal")) return;
+        e.preventDefault();
+        setMenu(null);
+        setViewsFolderMenu({
+          x: e.clientX,
+          y: e.clientY,
+          conn: connection,
+          database,
+        });
+      }}
+    >
       <div className="object-list-toolbar navicat-obj-toolbar">
         <div className="obj-toolbar-left">
           <button
@@ -241,7 +283,7 @@ export function ObjectListGrid() {
           <button
             type="button"
             className="obj-tool-btn"
-            title="打开表 (⌘O)"
+            title={wantViews ? "打开视图 (⌘O)" : "打开表 (⌘O)"}
             disabled={!selectedTable}
             onClick={() => selectedTable && openTable(selectedTable)}
           >
@@ -250,37 +292,52 @@ export function ObjectListGrid() {
           <button
             type="button"
             className="obj-tool-btn"
-            title="设计表 (⌘D)"
-            disabled={!selectedTable || wantViews}
-            onClick={() =>
-              selectedTable &&
-              connection &&
-              database &&
-              openTableDesigner({
-                connection,
-                database,
-                table: selectedTable,
-                mode: "alter",
-              })
-            }
+            title={wantViews ? "设计视图 (⌘D)" : "设计表 (⌘D)"}
+            disabled={!selectedTable}
+            onClick={() => {
+              if (!selectedTable || !connection || !database) return;
+              if (wantViews) {
+                openViewDesigner({
+                  connection,
+                  database,
+                  view: selectedTable,
+                  mode: "alter",
+                });
+              } else {
+                openTableDesigner({
+                  connection,
+                  database,
+                  table: selectedTable,
+                  mode: "alter",
+                });
+              }
+            }}
           >
             设计
           </button>
           <button
             type="button"
             className="obj-tool-btn"
-            title="新建表 (⌘N)"
-            disabled={wantViews || !connection || !database}
-            onClick={() =>
-              connection &&
-              database &&
-              openTableDesigner({
-                connection,
-                database,
-                table: "new_table",
-                mode: "create",
-              })
-            }
+            title={wantViews ? "新建视图 (⌘N)" : "新建表 (⌘N)"}
+            disabled={!connection || !database}
+            onClick={() => {
+              if (!connection || !database) return;
+              if (wantViews) {
+                openViewDesigner({
+                  connection,
+                  database,
+                  view: "new_view",
+                  mode: "create",
+                });
+              } else {
+                openTableDesigner({
+                  connection,
+                  database,
+                  table: "new_table",
+                  mode: "create",
+                });
+              }
+            }}
           >
             新建
           </button>
@@ -389,6 +446,17 @@ export function ObjectListGrid() {
         <TableContextMenu
           target={menu}
           onClose={() => setMenu(null)}
+          onRefresh={() => setTick((x) => x + 1)}
+          onMessage={(msg) => {
+            setToast(msg);
+            window.setTimeout(() => setToast(null), 2800);
+          }}
+        />
+      )}
+      {viewsFolderMenu && (
+        <ViewsFolderContextMenu
+          target={viewsFolderMenu}
+          onClose={() => setViewsFolderMenu(null)}
           onRefresh={() => setTick((x) => x + 1)}
           onMessage={(msg) => {
             setToast(msg);

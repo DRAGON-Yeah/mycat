@@ -88,6 +88,26 @@ export async function exportTableDictionary(args: {
     ),
     "",
   ];
+  try {
+    const viewDdl = await fetchCreateDdl({
+      conn,
+      database,
+      table,
+      isView: true,
+    });
+    if (/create\s+(or\s+replace\s+)?view\b/i.test(viewDdl)) {
+      lines.push(
+        "## 视图定义",
+        "",
+        "```sql",
+        viewDdl.replace(/;\s*$/, ""),
+        "```",
+        "",
+      );
+    }
+  } catch {
+    /* base table */
+  }
   await downloadTextFile(
     `${table}-data-dictionary.md`,
     lines.join("\n"),
@@ -118,8 +138,21 @@ export async function reverseSingleTableModel(args: {
   ]);
   const safe = (n: string) => n.replace(/[^A-Za-z0-9_]/g, "_") || "t";
   const t = safe(table);
+  let viewDdl = "";
+  try {
+    viewDdl = await fetchCreateDdl({
+      conn,
+      database,
+      table,
+      isView: true,
+    });
+  } catch {
+    /* ignore */
+  }
+  const isViewDdl =
+    !!viewDdl && /create\s+(or\s+replace\s+)?view\b/i.test(viewDdl);
   const lines = [
-    `# 逆向模型 · ${database}.${table}`,
+    `# 逆向模型 · ${database}.${table}${isViewDdl ? "（视图）" : ""}`,
     "",
     "```mermaid",
     "erDiagram",
@@ -139,9 +172,53 @@ export async function reverseSingleTableModel(args: {
     "```",
     "",
   ];
+  if (isViewDdl) {
+    lines.push("## VIEW DDL", "", "```sql", viewDdl.replace(/;\s*$/, ""), "```", "");
+  }
   const md = lines.join("\n");
   await downloadTextFile(`${table}-model.md`, md, "text/markdown");
   return md;
+}
+
+export async function exportAllViewsDictionary(args: {
+  conn: ConnectionDto;
+  database: string;
+}) {
+  const { conn, database } = args;
+  const { listTables } = await import("../connections/sessionApi");
+  await openConnection(conn.id);
+  const all = await listTables(conn.id, database);
+  const views = all.filter((t) => t.kind === "view");
+  const lines = [
+    `# 视图数据字典 · ${database}`,
+    "",
+    `连接：${conn.name}（${conn.engine}）`,
+    `生成时间：${new Date().toLocaleString()}`,
+    "",
+  ];
+  for (const v of views) {
+    lines.push(`## ${v.name}`, "");
+    try {
+      const ddl = await fetchCreateDdl({
+        conn,
+        database,
+        table: v.name,
+        isView: true,
+      });
+      lines.push("```sql", ddl.replace(/;\s*$/, ""), "```", "");
+    } catch (err) {
+      lines.push(
+        `（无法读取定义：${err instanceof Error ? err.message : String(err)}）`,
+        "",
+      );
+    }
+  }
+  await downloadTextFile(
+    `${database}-views-dictionary.md`,
+    lines.join("\n"),
+    "text/markdown",
+  );
+  return views.length;
 }
 
 /** Return SHOW CREATE TABLE/VIEW DDL text. */
@@ -461,15 +538,46 @@ export async function renameTable(args: {
   database: string;
   table: string;
   next: string;
+  isView?: boolean;
 }) {
-  const { conn, database, table, next } = args;
+  const { conn, database, table, next, isView } = args;
   if (!identOk(next)) {
-    throw new Error("新表名仅允许字母、数字、下划线，且不能以数字开头");
+    throw new Error("新名称仅允许字母、数字、下划线，且不能以数字开头");
   }
   await openConnection(conn.id);
   const e = engineKey(conn.engine);
   const qt = quoteTable(String(conn.engine), database, table);
   const qn = quoteIdent(String(conn.engine), next);
+  if (isView) {
+    if (e === "mysql") {
+      // MySQL has no RENAME VIEW; recreate from DDL
+      const ddl = await fetchCreateDdl({
+        conn,
+        database,
+        table,
+        isView: true,
+      });
+      const { rewriteCreateViewName } = await import(
+        "../view-designer/viewDdl"
+      );
+      const nextDdl = rewriteCreateViewName(
+        ddl,
+        next,
+        String(conn.engine),
+        database,
+      );
+      await executeSql(conn.id, `DROP VIEW ${qt}`, database);
+      await executeSql(conn.id, nextDdl, database);
+      return;
+    }
+    if (e === "postgres" || e === "postgresql") {
+      await executeSql(conn.id, `ALTER VIEW ${qt} RENAME TO ${qn}`, database);
+      return;
+    }
+    // SQLite 3.25+
+    await executeSql(conn.id, `ALTER VIEW ${qt} RENAME TO ${qn}`, database);
+    return;
+  }
   if (e === "postgres" || e === "postgresql") {
     await executeSql(conn.id, `ALTER TABLE ${qt} RENAME TO ${qn}`, database);
   } else if (e === "sqlite") {
@@ -478,6 +586,38 @@ export async function renameTable(args: {
     const qnDb = quoteTable(String(conn.engine), database, next);
     await executeSql(conn.id, `RENAME TABLE ${qt} TO ${qnDb}`, database);
   }
+}
+
+export async function copyView(args: {
+  conn: ConnectionDto;
+  database: string;
+  view: string;
+  newName: string;
+}) {
+  const { conn, database, view, newName } = args;
+  if (!identOk(newName)) {
+    throw new Error("目标视图名仅允许字母、数字、下划线，且不能以数字开头");
+  }
+  if (newName === view) {
+    throw new Error("目标视图名不能与源视图相同");
+  }
+  const ddl = await fetchCreateDdl({
+    conn,
+    database,
+    table: view,
+    isView: true,
+  });
+  const { rewriteCreateViewName } = await import("../view-designer/viewDdl");
+  let nextDdl = rewriteCreateViewName(
+    ddl,
+    newName,
+    String(conn.engine),
+    database,
+  );
+  // Ensure OR REPLACE not required for fresh name; strip OR REPLACE for create
+  nextDdl = nextDdl.replace(/\bOR\s+REPLACE\s+/i, "");
+  await openConnection(conn.id);
+  await executeSql(conn.id, nextDdl, database);
 }
 
 export async function copyTable(args: {

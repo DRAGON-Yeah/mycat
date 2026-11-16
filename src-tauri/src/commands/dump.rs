@@ -77,6 +77,14 @@ fn dump_structure(
             Some(db) if ident_ok(db) => format!("`{db}`.`{table}`"),
             _ => format!("`{table}`"),
         };
+        // Prefer VIEW DDL when the object is a view.
+        if let Ok(out) = session.execute_sql(&format!("SHOW CREATE VIEW {table_sql}")) {
+            if let Some(row) = out.rows.first() {
+                if let Some(Value::String(sql)) = row.get(1).or_else(|| row.first()) {
+                    return Ok(format!("{sql};\n\n"));
+                }
+            }
+        }
         if let Ok(out) = session.execute_sql(&format!("SHOW CREATE TABLE {table_sql}")) {
             if let Some(row) = out.rows.first() {
                 if let Some(Value::String(sql)) = row.get(1).or_else(|| row.first()) {

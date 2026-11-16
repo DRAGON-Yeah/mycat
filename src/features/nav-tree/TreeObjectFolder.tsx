@@ -39,6 +39,7 @@ type Props = {
     table: string;
     kind: string;
   }) => void;
+  onFolderContextMenu?: (args: { x: number; y: number }) => void;
   onMessage: (msg: string) => void;
 };
 
@@ -65,6 +66,7 @@ export function TreeObjectFolder({
   onOpenTable,
   onDesignTable,
   onTableContextMenu,
+  onFolderContextMenu,
   onMessage,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
@@ -215,7 +217,18 @@ export function TreeObjectFolder({
 
   return (
     <li>
-      <div className="tree-row tree-db">
+      <div
+        className="tree-row tree-db"
+        onContextMenu={
+          onFolderContextMenu
+            ? (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onFolderContextMenu({ x: e.clientX, y: e.clientY });
+              }
+            : undefined
+        }
+      >
         <button
           type="button"
           className={`tree-twist ${expanded ? "is-expanded" : ""}`}

@@ -58,6 +58,8 @@ export type DesignerTab = {
   database: string;
   table: string;
   mode: "create" | "alter";
+  /** table (default) or view designer */
+  kind?: "table" | "view";
   dirty?: boolean;
   seedColumns?: {
     name: string;
@@ -145,6 +147,12 @@ type WorkspaceState = {
       nullable: boolean;
       isPk: boolean;
     }[];
+  }) => string | null;
+  openViewDesigner: (opts: {
+    connection?: ConnectionDto;
+    database?: string;
+    view: string;
+    mode: "create" | "alter";
   }) => string | null;
   setActiveDesigner: (id: string) => void;
   closeDesignerTab: (id: string, opts?: { force?: boolean }) => boolean;
@@ -532,6 +540,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       database,
       table,
       mode: opts.mode,
+      kind: "table",
       dirty: false,
       seedColumns: opts.seedColumns,
     };
@@ -551,17 +560,88 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
     return id;
   },
+  openViewDesigner: (opts) => {
+    const conn = opts.connection ?? get().activeConnection;
+    if (!conn) {
+      window.alert("请先打开一个连接。");
+      return null;
+    }
+    const database =
+      opts.database?.trim() ||
+      get().selectedDatabase ||
+      conn.database?.trim() ||
+      "";
+    if (!database) {
+      window.alert("请先选择数据库，再设计视图。");
+      return null;
+    }
+    const view = opts.view.trim() || "new_view";
+    const id =
+      opts.mode === "create"
+        ? `view-designer-create-${conn.id}:${database}:${Date.now()}`
+        : `view-designer:${conn.id}:${database}:${view}`;
+    const existing =
+      opts.mode === "alter"
+        ? get().designerTabs.find((t) => t.id === id)
+        : undefined;
+    if (existing) {
+      set({
+        activeConnectionId: conn.id,
+        activeConnection: conn,
+        selectedDatabase: database,
+        selectedTable: view,
+        selectedFolder: "views",
+        selectionKind: "table",
+        activeDesignerId: existing.id,
+        activeTabId: null,
+        activeQueryId: null,
+        centerMode: "table-designer",
+        toolbarAction: "view",
+        placeholderFeature: null,
+      });
+      return existing.id;
+    }
+    const tab: DesignerTab = {
+      id,
+      connectionId: conn.id,
+      connectionName: conn.name,
+      connectionEngine: String(conn.engine),
+      database,
+      table: view,
+      mode: opts.mode,
+      kind: "view",
+      dirty: false,
+    };
+    set({
+      activeConnectionId: conn.id,
+      activeConnection: conn,
+      selectedDatabase: database,
+      selectedTable: opts.mode === "alter" ? view : null,
+      selectedFolder: "views",
+      selectionKind: "table",
+      designerTabs: [...get().designerTabs, tab],
+      activeDesignerId: id,
+      activeTabId: null,
+      activeQueryId: null,
+      centerMode: "table-designer",
+      toolbarAction: "view",
+      placeholderFeature: null,
+    });
+    return id;
+  },
   setActiveDesigner: (id) => {
     const tab = get().designerTabs.find((t) => t.id === id);
     if (!tab) return;
+    const isView = tab.kind === "view";
     set({
       activeDesignerId: id,
       activeTabId: null,
       activeQueryId: null,
       centerMode: "table-designer",
-      toolbarAction: "table",
+      toolbarAction: isView ? "view" : "table",
       placeholderFeature: null,
       selectedDatabase: tab.database,
+      selectedFolder: isView ? "views" : get().selectedFolder,
       selectedTable: tab.mode === "alter" ? tab.table : null,
       selectionKind: "table",
     });
@@ -570,9 +650,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const tab = get().designerTabs.find((t) => t.id === id);
     if (!tab) return false;
     if (!opts?.force && tab.dirty) {
+      const obj = tab.kind === "view" ? "视图" : "表";
       const ok = window.confirm(
         tab.mode === "create"
-          ? `新建表「${tab.table}」尚未保存，确定关闭并丢弃？`
+          ? `新建${obj}「${tab.table}」尚未保存，确定关闭并丢弃？`
           : `设计器「${tab.table}」有未保存更改，确定关闭？`,
       );
       if (!ok) return false;
@@ -613,7 +694,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const tab = get().designerTabs.find((t) => t.id === id);
     if (!tab) return null;
     const name = tableName.trim() || tab.table;
-    const newId = `designer:${tab.connectionId}:${tab.database}:${name}`;
+    const isView = tab.kind === "view";
+    const newId = isView
+      ? `view-designer:${tab.connectionId}:${tab.database}:${name}`
+      : `designer:${tab.connectionId}:${tab.database}:${name}`;
     const others = get().designerTabs.filter(
       (t) => t.id !== id && t.id !== newId,
     );
@@ -629,7 +713,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       designerTabs: [...others, next],
       activeDesignerId: newId,
       selectedTable: name,
+      selectedFolder: isView ? "views" : get().selectedFolder,
       centerMode: "table-designer",
+      toolbarAction: isView ? "view" : "table",
     });
     return newId;
   },

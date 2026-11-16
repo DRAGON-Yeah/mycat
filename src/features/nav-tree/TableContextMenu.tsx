@@ -25,6 +25,7 @@ import {
 import { getGridViewSnapshot } from "../data-grid/gridViewSnapshot";
 import {
   copyTable,
+  copyView,
   dropTableOrView,
   dumpSingleTable,
   emptyTable,
@@ -105,6 +106,7 @@ export function TableContextMenu({
   const selectDatabase = useWorkspaceStore((s) => s.selectDatabase);
   const selectTableMeta = useWorkspaceStore((s) => s.selectTableMeta);
   const openTableDesigner = useWorkspaceStore((s) => s.openTableDesigner);
+  const openViewDesigner = useWorkspaceStore((s) => s.openViewDesigner);
   const tabs = useWorkspaceStore((s) => s.tabs);
   const designerTabs = useWorkspaceStore((s) => s.designerTabs);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
@@ -357,15 +359,24 @@ export function TableContextMenu({
 
         <button
           type="button"
-          disabled={busy || isView}
+          disabled={busy}
           onClick={() => {
             ensureContext();
-            openTableDesigner({
-              connection: conn,
-              database,
-              table,
-              mode: "alter",
-            });
+            if (isView) {
+              openViewDesigner({
+                connection: conn,
+                database,
+                view: table,
+                mode: "alter",
+              });
+            } else {
+              openTableDesigner({
+                connection: conn,
+                database,
+                table,
+                mode: "alter",
+              });
+            }
             onClose();
           }}
         >
@@ -374,19 +385,28 @@ export function TableContextMenu({
         </button>
         <button
           type="button"
-          disabled={busy || isView}
+          disabled={busy}
           onClick={() => {
             ensureContext();
-            openTableDesigner({
-              connection: conn,
-              database,
-              table: "new_table",
-              mode: "create",
-            });
+            if (isView) {
+              openViewDesigner({
+                connection: conn,
+                database,
+                view: "new_view",
+                mode: "create",
+              });
+            } else {
+              openTableDesigner({
+                connection: conn,
+                database,
+                table: "new_table",
+                mode: "create",
+              });
+            }
             onClose();
           }}
         >
-          新建表
+          新建{isView ? "视图" : "表"}
           <span className="menu-shortcut">⌘N</span>
         </button>
 
@@ -400,7 +420,19 @@ export function TableContextMenu({
         >
           删除{isView ? "视图" : "表"}
         </button>
-        {!isView && (
+        {isView ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setCopyName(`${table}_copy`);
+              setCopyDialog("structure");
+            }}
+          >
+            复制视图
+            <span className="menu-shortcut">⇧⌘D</span>
+          </button>
+        ) : (
           <>
             <button
               type="button"
@@ -480,23 +512,21 @@ export function TableContextMenu({
         <div className="dg-menu-sep" />
 
         {!isView && (
-          <>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => setIoWizard("import")}
-            >
-              导入向导…
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => setIoWizard("export")}
-            >
-              导出向导…
-            </button>
-          </>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setIoWizard("import")}
+          >
+            导入向导…
+          </button>
         )}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => setIoWizard("export")}
+        >
+          导出向导…
+        </button>
         <button
           type="button"
           disabled={busy}
@@ -533,18 +563,18 @@ export function TableContextMenu({
 
         <div className="dg-menu-sep" />
 
-        {!isView && (
-          <div
-            className={`dg-menu-item has-sub ${dumpOpen ? "is-open" : ""}`}
-            onMouseEnter={() => setDumpOpen(true)}
-            onMouseLeave={() => setDumpOpen(false)}
-          >
-            <button type="button" className="dg-menu-trigger" disabled={busy}>
-              转储 SQL 文件
-              <span className="dg-menu-arrow">›</span>
-            </button>
-            {dumpOpen && (
-              <div className="dg-submenu">
+        <div
+          className={`dg-menu-item has-sub ${dumpOpen ? "is-open" : ""}`}
+          onMouseEnter={() => setDumpOpen(true)}
+          onMouseLeave={() => setDumpOpen(false)}
+        >
+          <button type="button" className="dg-menu-trigger" disabled={busy}>
+            转储 SQL 文件
+            <span className="dg-menu-arrow">›</span>
+          </button>
+          {dumpOpen && (
+            <div className="dg-submenu">
+              {!isView && (
                 <button
                   type="button"
                   onClick={() =>
@@ -561,26 +591,26 @@ export function TableContextMenu({
                 >
                   结构与数据…
                 </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void run(async () => {
-                      await dumpSingleTable({
-                        conn,
-                        database,
-                        table,
-                        includeData: false,
-                      });
-                      onMessage("已转储仅结构");
-                    })
-                  }
-                >
-                  仅结构…
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+              <button
+                type="button"
+                onClick={() =>
+                  void run(async () => {
+                    await dumpSingleTable({
+                      conn,
+                      database,
+                      table,
+                      includeData: false,
+                    });
+                    onMessage("已转储仅结构");
+                  })
+                }
+              >
+                仅结构…
+              </button>
+            </div>
+          )}
+        </div>
 
         {!isView && (
           <div
@@ -667,12 +697,12 @@ export function TableContextMenu({
             })
           }
         >
-          导出逆向模型…
+          {isView ? "逆向视图到模型…" : "导出逆向模型…"}
         </button>
         <button
           type="button"
-          disabled={busy || isView}
-          title="按当前表生成简易统计图"
+          disabled={busy}
+          title="按当前对象生成简易统计图"
           onClick={() => {
             setChartOpen(true);
           }}
@@ -992,7 +1022,13 @@ export function TableContextMenu({
                 return;
               }
               void run(async () => {
-                await renameTable({ conn, database, table, next });
+                await renameTable({
+                  conn,
+                  database,
+                  table,
+                  next,
+                  isView,
+                });
                 closeRelatedTabs(table);
                 onMessage(`已重命名为 ${next}`);
                 onRefresh();
@@ -1036,26 +1072,36 @@ export function TableContextMenu({
               e.preventDefault();
               const next = copyName.trim();
               if (!identOk(next)) {
-                onMessage("目标表名非法");
+                onMessage(isView ? "目标视图名非法" : "目标表名非法");
                 return;
               }
               void run(async () => {
-                await copyTable({
-                  conn,
-                  database,
-                  table,
-                  newName: next,
-                  includeData: copyDialog === "data",
-                });
-                onMessage(`已复制表 → ${next}`);
+                if (isView) {
+                  await copyView({
+                    conn,
+                    database,
+                    view: table,
+                    newName: next,
+                  });
+                  onMessage(`已复制视图 → ${next}`);
+                } else {
+                  await copyTable({
+                    conn,
+                    database,
+                    table,
+                    newName: next,
+                    includeData: copyDialog === "data",
+                  });
+                  onMessage(`已复制表 → ${next}`);
+                }
                 onRefresh();
                 setCopyDialog(null);
               });
             }}
           >
-            <h2>复制表</h2>
+            <h2>{isView ? "复制视图" : "复制表"}</h2>
             <label>
-              新表名
+              {isView ? "新视图名" : "新表名"}
               <input
                 value={copyName}
                 onChange={(e) => setCopyName(e.target.value)}

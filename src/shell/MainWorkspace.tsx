@@ -4,6 +4,7 @@ import { PlaceholderPane } from "../features/placeholders/PlaceholderPane";
 import { ConsolePanel } from "../features/query/Console";
 import { QueryEditor } from "../features/query/QueryEditor";
 import { TableDesigner } from "../features/table-designer/TableDesigner";
+import { ViewDesigner } from "../features/view-designer/ViewDesigner";
 import { useWorkspaceStore } from "../stores/workspaceStore";
 
 function queryTabLabel(title: string, database: string, connectionName: string) {
@@ -195,8 +196,11 @@ export function MainWorkspace() {
               t.database,
               t.connectionName,
             );
+            const kindLabel = t.kind === "view" ? "视图" : "表";
             const label =
-              t.mode === "create" ? `设计·${base}` : `设计 ${base}`;
+              t.mode === "create"
+                ? `设计${kindLabel}·${base}`
+                : `设计${kindLabel} ${base}`;
             return (
               <div
                 key={t.id}
@@ -261,7 +265,11 @@ export function MainWorkspace() {
         ) : centerMode === "console" ? (
           <ConsolePanel />
         ) : centerMode === "table-designer" && activeDesigner ? (
-          <TableDesigner tab={activeDesigner} />
+          activeDesigner.kind === "view" ? (
+            <ViewDesigner tab={activeDesigner} />
+          ) : (
+            <TableDesigner tab={activeDesigner} />
+          )
         ) : centerMode === "table" && activeTab ? (
           <DataGrid tab={activeTab} />
         ) : centerMode === "objectList" ? (
