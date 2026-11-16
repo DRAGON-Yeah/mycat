@@ -1136,6 +1136,11 @@ tr.is-inserted {
   min-height: 0;
 }
 
+.console-panel {
+  background: #0d0d0d;
+  color: #ffffff;
+}
+
 .query-empty {
   align-items: center;
   justify-content: center;
@@ -2252,9 +2257,10 @@ tr.is-inserted {
   justify-content: space-between;
   gap: 12px;
   padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-muted);
+  border-bottom: 1px solid #2a2a2a;
+  background: #141414;
   flex-shrink: 0;
+  color: #ffffff;
 }
 
 .console-toolbar-meta {
@@ -2268,15 +2274,26 @@ tr.is-inserted {
 .console-title {
   font-size: 12px;
   font-weight: 650;
-  color: var(--text);
+  color: #ffffff;
 }
 
 .console-context {
   font-size: 12px;
-  color: var(--text-muted);
+  color: #ffffff;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.console-toolbar .ghost-btn {
+  color: #ffffff;
+  border-color: #3a3a3a;
+  background: #1c1c1c;
+}
+
+.console-toolbar .ghost-btn:hover:not(:disabled) {
+  background: #2a2a2a;
+  color: #fff;
 }
 
 .console-context.is-muted {
@@ -2305,68 +2322,79 @@ tr.is-inserted {
   font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
   font-size: 12px;
   line-height: 1.45;
-  background: color-mix(in srgb, var(--bg) 92%, #1a1f24 8%);
+  background: #0d0d0d;
+  color: #ffffff;
 }
 
 .console-line {
   margin: 0 0 8px;
   white-space: pre-wrap;
   word-break: break-word;
+  color: #ffffff;
 }
 
 .console-line.is-meta {
-  color: var(--text-muted);
+  color: #ffffff;
 }
 
 .console-line.is-in {
-  color: #1565c0;
+  color: #ffffff;
   font-weight: 560;
 }
 
-[data-theme="dark"] .console-line.is-in {
-  color: #82b1ff;
-}
-
 .console-line.is-out {
-  color: var(--text);
+  color: #ffffff;
 }
 
 .console-line.is-err {
-  color: #cf222e;
+  color: #ff6b6b;
 }
 
-[data-theme="dark"] .console-line.is-err {
-  color: #ff7b72;
-}
-
-.console-input-row {
+.console-panel .console-input-row {
   border-bottom: none;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid #2a2a2a;
   gap: 6px;
+  background: #141414;
 }
 
 .console-prompt {
   font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
   font-size: 12px;
-  color: var(--text-muted);
+  color: #ffffff;
   flex-shrink: 0;
   user-select: none;
 }
 
-.console-input-row input {
+.console-panel .console-input-row input {
   flex: 1;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  color: var(--text);
+  border: 1px solid #333;
+  background: #0d0d0d;
+  color: #ffffff;
   border-radius: 6px;
   padding: 6px 8px;
   font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
   font-size: 12px;
+  caret-color: #ffffff;
 }
 
-.console-input-row input:focus {
-  outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
-  border-color: var(--accent);
+.console-panel .console-input-row input:focus {
+  outline: 1px solid #3b82f6;
+  border-color: #3b82f6;
+}
+
+.console-panel .console-input-row button {
+  border-color: #3a3a3a;
+  background: #1c1c1c;
+  color: #ffffff;
+}
+
+.console-panel .console-input-row button:hover:not(:disabled) {
+  background: #2a2a2a;
+}
+
+.console-panel .console-input-row button:disabled,
+.console-panel .console-input-row input:disabled {
+  opacity: 0.45;
 }
 
 .export-csv,
