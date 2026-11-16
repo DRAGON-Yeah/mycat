@@ -82,9 +82,12 @@ export function QueryEditor() {
   const [findCount, setFindCount] = useState(0);
   const findInputRef = useRef<HTMLInputElement>(null);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [saveAsMode, setSaveAsMode] = useState(false);
   const [saveName, setSaveName] = useState("");
   const [saveBusy, setSaveBusy] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const saveNameInputRef = useRef<HTMLInputElement>(null);
+  const toastTimer = useRef<number | null>(null);
 
   const monacoTheme = useMemo(
     () => (theme === "dark" ? "vs-dark" : "light"),
@@ -245,8 +248,14 @@ export function QueryEditor() {
     return () => document.removeEventListener("click", onDoc);
   }, [connMenuOpen, dbMenuOpen, runMenuOpen]);
 
+  function showToast(msg: string) {
+    setToast(msg);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 3200);
+  }
+
   // Global ⌘/Ctrl+S — Tauri/WebView may not route browser save; Monaco alone
-  // only fires when the editor has focus.
+  // only fires when the editor has focus. ⇧⌘S = 另存为.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
@@ -254,10 +263,12 @@ export function QueryEditor() {
       if (!tab) return;
       e.preventDefault();
       e.stopPropagation();
-      saveRef.current();
+      if (e.shiftKey) openSaveDialog(true);
+      else saveRef.current();
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
   const onMount: OnMount = (editor, monaco) => {
@@ -313,15 +324,25 @@ export function QueryEditor() {
     updateQueryTab(tab.id, { sql: next, dirty: true });
   }
 
-  function openSaveDialog() {
+  function openSaveDialog(saveAs = false) {
     if (!tab) return;
     // Already linked: overwrite without rename prompt (Navicat Save).
-    if (tab.savedQueryId && tab.title && tab.title !== "无标题") {
-      void persistSave(tab.title);
+    if (
+      !saveAs &&
+      tab.savedQueryId &&
+      tab.title &&
+      tab.title !== "无标题"
+    ) {
+      void persistSave(tab.title, false);
       return;
     }
     const suggested =
-      tab.title && tab.title !== "无标题" ? tab.title : "未命名查询";
+      tab.title && tab.title !== "无标题"
+        ? saveAs
+          ? `${tab.title} 副本`
+          : tab.title
+        : "未命名查询";
+    setSaveAsMode(saveAs);
     setSaveName(suggested);
     setSaveDialogOpen(true);
     window.setTimeout(() => {
@@ -330,7 +351,7 @@ export function QueryEditor() {
     }, 0);
   }
 
-  async function persistSave(rawName: string) {
+  async function persistSave(rawName: string, saveAs = saveAsMode) {
     if (!tab) return;
     const title = rawName.trim().replace(/\.sql$/i, "");
     if (!title) return;
@@ -338,7 +359,7 @@ export function QueryEditor() {
     setError(null);
     try {
       const saved = await upsertSavedQuery({
-        id: tab.savedQueryId || undefined,
+        id: saveAs ? undefined : tab.savedQueryId || undefined,
         connectionId: tab.connectionId,
         database: tab.database || null,
         name: title,
@@ -350,7 +371,10 @@ export function QueryEditor() {
         dirty: false,
       });
       setSaveDialogOpen(false);
-      setStatus(`已保存到「查询」：${saved.name}`);
+      setSaveAsMode(false);
+      const msg = `已保存到「查询」：${saved.name}`;
+      setStatus(msg);
+      showToast(msg);
       window.dispatchEvent(
         new CustomEvent("saved-queries-changed", {
           detail: { connectionId: tab.connectionId, database: tab.database },
@@ -364,7 +388,7 @@ export function QueryEditor() {
   }
 
   function save() {
-    openSaveDialog();
+    openSaveDialog(false);
   }
 
   function beautify() {
@@ -482,7 +506,6 @@ export function QueryEditor() {
       connectionName: conn.name,
       connectionEngine: String(conn.engine),
       database: db,
-      dirty: true,
     });
     applyQueryContext(conn, db);
   }
@@ -492,7 +515,7 @@ export function QueryEditor() {
     setDbMenuOpen(false);
     const conn =
       connections.find((c) => c.id === tab.connectionId) ?? null;
-    updateQueryTab(tab.id, { database, dirty: true });
+    updateQueryTab(tab.id, { database });
     if (conn) applyQueryContext(conn, database);
     if (database && String(tab.connectionEngine) === "mysql") {
       try {
@@ -724,10 +747,21 @@ export function QueryEditor() {
   return (
     <>
     <div className="query-panel navicat-query">
+      {toast ? (
+        <div className="query-toast" role="status">
+          {toast}
+        </div>
+      ) : null}
       <div className="query-icon-bar">
         <div className="query-icon-group">
           <IconBtn title="保存查询 (⌘/Ctrl+S)" onClick={save}>
             <IconSave />
+          </IconBtn>
+          <IconBtn
+            title="另存为 (⇧⌘/Ctrl+S)"
+            onClick={() => openSaveDialog(true)}
+          >
+            <IconSaveAs />
           </IconBtn>
           <span className="query-icon-sep" />
           <IconBtn title="格式化 SQL" onClick={beautify}>
@@ -736,7 +770,7 @@ export function QueryEditor() {
           <IconBtn title="注释" onClick={commentSelection}>
             <IconComment />
           </IconBtn>
-          <IconBtn title="查找 / 替换" onClick={findReplace}>
+          <IconBtn title="查找 (⌘/Ctrl+F)" onClick={findReplace}>
             <IconSearch />
           </IconBtn>
         </div>
@@ -961,7 +995,9 @@ export function QueryEditor() {
           disabled={!running}
           title="停止"
           onClick={() =>
-            setStatus("当前为同步驱动，取消将在语句结束后生效（尽力中断）。")
+            showToast(
+              "暂不支持中途取消：请等待当前语句执行结束（后端同步驱动）。",
+            )
           }
         >
           <span className="query-stop-icon" aria-hidden />
@@ -1086,7 +1122,7 @@ export function QueryEditor() {
             void persistSave(saveName);
           }}
         >
-          <h2>保存查询</h2>
+          <h2>{saveAsMode ? "另存为查询" : "保存查询"}</h2>
           <label>
             查询名称
             <input
@@ -1099,7 +1135,9 @@ export function QueryEditor() {
             />
           </label>
           <p className="save-query-hint">
-            保存后可在左侧对象树「查询」中打开。
+            {saveAsMode
+              ? "将创建为新的已保存查询，不影响原查询。"
+              : "保存后可在左侧对象树「查询」中打开。"}
           </p>
           <div className="modal-actions">
             <button
@@ -1146,6 +1184,33 @@ function IconSave() {
       />
       <path d="M5 2.5v4h5v-4" stroke="currentColor" strokeWidth="1.2" />
       <rect x="5" y="9.5" width="6" height="4" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
+function IconSaveAs() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M2.5 2.5h7.5L12.5 5v8.5H2.5V2.5Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      <path d="M4.5 2.5v3.5h5V2.5" stroke="currentColor" strokeWidth="1.2" />
+      <rect
+        x="4.5"
+        y="9.5"
+        width="5"
+        height="3.5"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      <path
+        d="M12.5 8.5h3M14 7v3"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

@@ -72,6 +72,28 @@ type PendingEdit = {
   database: string;
 };
 
+type SavedQueryMenu = {
+  x: number;
+  y: number;
+  conn: ConnectionDto;
+  database: string;
+  query: SavedQueryDto;
+};
+
+type QueriesFolderMenu = {
+  x: number;
+  y: number;
+  conn: ConnectionDto;
+  database: string;
+};
+
+type RenameSavedQueryState = {
+  conn: ConnectionDto;
+  database: string;
+  query: SavedQueryDto;
+  name: string;
+};
+
 type ConnNode = {
   conn: ConnectionDto;
   expanded: boolean;
@@ -111,6 +133,15 @@ export function ConnectionTree() {
   const [newDbFor, setNewDbFor] = useState<ConnectionDto | null>(null);
   const [newDbBusy, setNewDbBusy] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [savedQueryMenu, setSavedQueryMenu] = useState<SavedQueryMenu | null>(
+    null,
+  );
+  const [queriesFolderMenu, setQueriesFolderMenu] =
+    useState<QueriesFolderMenu | null>(null);
+  const [renameSaved, setRenameSaved] = useState<RenameSavedQueryState | null>(
+    null,
+  );
+  const [renameBusy, setRenameBusy] = useState(false);
 
   const activeConnectionId = useWorkspaceStore((s) => s.activeConnectionId);
   const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
@@ -160,6 +191,8 @@ export function ConnectionTree() {
     function onDocClick() {
       setDbMenu(null);
       setConnMenu(null);
+      setSavedQueryMenu(null);
+      setQueriesFolderMenu(null);
     }
     document.addEventListener("click", onDocClick);
     return () => document.removeEventListener("click", onDocClick);
@@ -334,9 +367,11 @@ export function ConnectionTree() {
   }
 
   useEffect(() => {
-    function onSaved() {
-      const connId = activeConnectionId;
-      const db = selectedDatabase;
+    function onSaved(ev: Event) {
+      const detail = (ev as CustomEvent<{ connectionId?: string; database?: string }>)
+        .detail;
+      const connId = detail?.connectionId || activeConnectionId;
+      const db = detail?.database || selectedDatabase;
       if (!connId || !db) return;
       void loadSavedQueries(connId, db);
     }
@@ -820,7 +855,26 @@ export function ConnectionTree() {
                               const saved = n.savedQueries[db] ?? [];
                               return (
                                 <li key={folder.id}>
-                                  <div className="tree-row tree-db">
+                                  <div
+                                    className="tree-row tree-db"
+                                    onContextMenu={
+                                      folder.id === "queries"
+                                        ? (e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setDbMenu(null);
+                                            setConnMenu(null);
+                                            setSavedQueryMenu(null);
+                                            setQueriesFolderMenu({
+                                              x: e.clientX,
+                                              y: e.clientY,
+                                              conn: n.conn,
+                                              database: db,
+                                            });
+                                          }
+                                        : undefined
+                                    }
+                                  >
                                     {folder.id === "queries" ? (
                                       <button
                                         type="button"
@@ -919,31 +973,16 @@ export function ConnectionTree() {
                                               onContextMenu={(e) => {
                                                 e.preventDefault();
                                                 e.stopPropagation();
-                                                if (
-                                                  !window.confirm(
-                                                    `删除已保存查询「${q.name}」？`,
-                                                  )
-                                                ) {
-                                                  return;
-                                                }
-                                                void deleteSavedQuery(q.id)
-                                                  .then(() =>
-                                                    loadSavedQueries(
-                                                      n.conn.id,
-                                                      db,
-                                                    ),
-                                                  )
-                                                  .catch((err) => {
-                                                    setToast(
-                                                      err instanceof Error
-                                                        ? err.message
-                                                        : String(err),
-                                                    );
-                                                    window.setTimeout(
-                                                      () => setToast(null),
-                                                      2500,
-                                                    );
-                                                  });
+                                                setDbMenu(null);
+                                                setConnMenu(null);
+                                                setQueriesFolderMenu(null);
+                                                setSavedQueryMenu({
+                                                  x: e.clientX,
+                                                  y: e.clientY,
+                                                  conn: n.conn,
+                                                  database: db,
+                                                  query: q,
+                                                });
                                               }}
                                             >
                                               <IconQueries />
@@ -1122,6 +1161,194 @@ export function ConnectionTree() {
             window.setTimeout(() => setToast(null), 4000);
           }}
         />
+      )}
+
+      {queriesFolderMenu && (
+        <div
+          className="dg-context-menu conn-context-menu"
+          style={{
+            left: queriesFolderMenu.x,
+            top: queriesFolderMenu.y,
+          }}
+          role="menu"
+        >
+          <button
+            type="button"
+            onClick={() => {
+              openConn(queriesFolderMenu.conn);
+              openQuery({
+                connection: queriesFolderMenu.conn,
+                database: queriesFolderMenu.database,
+              });
+              setQueriesFolderMenu(null);
+            }}
+          >
+            新建查询
+            <span className="menu-shortcut">⌘Y</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void loadSavedQueries(
+                queriesFolderMenu.conn.id,
+                queriesFolderMenu.database,
+              );
+              setQueriesFolderMenu(null);
+            }}
+          >
+            刷新
+          </button>
+          <button
+            type="button"
+            className="menu-cancel"
+            onClick={() => setQueriesFolderMenu(null)}
+          >
+            取消
+          </button>
+        </div>
+      )}
+
+      {savedQueryMenu && (
+        <div
+          className="dg-context-menu conn-context-menu"
+          style={{ left: savedQueryMenu.x, top: savedQueryMenu.y }}
+          role="menu"
+        >
+          <button
+            type="button"
+            onClick={() => {
+              openConn(savedQueryMenu.conn);
+              openQuery({
+                connection: savedQueryMenu.conn,
+                database: savedQueryMenu.database,
+                title: savedQueryMenu.query.name,
+                sql: savedQueryMenu.query.sql,
+                savedQueryId: savedQueryMenu.query.id,
+              });
+              setSavedQueryMenu(null);
+            }}
+          >
+            打开
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setRenameSaved({
+                conn: savedQueryMenu.conn,
+                database: savedQueryMenu.database,
+                query: savedQueryMenu.query,
+                name: savedQueryMenu.query.name,
+              });
+              setSavedQueryMenu(null);
+            }}
+          >
+            重命名
+          </button>
+          <div className="dg-menu-sep" />
+          <button
+            type="button"
+            className="is-danger"
+            onClick={() => {
+              const { conn, database, query } = savedQueryMenu;
+              setSavedQueryMenu(null);
+              if (!window.confirm(`删除已保存查询「${query.name}」？`)) return;
+              void deleteSavedQuery(query.id)
+                .then(() => loadSavedQueries(conn.id, database))
+                .catch((err) => {
+                  setToast(err instanceof Error ? err.message : String(err));
+                  window.setTimeout(() => setToast(null), 2500);
+                });
+            }}
+          >
+            删除
+          </button>
+          <button
+            type="button"
+            className="menu-cancel"
+            onClick={() => setSavedQueryMenu(null)}
+          >
+            取消
+          </button>
+        </div>
+      )}
+
+      {renameSaved && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !renameBusy) {
+              setRenameSaved(null);
+            }
+          }}
+        >
+          <form
+            className="modal"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const name = renameSaved.name.trim();
+              if (!name || renameBusy) return;
+              setRenameBusy(true);
+              void upsertSavedQuery({
+                id: renameSaved.query.id,
+                connectionId: renameSaved.conn.id,
+                database: renameSaved.database,
+                name,
+                sql: renameSaved.query.sql,
+              })
+                .then((saved) => {
+                  const openTab = queryTabs.find(
+                    (t) => t.savedQueryId === saved.id,
+                  );
+                  if (openTab) {
+                    updateQueryTab(openTab.id, { title: saved.name });
+                  }
+                  return loadSavedQueries(
+                    renameSaved.conn.id,
+                    renameSaved.database,
+                  );
+                })
+                .then(() => {
+                  setToast(`已重命名为「${name}」`);
+                  window.setTimeout(() => setToast(null), 2500);
+                  setRenameSaved(null);
+                })
+                .catch((err) => {
+                  setToast(err instanceof Error ? err.message : String(err));
+                  window.setTimeout(() => setToast(null), 2800);
+                })
+                .finally(() => setRenameBusy(false));
+            }}
+          >
+            <h2>重命名查询</h2>
+            <label>
+              名称
+              <input
+                value={renameSaved.name}
+                onChange={(e) =>
+                  setRenameSaved({ ...renameSaved, name: e.target.value })
+                }
+                autoFocus
+                disabled={renameBusy}
+              />
+            </label>
+            <div className="modal-actions">
+              <button
+                type="button"
+                disabled={renameBusy}
+                onClick={() => setRenameSaved(null)}
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                disabled={renameBusy || !renameSaved.name.trim()}
+              >
+                {renameBusy ? "保存中…" : "确定"}
+              </button>
+            </div>
+          </form>
+        </div>
       )}
 
       {editing !== undefined && (

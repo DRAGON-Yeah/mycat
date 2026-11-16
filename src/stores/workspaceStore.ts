@@ -507,13 +507,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   closeQueryTab: (id, opts) => {
     const tab = get().queryTabs.find((t) => t.id === id);
     if (!tab) return false;
-    if (
-      !opts?.force &&
-      tab.dirty &&
-      tab.sql.trim() &&
-      tab.title !== "无标题"
-    ) {
-      const ok = window.confirm(`「${tab.title}」有未保存更改，确定关闭？`);
+    if (!opts?.force && tab.dirty && tab.sql.trim()) {
+      const label = tab.title?.trim() || "无标题";
+      const ok = window.confirm(
+        `「${label}」有未保存更改，关闭将丢失修改。确定关闭？`,
+      );
       if (!ok) return false;
     }
     const queryTabs = get().queryTabs.filter((t) => t.id !== id);
