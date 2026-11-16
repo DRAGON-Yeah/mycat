@@ -39,11 +39,12 @@ export function DatabaseContextMenu({
   const [busy, setBusy] = useState(false);
   const sqlFileRef = useRef<HTMLInputElement>(null);
   const setCenterMode = useWorkspaceStore((s) => s.setCenterMode);
-  const setToolbarAction = useWorkspaceStore((s) => s.setToolbarAction);
   const openConn = useWorkspaceStore((s) => s.openConnection);
   const selectDatabase = useWorkspaceStore((s) => s.selectDatabase);
   const selectObjectFolder = useWorkspaceStore((s) => s.selectObjectFolder);
   const setObjectListFilter = useWorkspaceStore((s) => s.setObjectListFilter);
+  const openQuery = useWorkspaceStore((s) => s.openQuery);
+  const setToolbarAction = useWorkspaceStore((s) => s.setToolbarAction);
 
   const { conn, database } = target;
 
@@ -278,9 +279,7 @@ export function DatabaseContextMenu({
         disabled={busy}
         onClick={() => {
           ensureContext();
-          selectObjectFolder(database, "queries");
-          setToolbarAction("query");
-          setCenterMode("query");
+          openQuery({ connection: conn, database });
           onClose();
         }}
       >

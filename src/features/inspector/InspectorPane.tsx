@@ -5,6 +5,10 @@ export function InspectorPane() {
   const database = useWorkspaceStore((s) => s.selectedDatabase);
   const table = useWorkspaceStore((s) => s.selectedTable);
   const kind = useWorkspaceStore((s) => s.selectionKind);
+  const centerMode = useWorkspaceStore((s) => s.centerMode);
+  const activeQueryId = useWorkspaceStore((s) => s.activeQueryId);
+  const queryTabs = useWorkspaceStore((s) => s.queryTabs);
+  const activeQuery = queryTabs.find((t) => t.id === activeQueryId) ?? null;
 
   if (kind === "none" || !connection) {
     return (
@@ -41,7 +45,7 @@ export function InspectorPane() {
     );
   }
 
-  if (kind === "database" && database) {
+  if (kind === "database" && database && centerMode !== "query") {
     return (
       <aside className="pane inspector-pane" aria-label="信息">
         <div className="pane-title">数据库</div>
@@ -92,7 +96,7 @@ export function InspectorPane() {
         </div>
         <div>
           <dt>数据库</dt>
-          <dd>{connection.database ?? "—"}</dd>
+          <dd>{connection.database?.trim() || "—"}</dd>
         </div>
         <div>
           <dt>用户</dt>
@@ -102,6 +106,12 @@ export function InspectorPane() {
           <dt>分组</dt>
           <dd>{connection.groupName ?? "—"}</dd>
         </div>
+        {centerMode === "query" && activeQuery && (
+          <div>
+            <dt>查询库</dt>
+            <dd>{activeQuery.database || "—"}</dd>
+          </div>
+        )}
       </dl>
     </aside>
   );

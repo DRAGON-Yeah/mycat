@@ -76,6 +76,8 @@ export function ConnectionTree() {
   const clearDatabaseSelection = useWorkspaceStore(
     (s) => s.clearDatabaseSelection,
   );
+  const openQuery = useWorkspaceStore((s) => s.openQuery);
+  const activeConnection = useWorkspaceStore((s) => s.activeConnection);
 
   useEffect(() => {
     function onDocClick() {
@@ -99,7 +101,12 @@ export function ConnectionTree() {
       // ⌘Y new query
       if (!e.shiftKey && (e.key === "y" || e.key === "Y")) {
         e.preventDefault();
-        selectObjectFolder(selectedDatabase, "queries");
+        if (activeConnection) {
+          openQuery({
+            connection: activeConnection,
+            database: selectedDatabase,
+          });
+        }
         return;
       }
       // ⌘R refresh
@@ -115,7 +122,7 @@ export function ConnectionTree() {
     return () => window.removeEventListener("keydown", onKey);
     // closeDatabase / refresh are stable enough via closure over latest state
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDatabase, activeConnectionId, selectObjectFolder]);
+  }, [selectedDatabase, activeConnectionId, activeConnection, openQuery]);
 
   const reload = useCallback(async () => {
     try {
