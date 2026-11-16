@@ -3,6 +3,10 @@ import {
   listTables,
   type DbObject,
 } from "../connections/sessionApi";
+import {
+  TableContextMenu,
+  type TableMenuTarget,
+} from "../nav-tree/TableContextMenu";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 
 function formatBytes(n?: number | null) {
@@ -37,6 +41,8 @@ export function ObjectListGrid() {
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("");
   const [tick, setTick] = useState(0);
+  const [toast, setToast] = useState<string | null>(null);
+  const [menu, setMenu] = useState<TableMenuTarget | null>(null);
   const filterRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -49,6 +55,14 @@ export function ObjectListGrid() {
     filterRef.current?.select();
     consumeObjectListFilterFocus();
   }, [focusObjectListFilter, consumeObjectListFilterFocus]);
+
+  useEffect(() => {
+    function onDoc() {
+      setMenu(null);
+    }
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, []);
 
   const wantViews = folder === "views";
   const title = wantViews ? "视图" : "表";
@@ -109,7 +123,12 @@ export function ObjectListGrid() {
     <div className="object-list-grid">
       <div className="object-list-toolbar navicat-obj-toolbar">
         <div className="obj-toolbar-left">
-          <button type="button" className="obj-tool-btn" title="刷新" onClick={() => setTick((x) => x + 1)}>
+          <button
+            type="button"
+            className="obj-tool-btn"
+            title="刷新"
+            onClick={() => setTick((x) => x + 1)}
+          >
             ↻
           </button>
           <button
@@ -138,6 +157,7 @@ export function ObjectListGrid() {
           placeholder="搜索 / 在数据库中查找"
         />
       </div>
+      {toast && <p className="pane-placeholder">{toast}</p>}
       {loading && <p className="pane-placeholder">加载中…</p>}
       {error && <p className="pane-error">{error}</p>}
       {!loading && !error && (
@@ -159,9 +179,24 @@ export function ObjectListGrid() {
               {filtered.map((t) => (
                 <tr
                   key={`${t.kind}-${t.name}`}
-                  className={selectedTable === t.name ? "is-selected" : undefined}
+                  className={
+                    selectedTable === t.name ? "is-selected" : undefined
+                  }
                   onClick={() => selectTableMeta(t.name)}
                   onDoubleClick={() => openTable(t.name)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    selectTableMeta(t.name);
+                    setMenu({
+                      x: e.clientX,
+                      y: e.clientY,
+                      conn: connection,
+                      database,
+                      table: t.name,
+                      kind: t.kind,
+                    });
+                  }}
                 >
                   <td>
                     <span className="object-kind">
@@ -188,6 +223,18 @@ export function ObjectListGrid() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {menu && (
+        <TableContextMenu
+          target={menu}
+          onClose={() => setMenu(null)}
+          onRefresh={() => setTick((x) => x + 1)}
+          onMessage={(msg) => {
+            setToast(msg);
+            window.setTimeout(() => setToast(null), 2800);
+          }}
+        />
       )}
     </div>
   );

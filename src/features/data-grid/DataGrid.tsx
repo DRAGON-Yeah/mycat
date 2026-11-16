@@ -42,17 +42,32 @@ type MenuState = {
   colIndex: number;
 } | null;
 
-function cellText(value: unknown): string {
-  if (value === null || value === undefined) return "NULL";
+function cellDisplayText(value: unknown): string {
+  if (value === null || value === undefined) return "";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
 
-function parseCellInput(raw: string): unknown {
-  if (raw === "NULL") return null;
+function cellCopyText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function isNullish(value: unknown): boolean {
+  return value === null || value === undefined;
+}
+
+/** Empty input → SQL NULL when column is nullable (Navicat-like). */
+function parseCellInput(raw: string, nullable: boolean): unknown {
+  if (raw === "") return nullable ? null : "";
   if (raw === "true") return true;
   if (raw === "false") return false;
-  if (raw.trim() !== "" && !Number.isNaN(Number(raw)) && /^-?\d+(\.\d+)?$/.test(raw.trim())) {
+  if (
+    raw.trim() !== "" &&
+    !Number.isNaN(Number(raw)) &&
+    /^-?\d+(\.\d+)?$/.test(raw.trim())
+  ) {
     return Number(raw);
   }
   return raw;
@@ -78,7 +93,7 @@ export function DataGrid({ tab }: Props) {
   const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
   const database = tab.database || selectedDatabase;
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(1000);
+  const [pageSize, setPageSize] = useState(1000);
   const [sortCol, setSortCol] = useState<string | undefined>();
   const [sortDir, setSortDir] = useState<"ASC" | "DESC">("ASC");
   const [filterCol, setFilterCol] = useState("");
@@ -101,6 +116,12 @@ export function DataGrid({ tab }: Props) {
   const [rowHeight, setRowHeight] = useState(24);
   const [zoom, setZoom] = useState(100);
   const [clipboard, setClipboard] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{
+    row: number;
+    col: number;
+  } | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [editSnapshot, setEditSnapshot] = useState<unknown>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const dirty = useMemo(() => {
@@ -209,15 +230,44 @@ export function DataGrid({ tab }: Props) {
     setPage(1);
   }
 
-  function updateCell(rowIndex: number, colIndex: number, raw: string) {
+  function updateCellValue(rowIndex: number, colIndex: number, value: unknown) {
     setRows((prev) =>
       prev.map((r, i) => {
         if (i !== rowIndex || r.deleted) return r;
         const values = [...r.values];
-        values[colIndex] = parseCellInput(raw);
+        values[colIndex] = value;
         return { ...r, values };
       }),
     );
+  }
+
+  function updateCell(rowIndex: number, colIndex: number, raw: string) {
+    const nullable = data?.columns[colIndex]?.nullable ?? true;
+    updateCellValue(rowIndex, colIndex, parseCellInput(raw, nullable));
+  }
+
+  function setCellNull(rowIndex: number, colIndex: number) {
+    updateCellValue(rowIndex, colIndex, null);
+  }
+
+  function beginEdit(rowIndex: number, colIndex: number, cell: unknown) {
+    setSelectedRow(rowIndex);
+    setEditing({ row: rowIndex, col: colIndex });
+    setEditSnapshot(cell);
+    setEditDraft(isNullish(cell) ? "" : cellDisplayText(cell));
+  }
+
+  function commitEdit() {
+    if (!editing) return;
+    updateCell(editing.row, editing.col, editDraft);
+    setEditing(null);
+  }
+
+  function cancelEdit() {
+    if (!editing) return;
+    updateCellValue(editing.row, editing.col, editSnapshot);
+    setEditing(null);
+    setEditDraft("");
   }
 
   function addRow() {
@@ -371,8 +421,12 @@ export function DataGrid({ tab }: Props) {
   function pasteIntoCell() {
     if (!menu || !clipboard) return;
     updateCell(menu.rowIndex, menu.colIndex, clipboard);
+    setEditing(null);
     setMenu(null);
   }
+
+  const totalRecords = data?.total ?? 0;
+  const canPage = !loading && !dirty;
 
   const visibleCount = rows.filter((r) => !r.deleted).length;
   const recordLabel =
@@ -383,56 +437,6 @@ export function DataGrid({ tab }: Props) {
   return (
     <div className="data-grid navicat-grid" ref={rootRef}>
       <div className="dg-toolbar">
-        <button type="button" className="dg-icon-btn" title="添加记录" onClick={addRow} disabled={!data}>
-          <span className="dg-ico plus">+</span>
-        </button>
-        <button
-          type="button"
-          className="dg-icon-btn"
-          title="删除记录"
-          onClick={deleteSelected}
-          disabled={!data || rows.length === 0}
-        >
-          <span className="dg-ico minus">−</span>
-        </button>
-        <span className="dg-sep" />
-        <button
-          type="button"
-          className="dg-icon-btn is-ok"
-          title="应用更改"
-          disabled={!dirty || saving}
-          onClick={() => void commit()}
-        >
-          ✓
-        </button>
-        <button
-          type="button"
-          className="dg-icon-btn is-danger"
-          title="放弃更改"
-          disabled={!dirty || saving}
-          onClick={discard}
-        >
-          ✕
-        </button>
-        <span className="dg-sep" />
-        <button
-          type="button"
-          className="dg-icon-btn"
-          title="刷新"
-          disabled={loading || dirty}
-          onClick={() => void load()}
-        >
-          ↻
-        </button>
-        <button
-          type="button"
-          className={`dg-icon-btn ${showFilter ? "is-active" : ""}`}
-          title="过滤"
-          onClick={() => setShowFilter((v) => !v)}
-        >
-          ⚙︎
-        </button>
-        <span className="dg-sep" />
         <ExportCsvButton connectionId={tab.connectionId} table={tab.table} />
         {data && (
           <ImportCsvButton
@@ -561,63 +565,192 @@ export function DataGrid({ tab }: Props) {
                 }}
               >
                 <td className="row-num-col">{ri + 1}</td>
-                {row.values.map((cell, ci) => (
-                  <td
-                    key={ci}
-                    className={cell === null ? "is-null" : undefined}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setSelectedRow(ri);
-                      setMenu({
-                        x: e.clientX,
-                        y: e.clientY,
-                        rowIndex: ri,
-                        colIndex: ci,
-                      });
-                    }}
-                  >
-                    <input
-                      className="cell-input"
-                      disabled={!!row.deleted}
-                      value={cellText(cell)}
-                      onChange={(e) => updateCell(ri, ci, e.target.value)}
-                      onFocus={() => setSelectedRow(ri)}
-                    />
-                  </td>
-                ))}
+                {row.values.map((cell, ci) => {
+                  const isEditing =
+                    editing?.row === ri && editing?.col === ci;
+                  const nullCell = isNullish(cell);
+                  return (
+                    <td
+                      key={ci}
+                      className={
+                        nullCell && !isEditing ? "is-null" : undefined
+                      }
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setSelectedRow(ri);
+                        setMenu({
+                          x: e.clientX,
+                          y: e.clientY,
+                          rowIndex: ri,
+                          colIndex: ci,
+                        });
+                      }}
+                    >
+                      <input
+                        className={`cell-input ${
+                          nullCell && !isEditing ? "is-null-ph" : ""
+                        }`}
+                        disabled={!!row.deleted}
+                        value={
+                          isEditing
+                            ? editDraft
+                            : nullCell
+                              ? ""
+                              : cellDisplayText(cell)
+                        }
+                        placeholder={
+                          nullCell && !isEditing ? "NULL" : undefined
+                        }
+                        onChange={(e) => {
+                          setEditDraft(e.target.value);
+                          updateCell(ri, ci, e.target.value);
+                        }}
+                        onFocus={() => beginEdit(ri, ci, cell)}
+                        onBlur={() => commitEdit()}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            (e.target as HTMLInputElement).blur();
+                          } else if (e.key === "Escape") {
+                            e.preventDefault();
+                            cancelEdit();
+                          }
+                        }}
+                      />
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      <div className="dg-sql-bar">
-        <code title={sqlPreview}>{sqlPreview}</code>
-        <div className="dg-pager">
+      <div className="dg-footer-bar" aria-label="表数据工具栏">
+        <div className="dg-footer-left">
           <button
             type="button"
-            disabled={page <= 1 || loading || dirty}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="dg-icon-btn"
+            title="添加记录"
+            onClick={addRow}
+            disabled={!data}
           >
-            ‹
+            <span className="dg-ico plus">+</span>
           </button>
-          <span>
-            {page} / {totalPages}
-          </span>
           <button
             type="button"
-            disabled={page >= totalPages || loading || dirty}
-            onClick={() => setPage((p) => p + 1)}
+            className="dg-icon-btn"
+            title="删除记录"
+            onClick={deleteSelected}
+            disabled={!data || rows.length === 0}
           >
-            ›
+            <span className="dg-ico minus">−</span>
+          </button>
+          <span className="dg-sep" />
+          <button
+            type="button"
+            className="dg-icon-btn is-ok"
+            title="应用更改"
+            disabled={!dirty || saving}
+            onClick={() => void commit()}
+          >
+            ✓
+          </button>
+          <button
+            type="button"
+            className="dg-icon-btn is-danger"
+            title="放弃更改"
+            disabled={!dirty || saving}
+            onClick={discard}
+          >
+            ✕
+          </button>
+          <span className="dg-sep" />
+          <button
+            type="button"
+            className="dg-icon-btn"
+            title={dirty ? "请先应用或放弃更改后再刷新" : "刷新"}
+            disabled={!canPage}
+            onClick={() => void load()}
+          >
+            ↻
+          </button>
+          <button
+            type="button"
+            className={`dg-icon-btn ${showFilter ? "is-active" : ""}`}
+            title="过滤"
+            onClick={() => setShowFilter((v) => !v)}
+          >
+            ⌕
           </button>
         </div>
-      </div>
 
-      <div className="dg-status-bar">
-        <span>{selectedRow >= 0 && rows[selectedRow] && !rows[selectedRow]?.deleted ? "已选 1 行" : "未选中"}</span>
-        <span>{recordLabel}</span>
-        <span>{loading ? "刷新中…" : saving ? "提交中…" : "就绪"}</span>
+        <code className="dg-footer-sql" title={sqlPreview}>
+          {sqlPreview}
+        </code>
+
+        <div className="dg-footer-right">
+          <div className="dg-pager">
+            <button
+              type="button"
+              title="首页"
+              disabled={page <= 1 || !canPage}
+              onClick={() => setPage(1)}
+            >
+              «
+            </button>
+            <button
+              type="button"
+              title="上一页"
+              disabled={page <= 1 || !canPage}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              ‹
+            </button>
+            <span className="dg-page-indicator" title={`共 ${totalRecords} 行`}>
+              {page}/{totalPages}
+            </span>
+            <button
+              type="button"
+              title="下一页"
+              disabled={page >= totalPages || !canPage}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              ›
+            </button>
+            <button
+              type="button"
+              title="末页"
+              disabled={page >= totalPages || !canPage}
+              onClick={() => setPage(totalPages)}
+            >
+              »
+            </button>
+          </div>
+          <select
+            className="dg-page-size"
+            value={pageSize}
+            title="每页行数"
+            disabled={!canPage}
+            onChange={(e) => {
+              setPageSize(Number(e.target.value));
+              setPage(1);
+            }}
+          >
+            <option value={100}>100</option>
+            <option value={500}>500</option>
+            <option value={1000}>1000</option>
+          </select>
+          <span className="dg-footer-meta">
+            {selectedRow >= 0 && rows[selectedRow] && !rows[selectedRow]?.deleted
+              ? "已选 1 行"
+              : "未选中"}
+            {" · "}
+            {recordLabel}
+            {" · "}
+            {loading ? "刷新中…" : saving ? "提交中…" : "就绪"}
+          </span>
+        </div>
       </div>
 
       {menu && data && (
@@ -648,11 +781,23 @@ export function DataGrid({ tab }: Props) {
           <button
             type="button"
             onClick={() => {
-              void copyText(cellText(rows[menu.rowIndex]?.values[menu.colIndex]));
+              void copyText(
+                cellCopyText(rows[menu.rowIndex]?.values[menu.colIndex]),
+              );
               setMenu(null);
             }}
           >
             复制
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCellNull(menu.rowIndex, menu.colIndex);
+              setEditing(null);
+              setMenu(null);
+            }}
+          >
+            设为 NULL
           </button>
           <button
             type="button"

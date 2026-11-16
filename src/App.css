@@ -893,22 +893,41 @@ body.is-row-resizing * {
   font-style: italic;
 }
 
-.dg-sql-bar {
+.data-grid .cell-input.is-null-ph::placeholder {
+  color: var(--text-muted);
+  font-style: italic;
+  opacity: 1;
+}
+
+.data-grid tbody tr.is-selected .cell-input.is-null-ph::placeholder {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.dg-footer-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 26px;
-  padding: 0 8px;
+  min-height: 32px;
+  padding: 2px 8px;
   border-top: 1px solid var(--border);
   background: #eef1f5;
   font-size: 11px;
+  flex-shrink: 0;
 }
 
-[data-theme="dark"] .dg-sql-bar {
+[data-theme="dark"] .dg-footer-bar {
   background: var(--bg-muted);
 }
 
-.dg-sql-bar code {
+.dg-footer-left,
+.dg-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.dg-footer-sql {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -916,12 +935,14 @@ body.is-row-resizing * {
   white-space: nowrap;
   color: var(--text-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  padding: 0 6px;
 }
 
 .dg-pager {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   color: var(--text-muted);
 }
 
@@ -930,9 +951,10 @@ body.is-row-resizing * {
   background: var(--bg-elevated);
   color: var(--text);
   width: 22px;
-  height: 20px;
+  height: 22px;
   border-radius: 3px;
   cursor: pointer;
+  line-height: 1;
 }
 
 .dg-pager button:disabled {
@@ -940,16 +962,31 @@ body.is-row-resizing * {
   cursor: default;
 }
 
-.dg-status-bar {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-  min-height: 22px;
-  padding: 0 10px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-muted);
-  color: var(--text-muted);
+.dg-page-indicator {
+  min-width: 36px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.dg-page-size {
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-elevated);
+  color: var(--text);
   font-size: 11px;
+  padding: 0 4px;
+}
+
+.dg-footer-meta {
+  color: var(--text-muted);
+  white-space: nowrap;
+  margin-left: 6px;
+}
+
+.dg-sql-bar,
+.dg-status-bar {
+  display: none;
 }
 
 .dg-context-menu {
