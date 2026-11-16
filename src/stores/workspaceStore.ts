@@ -38,10 +38,22 @@ export type QueryTab = {
   savedQueryId?: string | null;
 };
 
+export type DesignerTab = {
+  id: string;
+  connectionId: string;
+  connectionName: string;
+  connectionEngine: string;
+  database: string;
+  table: string;
+  mode: "create" | "alter";
+  dirty?: boolean;
+};
+
 export type CenterMode =
   | "welcome"
   | "objectList"
   | "table"
+  | "table-designer"
   | "query"
   | "console"
   | "placeholder";
@@ -83,6 +95,8 @@ type WorkspaceState = {
   activeTabId: string | null;
   queryTabs: QueryTab[];
   activeQueryId: string | null;
+  designerTabs: DesignerTab[];
+  activeDesignerId: string | null;
   /** When set, QueryEditor should auto-run this tab once after mount. */
   pendingQueryAutoRunId: string | null;
   openConnection: (conn: ConnectionDto) => void;
@@ -101,6 +115,19 @@ type WorkspaceState = {
   setObjectListFilter: (filter: string, focus?: boolean) => void;
   consumeObjectListFilterFocus: () => void;
   openTable: (table: string) => void;
+  openTableDesigner: (opts: {
+    connection?: ConnectionDto;
+    database?: string;
+    table: string;
+    mode: "create" | "alter";
+  }) => string | null;
+  setActiveDesigner: (id: string) => void;
+  closeDesignerTab: (id: string, opts?: { force?: boolean }) => boolean;
+  markDesignerDirty: (id: string, dirty: boolean) => void;
+  updateDesignerTab: (
+    id: string,
+    patch: Partial<Pick<DesignerTab, "table" | "dirty">>,
+  ) => void;
   openQuery: (opts?: {
     connection?: ConnectionDto;
     database?: string;
@@ -166,6 +193,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   activeTabId: null,
   queryTabs: [],
   activeQueryId: null,
+  designerTabs: [],
+  activeDesignerId: null,
   pendingQueryAutoRunId: null,
   openConnection: (conn) =>
     set({
@@ -196,6 +225,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       activeTabId: null,
       queryTabs: [],
       activeQueryId: null,
+      designerTabs: [],
+      activeDesignerId: null,
       pendingQueryAutoRunId: null,
     }),
   clearDatabaseSelection: () =>
@@ -382,6 +413,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       set({
         activeTabId: id,
         activeQueryId: null,
+        activeDesignerId: null,
         centerMode: "table",
         selectedDatabase: database,
         selectedTable: table,
@@ -406,6 +438,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       ],
       activeTabId: id,
       activeQueryId: null,
+      activeDesignerId: null,
       centerMode: "table",
       selectedDatabase: database,
       selectedTable: table,
@@ -414,6 +447,122 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       placeholderFeature: null,
     });
   },
+  openTableDesigner: (opts) => {
+    const conn = opts.connection ?? get().activeConnection;
+    if (!conn) return null;
+    const database =
+      opts.database?.trim() ||
+      get().selectedDatabase ||
+      conn.database?.trim() ||
+      "";
+    if (!database) return null;
+    const table = opts.table.trim() || "new_table";
+    const id =
+      opts.mode === "create"
+        ? `designer-create-${conn.id}:${database}:${Date.now()}`
+        : `designer:${conn.id}:${database}:${table}`;
+    const existing =
+      opts.mode === "alter"
+        ? get().designerTabs.find((t) => t.id === id)
+        : undefined;
+    if (existing) {
+      set({
+        activeConnectionId: conn.id,
+        activeConnection: conn,
+        selectedDatabase: database,
+        selectedTable: table,
+        selectionKind: "table",
+        activeDesignerId: existing.id,
+        activeTabId: null,
+        activeQueryId: null,
+        centerMode: "table-designer",
+        toolbarAction: "table",
+        placeholderFeature: null,
+      });
+      return existing.id;
+    }
+    const tab: DesignerTab = {
+      id,
+      connectionId: conn.id,
+      connectionName: conn.name,
+      connectionEngine: String(conn.engine),
+      database,
+      table,
+      mode: opts.mode,
+      dirty: false,
+    };
+    set({
+      activeConnectionId: conn.id,
+      activeConnection: conn,
+      selectedDatabase: database,
+      selectedTable: opts.mode === "alter" ? table : null,
+      selectionKind: "table",
+      designerTabs: [...get().designerTabs, tab],
+      activeDesignerId: id,
+      activeTabId: null,
+      activeQueryId: null,
+      centerMode: "table-designer",
+      toolbarAction: "table",
+      placeholderFeature: null,
+    });
+    return id;
+  },
+  setActiveDesigner: (id) => {
+    const tab = get().designerTabs.find((t) => t.id === id);
+    if (!tab) return;
+    set({
+      activeDesignerId: id,
+      activeTabId: null,
+      activeQueryId: null,
+      centerMode: "table-designer",
+      toolbarAction: "table",
+      placeholderFeature: null,
+      selectedDatabase: tab.database,
+      selectedTable: tab.mode === "alter" ? tab.table : null,
+      selectionKind: "table",
+    });
+  },
+  closeDesignerTab: (id, opts) => {
+    const tab = get().designerTabs.find((t) => t.id === id);
+    if (!tab) return false;
+    if (!opts?.force && tab.dirty) {
+      const ok = window.confirm(
+        `设计器「${tab.table}」有未保存更改，确定关闭？`,
+      );
+      if (!ok) return false;
+    }
+    const designerTabs = get().designerTabs.filter((t) => t.id !== id);
+    const closingActive = get().activeDesignerId === id;
+    const activeDesignerId = closingActive
+      ? (designerTabs[designerTabs.length - 1]?.id ?? null)
+      : get().activeDesignerId;
+    set({
+      designerTabs,
+      activeDesignerId,
+      centerMode: activeDesignerId
+        ? "table-designer"
+        : get().activeQueryId
+          ? "query"
+          : get().activeTabId
+            ? "table"
+            : get().selectedDatabase
+              ? "objectList"
+              : "welcome",
+    });
+    return true;
+  },
+  markDesignerDirty: (id, dirty) =>
+    set({
+      designerTabs: get().designerTabs.map((t) =>
+        t.id === id ? { ...t, dirty } : t,
+      ),
+    }),
+  updateDesignerTab: (id, patch) =>
+    set({
+      designerTabs: get().designerTabs.map((t) =>
+        t.id === id ? { ...t, ...patch } : t,
+      ),
+    }),
   openQuery: (opts) => {
     const conn = opts?.connection ?? get().activeConnection;
     if (!conn) return null;
@@ -554,6 +703,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({
       activeTabId: id,
       activeQueryId: null,
+      activeDesignerId: null,
       centerMode: "table",
       toolbarAction: "table",
       placeholderFeature: null,
@@ -569,6 +719,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({
       activeQueryId: id,
       activeTabId: null,
+      activeDesignerId: null,
       centerMode: "query",
       toolbarAction: "query",
       placeholderFeature: null,
@@ -644,12 +795,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const queryTabs = get().queryTabs.filter(
       (t) => !(t.connectionId === connectionId && t.database === database),
     );
+    const designerTabs = get().designerTabs.filter(
+      (t) => !(t.connectionId === connectionId && t.database === database),
+    );
     const activeTabId = tabs.some((t) => t.id === get().activeTabId)
       ? get().activeTabId
       : (tabs[tabs.length - 1]?.id ?? null);
     const activeQueryId = queryTabs.some((t) => t.id === get().activeQueryId)
       ? get().activeQueryId
       : (queryTabs[queryTabs.length - 1]?.id ?? null);
+    const activeDesignerId = designerTabs.some(
+      (t) => t.id === get().activeDesignerId,
+    )
+      ? get().activeDesignerId
+      : (designerTabs[designerTabs.length - 1]?.id ?? null);
 
     const clearingSelection =
       get().activeConnectionId === connectionId &&
@@ -658,8 +817,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({
       tabs,
       queryTabs,
+      designerTabs,
       activeTabId,
       activeQueryId,
+      activeDesignerId,
       ...(clearingSelection
         ? {
             selectedDatabase: null,
@@ -670,18 +831,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             focusObjectListFilter: false,
           }
         : {}),
-      centerMode: activeQueryId
-        ? "query"
-        : activeTabId
-          ? "table"
-          : clearingSelection
-            ? "welcome"
-            : get().selectedDatabase
-              ? "objectList"
-              : "welcome",
+      centerMode: activeDesignerId
+        ? "table-designer"
+        : activeQueryId
+          ? "query"
+          : activeTabId
+            ? "table"
+            : clearingSelection
+              ? "welcome"
+              : get().selectedDatabase
+                ? "objectList"
+                : "welcome",
       toolbarAction: activeQueryId
         ? "query"
-        : activeTabId
+        : activeTabId || activeDesignerId
           ? "table"
           : "connection",
       placeholderFeature: null,
@@ -701,20 +864,30 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const queryTabs = get().queryTabs.filter(
       (t) => t.connectionId !== connectionId,
     );
+    const designerTabs = get().designerTabs.filter(
+      (t) => t.connectionId !== connectionId,
+    );
     const activeTabId = tabs.some((t) => t.id === get().activeTabId)
       ? get().activeTabId
       : (tabs[tabs.length - 1]?.id ?? null);
     const activeQueryId = queryTabs.some((t) => t.id === get().activeQueryId)
       ? get().activeQueryId
       : (queryTabs[queryTabs.length - 1]?.id ?? null);
+    const activeDesignerId = designerTabs.some(
+      (t) => t.id === get().activeDesignerId,
+    )
+      ? get().activeDesignerId
+      : (designerTabs[designerTabs.length - 1]?.id ?? null);
 
     const clearing = get().activeConnectionId === connectionId;
 
     set({
       tabs,
       queryTabs,
+      designerTabs,
       activeTabId,
       activeQueryId,
+      activeDesignerId,
       ...(clearing
         ? {
             activeConnectionId: null,
@@ -727,14 +900,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             focusObjectListFilter: false,
           }
         : {}),
-      centerMode: activeQueryId
-        ? "query"
-        : activeTabId
-          ? "table"
-          : "welcome",
+      centerMode: activeDesignerId
+        ? "table-designer"
+        : activeQueryId
+          ? "query"
+          : activeTabId
+            ? "table"
+            : "welcome",
       toolbarAction: activeQueryId
         ? "query"
-        : activeTabId
+        : activeTabId || activeDesignerId
           ? "table"
           : "connection",
       placeholderFeature: null,

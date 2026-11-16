@@ -26,6 +26,7 @@ export function ObjectListGrid() {
   const database = useWorkspaceStore((s) => s.selectedDatabase);
   const folder = useWorkspaceStore((s) => s.selectedFolder);
   const openTable = useWorkspaceStore((s) => s.openTable);
+  const openTableDesigner = useWorkspaceStore((s) => s.openTableDesigner);
   const selectTableMeta = useWorkspaceStore((s) => s.selectTableMeta);
   const selectedTable = useWorkspaceStore((s) => s.selectedTable);
   const objectListFilter = useWorkspaceStore((s) => s.objectListFilter);
@@ -63,6 +64,58 @@ export function ObjectListGrid() {
     document.addEventListener("click", onDoc);
     return () => document.removeEventListener("click", onDoc);
   }, []);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!connection || !database) return;
+      const meta = e.metaKey || e.ctrlKey;
+      if (!meta) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || target?.isContentEditable) {
+        return;
+      }
+      const key = e.key.toLowerCase();
+      if (key === "r") {
+        e.preventDefault();
+        setTick((x) => x + 1);
+        return;
+      }
+      if (key === "o" && selectedTable) {
+        e.preventDefault();
+        openTable(selectedTable);
+        return;
+      }
+      if (key === "d" && selectedTable && folder !== "views") {
+        e.preventDefault();
+        openTableDesigner({
+          connection,
+          database,
+          table: selectedTable,
+          mode: "alter",
+        });
+        return;
+      }
+      if (key === "n" && folder !== "views") {
+        e.preventDefault();
+        openTableDesigner({
+          connection,
+          database,
+          table: "new_table",
+          mode: "create",
+        });
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    connection,
+    database,
+    selectedTable,
+    folder,
+    openTable,
+    openTableDesigner,
+  ]);
 
   const wantViews = folder === "views";
   const title = wantViews ? "视图" : "表";
@@ -134,11 +187,48 @@ export function ObjectListGrid() {
           <button
             type="button"
             className="obj-tool-btn"
-            title="打开表"
+            title="打开表 (⌘O)"
             disabled={!selectedTable}
             onClick={() => selectedTable && openTable(selectedTable)}
           >
             ⊞ 打开
+          </button>
+          <button
+            type="button"
+            className="obj-tool-btn"
+            title="设计表 (⌘D)"
+            disabled={!selectedTable || wantViews}
+            onClick={() =>
+              selectedTable &&
+              connection &&
+              database &&
+              openTableDesigner({
+                connection,
+                database,
+                table: selectedTable,
+                mode: "alter",
+              })
+            }
+          >
+            设计
+          </button>
+          <button
+            type="button"
+            className="obj-tool-btn"
+            title="新建表 (⌘N)"
+            disabled={wantViews || !connection || !database}
+            onClick={() =>
+              connection &&
+              database &&
+              openTableDesigner({
+                connection,
+                database,
+                table: "new_table",
+                mode: "create",
+              })
+            }
+          >
+            新建
           </button>
           <span className="obj-tool-sep" />
           <span className="object-list-title">

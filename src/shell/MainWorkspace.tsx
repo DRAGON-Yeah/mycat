@@ -3,6 +3,7 @@ import { ObjectListGrid } from "../features/object-list/ObjectListGrid";
 import { PlaceholderPane } from "../features/placeholders/PlaceholderPane";
 import { ConsolePanel } from "../features/query/Console";
 import { QueryEditor } from "../features/query/QueryEditor";
+import { TableDesigner } from "../features/table-designer/TableDesigner";
 import { useWorkspaceStore } from "../stores/workspaceStore";
 
 function queryTabLabel(title: string, database: string, connectionName: string) {
@@ -19,10 +20,14 @@ export function MainWorkspace() {
   const activeTabId = useWorkspaceStore((s) => s.activeTabId);
   const queryTabs = useWorkspaceStore((s) => s.queryTabs);
   const activeQueryId = useWorkspaceStore((s) => s.activeQueryId);
+  const designerTabs = useWorkspaceStore((s) => s.designerTabs);
+  const activeDesignerId = useWorkspaceStore((s) => s.activeDesignerId);
   const setActiveTab = useWorkspaceStore((s) => s.setActiveTab);
   const setActiveQuery = useWorkspaceStore((s) => s.setActiveQuery);
+  const setActiveDesigner = useWorkspaceStore((s) => s.setActiveDesigner);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
   const closeQueryTab = useWorkspaceStore((s) => s.closeQueryTab);
+  const closeDesignerTab = useWorkspaceStore((s) => s.closeDesignerTab);
   const setCenterMode = useWorkspaceStore((s) => s.setCenterMode);
   const openConsole = useWorkspaceStore((s) => s.openConsole);
   const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
@@ -30,9 +35,14 @@ export function MainWorkspace() {
   const openQuery = useWorkspaceStore((s) => s.openQuery);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
+  const activeDesigner =
+    designerTabs.find((t) => t.id === activeDesignerId) ?? null;
   const objectsActive =
     centerMode === "welcome" ||
-    (centerMode === "objectList" && !activeTabId && !activeQueryId);
+    (centerMode === "objectList" &&
+      !activeTabId &&
+      !activeQueryId &&
+      !activeDesignerId);
 
   function onNewQuery() {
     if (!activeConnection) {
@@ -159,6 +169,46 @@ export function MainWorkspace() {
               </div>
             );
           })}
+
+          {designerTabs.map((t) => {
+            const active =
+              centerMode === "table-designer" && t.id === activeDesignerId;
+            const label =
+              t.mode === "create" ? `设计·${t.table}` : `设计 ${t.table}`;
+            return (
+              <div
+                key={t.id}
+                className={`ws-tab ws-tab-doc ${active ? "is-active" : ""}`}
+                role="tab"
+                aria-selected={active}
+                title={label}
+              >
+                <button
+                  type="button"
+                  className="ws-tab-main"
+                  onClick={() => setActiveDesigner(t.id)}
+                >
+                  <span className="ws-tab-label">
+                    {t.dirty ? "• " : ""}
+                    {label}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="ws-tab-close"
+                  title="关闭"
+                  aria-label={`关闭 ${label}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    closeDesignerTab(t.id);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
         </div>
 
         <button
@@ -179,6 +229,8 @@ export function MainWorkspace() {
           <QueryEditor />
         ) : centerMode === "console" ? (
           <ConsolePanel />
+        ) : centerMode === "table-designer" && activeDesigner ? (
+          <TableDesigner tab={activeDesigner} />
         ) : centerMode === "table" && activeTab ? (
           <DataGrid tab={activeTab} />
         ) : centerMode === "objectList" ? (
