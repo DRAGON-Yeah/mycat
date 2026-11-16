@@ -3382,22 +3382,10 @@ tr.is-inserted {
   padding-left: 16px;
 }
 
-/* Saved queries: sit tightly under「查询」, aligned with folder text */
+/* Saved queries: indented one level under「查询」, aligned with table items */
 .tree-query-list {
   padding-left: 4px;
-  margin-left: 12px;
-}
-
-.tree-query-list .tree-row {
-  padding-left: 2px;
-}
-
-.tree-query-list .tree-twist-spacer {
-  display: none;
-}
-
-.tree-query-list .tree-label {
-  padding-left: 2px;
+  margin-left: 6px;
 }
 
 .tree-object-list {
