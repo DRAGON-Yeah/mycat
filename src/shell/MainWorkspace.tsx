@@ -9,7 +9,7 @@ function queryTabLabel(title: string, database: string, connectionName: string) 
   const db = database || "?";
   const conn = connectionName || "?";
   const full = `${title} @${db} (${conn})`;
-  return full.length > 36 ? `${full.slice(0, 34)}…` : full;
+  return full.length > 40 ? `${full.slice(0, 38)}…` : full;
 }
 
 export function MainWorkspace() {
@@ -25,99 +25,162 @@ export function MainWorkspace() {
   const closeQueryTab = useWorkspaceStore((s) => s.closeQueryTab);
   const setCenterMode = useWorkspaceStore((s) => s.setCenterMode);
   const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
+  const activeConnection = useWorkspaceStore((s) => s.activeConnection);
   const openQuery = useWorkspaceStore((s) => s.openQuery);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
+  const objectsActive =
+    centerMode === "welcome" ||
+    (centerMode === "objectList" && !activeTabId && !activeQueryId);
+
+  function onNewQuery() {
+    if (!activeConnection) {
+      window.alert("请先在左侧打开一个连接，再新建查询。");
+      return;
+    }
+    openQuery({
+      connection: activeConnection,
+      database: selectedDatabase || undefined,
+    });
+  }
 
   return (
     <main className="pane workspace main-workspace" aria-label="工作区">
-      <div className="workspace-tabs">
-        <div
-          className={`tab ${centerMode === "welcome" || (centerMode === "objectList" && !activeTab && !activeQueryId) ? "active" : ""}`}
-        >
+      <div className="ws-tabbar" role="tablist" aria-label="工作区页签">
+        <div className="ws-tabbar-scroll">
           <button
             type="button"
+            role="tab"
+            aria-selected={objectsActive}
+            className={`ws-tab ws-tab-system ${objectsActive ? "is-active" : ""}`}
             onClick={() =>
               setCenterMode(selectedDatabase ? "objectList" : "welcome")
             }
           >
-            {selectedDatabase ? "对象" : "欢迎"}
+            <span className="ws-tab-label">
+              {selectedDatabase ? "对象" : "欢迎"}
+            </span>
           </button>
-        </div>
-        <div className={`tab ${centerMode === "console" ? "active" : ""}`}>
-          <button type="button" onClick={() => setCenterMode("console")}>
-            Console
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={centerMode === "console"}
+            className={`ws-tab ws-tab-system ${centerMode === "console" ? "is-active" : ""}`}
+            onClick={() => setCenterMode("console")}
+          >
+            <span className="ws-tab-label">Console</span>
           </button>
+
+          <span className="ws-tabbar-divider" aria-hidden />
+
+          {queryTabs.map((q) => {
+            const active = centerMode === "query" && q.id === activeQueryId;
+            return (
+              <div
+                key={q.id}
+                className={`ws-tab ws-tab-doc ws-tab-query ${active ? "is-active" : ""}`}
+                role="tab"
+                aria-selected={active}
+                title={`${q.title} @${q.database || "?"} (${q.connectionName})`}
+              >
+                <button
+                  type="button"
+                  className="ws-tab-main"
+                  onClick={() => setActiveQuery(q.id)}
+                >
+                  <span className="ws-tab-query-icon" aria-hidden />
+                  <span className="ws-tab-label">
+                    {q.dirty ? "• " : ""}
+                    {queryTabLabel(q.title, q.database, q.connectionName)}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="ws-tab-close"
+                  title="关闭"
+                  aria-label={`关闭 ${q.title}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeQueryTab(q.id);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+
+          {tabs.map((t) => {
+            const active = centerMode === "table" && t.id === activeTabId;
+            return (
+              <div
+                key={t.id}
+                className={`ws-tab ws-tab-doc ${active ? "is-active" : ""}`}
+                role="tab"
+                aria-selected={active}
+                title={t.table}
+              >
+                <button
+                  type="button"
+                  className="ws-tab-main"
+                  onClick={() => setActiveTab(t.id)}
+                >
+                  <span className="ws-tab-table-icon" aria-hidden />
+                  <span className="ws-tab-label">
+                    {t.dirty ? "• " : ""}
+                    {t.table}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="ws-tab-close"
+                  title="关闭"
+                  aria-label={`关闭 ${t.table}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeTab(t.id);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
         </div>
-        {queryTabs.map((q) => (
-          <div
-            key={q.id}
-            className={`tab tab-query ${centerMode === "query" && q.id === activeQueryId ? "active" : ""}`}
-            title={`${q.title} @${q.database || "?"} (${q.connectionName})`}
-          >
-            <button type="button" onClick={() => setActiveQuery(q.id)}>
-              <span className="tab-query-icon" aria-hidden />
-              {q.dirty ? "• " : ""}
-              {queryTabLabel(q.title, q.database, q.connectionName)}
-            </button>
-            <button
-              type="button"
-              className="tab-close"
-              onClick={() => closeQueryTab(q.id)}
-              aria-label="关闭查询"
-            >
-              ×
-            </button>
-          </div>
-        ))}
-        {tabs.map((t) => (
-          <div
-            key={t.id}
-            className={`tab ${centerMode === "table" && t.id === activeTabId ? "active" : ""}`}
-          >
-            <button type="button" onClick={() => setActiveTab(t.id)}>
-              {t.dirty ? "• " : ""}
-              {t.table}
-            </button>
-            <button
-              type="button"
-              className="tab-close"
-              onClick={() => closeTab(t.id)}
-              aria-label="关闭"
-            >
-              ×
-            </button>
-          </div>
-        ))}
+
         <button
           type="button"
-          className="tab-add-query"
+          className="ws-tab-add"
           title="新建查询"
-          onClick={() => openQuery()}
+          aria-label="新建查询"
+          onClick={onNewQuery}
         >
           +
         </button>
       </div>
 
-      {centerMode === "placeholder" && placeholderFeature ? (
-        <PlaceholderPane feature={placeholderFeature} />
-      ) : centerMode === "query" ? (
-        <QueryEditor />
-      ) : centerMode === "console" ? (
-        <ConsolePanel />
-      ) : centerMode === "table" && activeTab ? (
-        <DataGrid tab={activeTab} />
-      ) : centerMode === "objectList" ? (
-        <ObjectListGrid />
-      ) : (
-        <div className="workspace-content">
-          <h1>工作区</h1>
-          <p>
-            在左侧打开连接并选择数据库后，这里会显示表清单。也可使用顶栏「查询」或
-            Console。
-          </p>
-        </div>
-      )}
+      <div className="ws-body">
+        {centerMode === "placeholder" && placeholderFeature ? (
+          <PlaceholderPane feature={placeholderFeature} />
+        ) : centerMode === "query" ? (
+          <QueryEditor />
+        ) : centerMode === "console" ? (
+          <ConsolePanel />
+        ) : centerMode === "table" && activeTab ? (
+          <DataGrid tab={activeTab} />
+        ) : centerMode === "objectList" ? (
+          <ObjectListGrid />
+        ) : (
+          <div className="workspace-content">
+            <h1>工作区</h1>
+            <p>
+              在左侧打开连接并选择数据库后，这里会显示表清单。也可使用顶栏「查询」或
+              Console。
+            </p>
+          </div>
+        )}
+      </div>
     </main>
   );
 }

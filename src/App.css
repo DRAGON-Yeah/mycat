@@ -242,36 +242,187 @@ body,
 }
 
 .workspace-tabs {
-  display: flex;
-  gap: 0;
-  padding: 0 0 0 4px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-  min-height: 30px;
-  align-items: flex-end;
+  display: none;
 }
 
-.tab {
+.ws-tabbar {
   display: flex;
+  align-items: stretch;
+  gap: 0;
+  min-height: 32px;
+  padding: 0 6px 0 4px;
+  background: linear-gradient(180deg, #f4f5f7 0%, #e8eaee 100%);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+[data-theme="dark"] .ws-tabbar {
+  background: linear-gradient(180deg, #2c3038 0%, #252930 100%);
+}
+
+.ws-tabbar-scroll {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-top: 4px;
+  scrollbar-width: thin;
+}
+
+.ws-tabbar-divider {
+  width: 1px;
+  align-self: center;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.ws-tab {
+  display: inline-flex;
   align-items: center;
+  max-width: 280px;
+  height: 28px;
+  margin: 0;
   padding: 0;
-  font-size: 12px;
   border: 1px solid transparent;
   border-bottom: none;
-  border-radius: 3px 3px 0 0;
-  color: var(--text-muted);
+  border-radius: 6px 6px 0 0;
   background: transparent;
-  margin-right: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
+  position: relative;
 }
 
-.tab.active {
+.ws-tab-system {
+  padding: 0 12px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.ws-tab-system:hover,
+.ws-tab-doc:hover {
+  background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+  color: var(--text);
+}
+
+.ws-tab.is-active {
   background: var(--bg-elevated);
   border-color: var(--border);
-  border-bottom-color: var(--bg-elevated);
   color: var(--text);
-  position: relative;
   z-index: 1;
-  margin-bottom: -1px;
+  box-shadow: 0 -1px 0 var(--bg-elevated);
+}
+
+.ws-tab-doc {
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+.ws-tab-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px 0 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ws-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.ws-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+}
+
+.ws-tab-doc:hover .ws-tab-close,
+.ws-tab-doc.is-active .ws-tab-close {
+  opacity: 0.75;
+}
+
+.ws-tab-close:hover {
+  opacity: 1 !important;
+  background: color-mix(in srgb, #ef4444 18%, transparent);
+  color: #b91c1c;
+}
+
+.ws-tab-query-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  background: linear-gradient(
+    135deg,
+    #f97316 0%,
+    #fb923c 48%,
+    #3b82f6 48%,
+    #2563eb 100%
+  );
+}
+
+.ws-tab-table-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #60a5fa, #2563eb);
+}
+
+.ws-tab-add {
+  align-self: center;
+  width: 24px;
+  height: 24px;
+  margin-left: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ws-tab-add:hover {
+  border-color: #3b82f6;
+  color: #2563eb;
+}
+
+.ws-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
 }
 
 .workspace-content {
@@ -450,6 +601,7 @@ body,
   flex: 0 0 auto;
 }
 
+/* legacy .tab kept for DataGrid internal chrome if any */
 .tab {
   display: inline-flex;
   align-items: center;
@@ -1315,34 +1467,6 @@ tr.is-inserted {
   min-height: 0;
 }
 
-.tab-query-icon {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  margin-right: 6px;
-  vertical-align: -1px;
-  background: linear-gradient(135deg, #f97316 0%, #fb923c 45%, #3b82f6 45%, #2563eb 100%);
-  border-radius: 2px;
-}
-
-.tab-add-query {
-  margin-left: 4px;
-  align-self: center;
-  width: 22px;
-  height: 22px;
-  border: 1px dashed var(--border);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-}
-
-.tab-add-query:hover {
-  color: var(--text);
-  border-color: var(--text-muted);
-}
 
 .console-output {
   flex: 1;
@@ -1955,6 +2079,8 @@ tr.is-inserted {
 .main-workspace {
   border-right: 1px solid var(--border);
   background: var(--bg-elevated);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .navicat-shell .color-dot {
