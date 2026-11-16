@@ -393,7 +393,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
   closeQueryTab: (id) => {
     const tab = get().queryTabs.find((t) => t.id === id);
-    if (tab?.dirty && tab.sql.trim()) {
+    if (!tab) return false;
+    // Only prompt when named/saved query has edits — avoid stuck confirms in Tauri.
+    if (tab.dirty && tab.sql.trim() && tab.title !== "无标题") {
       const ok = window.confirm(`「${tab.title}」有未保存更改，确定关闭？`);
       if (!ok) return false;
     }

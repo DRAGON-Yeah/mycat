@@ -100,14 +100,15 @@ export function MainWorkspace() {
                   className="ws-tab-close"
                   title="关闭"
                   aria-label={`关闭 ${q.title}`}
-                  onMouseDown={(e) => {
+                  onPointerDown={(e) => {
+                    // Close on pointerdown so the action isn't lost if click is swallowed.
                     e.preventDefault();
                     e.stopPropagation();
+                    closeQueryTab(q.id);
                   }}
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    closeQueryTab(q.id);
                   }}
                 >
                   ×
