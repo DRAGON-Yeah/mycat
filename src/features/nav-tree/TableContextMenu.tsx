@@ -96,6 +96,9 @@ export function TableContextMenu({
     rows: unknown[][];
   } | null>(null);
   const [chartOpen, setChartOpen] = useState(false);
+  const [dangerConfirm, setDangerConfirm] = useState<
+    null | "delete" | "empty" | "truncate"
+  >(null);
 
   const openTable = useWorkspaceStore((s) => s.openTable);
   const openConn = useWorkspaceStore((s) => s.openConnection);
@@ -389,18 +392,7 @@ export function TableContextMenu({
           type="button"
           className="is-danger"
           disabled={busy}
-          onClick={() => {
-            const label = isView ? "视图" : "表";
-            if (!window.confirm(`删除${label}「${table}」？此操作不可恢复。`)) {
-              return;
-            }
-            void run(async () => {
-              await dropTableOrView({ conn, database, table, isView });
-              closeRelatedTabs(table);
-              onMessage(`已删除${label} ${table}`);
-              onRefresh();
-            });
-          }}
+          onClick={() => setDangerConfirm("delete")}
         >
           删除{isView ? "视图" : "表"}
         </button>
@@ -409,38 +401,14 @@ export function TableContextMenu({
             <button
               type="button"
               disabled={busy}
-              onClick={() => {
-                if (!window.confirm(`清空表「${table}」的所有数据？`)) return;
-                void run(async () => {
-                  await emptyTable({ conn, database, table });
-                  emitTableDataChanged({
-                    connectionId: conn.id,
-                    database,
-                    table,
-                  });
-                  onMessage(`已清空表 ${table}`);
-                  onRefresh();
-                });
-              }}
+              onClick={() => setDangerConfirm("empty")}
             >
               清空表
             </button>
             <button
               type="button"
               disabled={busy}
-              onClick={() => {
-                if (!window.confirm(`截断表「${table}」？`)) return;
-                void run(async () => {
-                  await truncateTable({ conn, database, table });
-                  emitTableDataChanged({
-                    connectionId: conn.id,
-                    database,
-                    table,
-                  });
-                  onMessage(`已截断表 ${table}`);
-                  onRefresh();
-                });
-              }}
+              onClick={() => setDangerConfirm("truncate")}
             >
               截断表
             </button>
@@ -889,6 +857,123 @@ export function TableContextMenu({
           <span className="menu-shortcut">⌘R</span>
         </button>
       </div>
+
+      {dangerConfirm && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !busy) {
+              setDangerConfirm(null);
+            }
+          }}
+        >
+          <div
+            className="modal danger-confirm-modal"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h2>
+              {dangerConfirm === "delete"
+                ? `删除${isView ? "视图" : "表"}`
+                : dangerConfirm === "empty"
+                  ? "清空表"
+                  : "截断表"}
+            </h2>
+            <p className="danger-confirm-text">
+              {dangerConfirm === "delete" ? (
+                <>
+                  确定删除{isView ? "视图" : "表"}{" "}
+                  <strong>
+                    {database}.{table}
+                  </strong>{" "}
+                  吗？此操作不可恢复，相关打开的页签也会关闭。
+                </>
+              ) : dangerConfirm === "empty" ? (
+                <>
+                  确定清空表{" "}
+                  <strong>
+                    {database}.{table}
+                  </strong>{" "}
+                  的全部数据吗？表结构会保留，自增计数通常不变。
+                </>
+              ) : (
+                <>
+                  确定截断表{" "}
+                  <strong>
+                    {database}.{table}
+                  </strong>{" "}
+                  吗？全部数据将被删除，自增计数通常会重置。
+                </>
+              )}
+            </p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setDangerConfirm(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="is-danger"
+                disabled={busy}
+                autoFocus
+                onClick={() => {
+                  const op = dangerConfirm;
+                  setDangerConfirm(null);
+                  if (op === "delete") {
+                    const label = isView ? "视图" : "表";
+                    void run(async () => {
+                      await dropTableOrView({
+                        conn,
+                        database,
+                        table,
+                        isView,
+                      });
+                      closeRelatedTabs(table);
+                      onMessage(`已删除${label} ${table}`);
+                      onRefresh();
+                    });
+                    return;
+                  }
+                  if (op === "empty") {
+                    void run(async () => {
+                      await emptyTable({ conn, database, table });
+                      emitTableDataChanged({
+                        connectionId: conn.id,
+                        database,
+                        table,
+                      });
+                      onMessage(`已清空表 ${table}`);
+                      onRefresh();
+                    });
+                    return;
+                  }
+                  void run(async () => {
+                    await truncateTable({ conn, database, table });
+                    emitTableDataChanged({
+                      connectionId: conn.id,
+                      database,
+                      table,
+                    });
+                    onMessage(`已截断表 ${table}`);
+                    onRefresh();
+                  });
+                }}
+              >
+                {busy
+                  ? "处理中…"
+                  : dangerConfirm === "delete"
+                    ? "删除"
+                    : dangerConfirm === "empty"
+                      ? "清空"
+                      : "截断"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {renameOpen && (
         <div className="modal-backdrop" role="presentation">

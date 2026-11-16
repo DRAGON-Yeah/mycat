@@ -3043,11 +3043,31 @@ tr.is-inserted {
   background: var(--row-hover);
 }
 
+.danger-confirm-modal {
+  max-width: 420px;
+}
+.danger-confirm-text {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text, #222);
+}
+.danger-confirm-text strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
 .modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 8px;
+}
+.modal-actions button.is-danger {
+  background: #c62828;
+  color: #fff;
+  border-color: #c62828;
+}
+.modal-actions button.is-danger:hover:not(:disabled) {
+  background: #b71c1c;
 }
 
 .modal-actions button {

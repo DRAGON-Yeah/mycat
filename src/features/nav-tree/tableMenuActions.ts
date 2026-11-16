@@ -360,7 +360,47 @@ export async function emptyTable(args: {
 }) {
   const { conn, database, table } = args;
   await openConnection(conn.id);
-  const qt = quoteTable(String(conn.engine), database, table);
+  const engine = String(conn.engine);
+  const e = engineKey(engine);
+  const qt = quoteTable(engine, database, table);
+
+  // MySQL: plain DELETE without WHERE is blocked by sql_safe_updates;
+  // FK children also block parent deletes — temporarily relax both.
+  if (e === "mysql") {
+    try {
+      await executeSql(conn.id, "SET FOREIGN_KEY_CHECKS=0", database);
+      await executeSql(conn.id, "SET sql_safe_updates=0", database);
+      await executeSql(conn.id, `DELETE FROM ${qt} WHERE 1=1`, database);
+    } finally {
+      try {
+        await executeSql(conn.id, "SET sql_safe_updates=1", database);
+      } catch {
+        /* ignore */
+      }
+      try {
+        await executeSql(conn.id, "SET FOREIGN_KEY_CHECKS=1", database);
+      } catch {
+        /* ignore */
+      }
+    }
+    return;
+  }
+
+  if (e === "sqlite") {
+    await executeSql(conn.id, "PRAGMA foreign_keys=OFF", database);
+    try {
+      await executeSql(conn.id, `DELETE FROM ${qt}`, database);
+    } finally {
+      try {
+        await executeSql(conn.id, "PRAGMA foreign_keys=ON", database);
+      } catch {
+        /* ignore */
+      }
+    }
+    return;
+  }
+
+  // Postgres: DELETE keeps identity sequence (unlike TRUNCATE)
   await executeSql(conn.id, `DELETE FROM ${qt}`, database);
 }
 
@@ -383,6 +423,17 @@ export async function truncateTable(args: {
       );
     } catch {
       // no autoincrement sequence
+    }
+  } else if (e === "mysql") {
+    try {
+      await executeSql(conn.id, "SET FOREIGN_KEY_CHECKS=0", database);
+      await executeSql(conn.id, `TRUNCATE TABLE ${qt}`, database);
+    } finally {
+      try {
+        await executeSql(conn.id, "SET FOREIGN_KEY_CHECKS=1", database);
+      } catch {
+        /* ignore */
+      }
     }
   } else {
     await executeSql(conn.id, `TRUNCATE TABLE ${qt}`, database);
