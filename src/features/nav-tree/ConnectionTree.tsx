@@ -40,6 +40,12 @@ import {
   DatabaseContextMenu,
   type DbMenuTarget,
 } from "./DatabaseContextMenu";
+import {
+  TableContextMenu,
+  type TableMenuTarget,
+} from "./TableContextMenu";
+import { TreeObjectFolder } from "./TreeObjectFolder";
+import { emitTableDataChanged } from "../../lib/tableEvents";
 import { CloseWorkspaceDialog } from "./CloseWorkspaceDialog";
 import { EditDatabaseDialog } from "./EditDatabaseDialog";
 import { NewDatabaseDialog } from "./NewDatabaseDialog";
@@ -142,14 +148,19 @@ export function ConnectionTree() {
     null,
   );
   const [renameBusy, setRenameBusy] = useState(false);
+  const [tableMenu, setTableMenu] = useState<TableMenuTarget | null>(null);
 
   const activeConnectionId = useWorkspaceStore((s) => s.activeConnectionId);
   const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
   const selectedFolder = useWorkspaceStore((s) => s.selectedFolder);
+  const selectedTable = useWorkspaceStore((s) => s.selectedTable);
   const openConn = useWorkspaceStore((s) => s.openConnection);
   const clearConnection = useWorkspaceStore((s) => s.clearConnection);
   const selectDatabase = useWorkspaceStore((s) => s.selectDatabase);
   const selectObjectFolder = useWorkspaceStore((s) => s.selectObjectFolder);
+  const selectTableMeta = useWorkspaceStore((s) => s.selectTableMeta);
+  const openTable = useWorkspaceStore((s) => s.openTable);
+  const openTableDesigner = useWorkspaceStore((s) => s.openTableDesigner);
   const openQuery = useWorkspaceStore((s) => s.openQuery);
   const activeConnection = useWorkspaceStore((s) => s.activeConnection);
   const activeQueryId = useWorkspaceStore((s) => s.activeQueryId);
@@ -189,11 +200,14 @@ export function ConnectionTree() {
   );
 
   useEffect(() => {
-    function onDocClick() {
+    function onDocClick(e: MouseEvent) {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.(".dg-context-menu, .modal, .modal-backdrop")) return;
       setDbMenu(null);
       setConnMenu(null);
       setSavedQueryMenu(null);
       setQueriesFolderMenu(null);
+      setTableMenu(null);
     }
     document.addEventListener("click", onDocClick);
     return () => document.removeEventListener("click", onDocClick);
@@ -869,6 +883,74 @@ export function ConnectionTree() {
                         {dbOpen && (
                           <ul className="tree-children">
                             {FOLDERS.map((folder) => {
+                              if (
+                                folder.id === "tables" ||
+                                folder.id === "views"
+                              ) {
+                                return (
+                                  <TreeObjectFolder
+                                    key={folder.id}
+                                    conn={n.conn}
+                                    database={db}
+                                    folder={folder.id}
+                                    folderActive={
+                                      dbActive && selectedFolder === folder.id
+                                    }
+                                    selectedTable={
+                                      dbActive ? selectedTable : null
+                                    }
+                                    onSelectFolder={() => {
+                                      openConn(n.conn);
+                                      selectObjectFolder(db, folder.id);
+                                    }}
+                                    onOpenTable={(table, kind) => {
+                                      openConn(n.conn);
+                                      selectObjectFolder(
+                                        db,
+                                        kind === "view" ? "views" : "tables",
+                                      );
+                                      selectTableMeta(table);
+                                      openTable(table);
+                                    }}
+                                    onDesignTable={(table) => {
+                                      openConn(n.conn);
+                                      openTableDesigner({
+                                        connection: n.conn,
+                                        database: db,
+                                        table,
+                                        mode: "alter",
+                                      });
+                                    }}
+                                    onTableContextMenu={({
+                                      x,
+                                      y,
+                                      table,
+                                      kind,
+                                    }) => {
+                                      setDbMenu(null);
+                                      setConnMenu(null);
+                                      setSavedQueryMenu(null);
+                                      setQueriesFolderMenu(null);
+                                      setTableMenu({
+                                        x,
+                                        y,
+                                        conn: n.conn,
+                                        database: db,
+                                        table,
+                                        kind,
+                                      });
+                                    }}
+                                    onMessage={(msg) => {
+                                      setToast(msg);
+                                      window.setTimeout(
+                                        () => setToast(null),
+                                        2500,
+                                      );
+                                    }}
+                                  />
+                                );
+                              }
+
                               const queriesOpen =
                                 folder.id === "queries" &&
                                 !!n.openQueryFolders[db];
@@ -885,6 +967,7 @@ export function ConnectionTree() {
                                             setDbMenu(null);
                                             setConnMenu(null);
                                             setSavedQueryMenu(null);
+                                            setTableMenu(null);
                                             setQueriesFolderMenu({
                                               x: e.clientX,
                                               y: e.clientY,
@@ -996,6 +1079,7 @@ export function ConnectionTree() {
                                                 setDbMenu(null);
                                                 setConnMenu(null);
                                                 setQueriesFolderMenu(null);
+                                                setTableMenu(null);
                                                 setSavedQueryMenu({
                                                   x: e.clientX,
                                                   y: e.clientY,
@@ -1124,6 +1208,24 @@ export function ConnectionTree() {
             finalizeCloseDatabase(connId, database)
           }
           onAskNewDatabase={(c) => setNewDbFor(c)}
+          onMessage={(msg) => {
+            setToast(msg);
+            window.setTimeout(() => setToast(null), 2500);
+          }}
+        />
+      )}
+
+      {tableMenu && (
+        <TableContextMenu
+          target={tableMenu}
+          onClose={() => setTableMenu(null)}
+          onRefresh={() => {
+            emitTableDataChanged({
+              connectionId: tableMenu.conn.id,
+              database: tableMenu.database,
+              table: tableMenu.table,
+            });
+          }}
           onMessage={(msg) => {
             setToast(msg);
             window.setTimeout(() => setToast(null), 2500);

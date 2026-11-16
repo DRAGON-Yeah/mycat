@@ -3400,6 +3400,40 @@ tr.is-inserted {
   padding-left: 2px;
 }
 
+.tree-object-list {
+  padding-left: 4px;
+  margin-left: 12px;
+}
+
+.tree-object-list .tree-label,
+.tree-object-meta .tree-label {
+  font-size: 12px;
+}
+
+.tree-object-meta {
+  padding-left: 4px;
+  margin-left: 12px;
+}
+
+.tree-object-leaf {
+  padding-left: 4px;
+  margin-left: 12px;
+}
+
+.tree-meta-leaf {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 2px 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: default;
+}
+
+.tree-meta-leaf .tree-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 .tree-row {
   display: flex;
   align-items: center;
