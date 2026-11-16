@@ -10,13 +10,45 @@ export type TableTab = {
   dirty?: boolean;
 };
 
+export type CenterMode =
+  | "welcome"
+  | "objectList"
+  | "table"
+  | "query"
+  | "console"
+  | "placeholder";
+
+export type ToolbarAction =
+  | "connection"
+  | "user"
+  | "table"
+  | "view"
+  | "function"
+  | "query"
+  | "backup"
+  | "automation"
+  | "model"
+  | "bi";
+
+export type SelectionKind = "none" | "connection" | "database" | "table";
+
 type WorkspaceState = {
   activeConnectionId: string | null;
   activeConnection: ConnectionDto | null;
+  selectedDatabase: string | null;
+  selectedTable: string | null;
+  selectionKind: SelectionKind;
+  centerMode: CenterMode;
+  toolbarAction: ToolbarAction;
+  placeholderFeature: string | null;
   tabs: TableTab[];
   activeTabId: string | null;
   openConnection: (conn: ConnectionDto) => void;
   clearConnection: () => void;
+  selectDatabase: (database: string) => void;
+  selectTableMeta: (table: string | null) => void;
+  setCenterMode: (mode: CenterMode) => void;
+  setToolbarAction: (action: ToolbarAction, placeholder?: string | null) => void;
   openTable: (table: string) => void;
   closeTab: (id: string) => boolean;
   setActiveTab: (id: string) => void;
@@ -26,27 +58,112 @@ type WorkspaceState = {
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   activeConnectionId: null,
   activeConnection: null,
+  selectedDatabase: null,
+  selectedTable: null,
+  selectionKind: "none",
+  centerMode: "welcome",
+  toolbarAction: "connection",
+  placeholderFeature: null,
   tabs: [],
   activeTabId: null,
   openConnection: (conn) =>
     set({
       activeConnectionId: conn.id,
       activeConnection: conn,
+      selectedDatabase: conn.database?.trim() || null,
+      selectedTable: null,
+      selectionKind: "connection",
+      centerMode: conn.database?.trim() ? "objectList" : "welcome",
+      toolbarAction: "table",
+      placeholderFeature: null,
     }),
   clearConnection: () =>
     set({
       activeConnectionId: null,
       activeConnection: null,
+      selectedDatabase: null,
+      selectedTable: null,
+      selectionKind: "none",
+      centerMode: "welcome",
+      toolbarAction: "connection",
+      placeholderFeature: null,
       tabs: [],
       activeTabId: null,
     }),
+  selectDatabase: (database) =>
+    set({
+      selectedDatabase: database,
+      selectedTable: null,
+      selectionKind: "database",
+      centerMode: "objectList",
+      toolbarAction: "table",
+      placeholderFeature: null,
+      activeTabId: null,
+    }),
+  selectTableMeta: (table) =>
+    set({
+      selectedTable: table,
+      selectionKind: table ? "table" : get().selectedDatabase ? "database" : "connection",
+    }),
+  setCenterMode: (mode) => set({ centerMode: mode, placeholderFeature: null }),
+  setToolbarAction: (action, placeholder = null) => {
+    if (placeholder) {
+      set({
+        toolbarAction: action,
+        centerMode: "placeholder",
+        placeholderFeature: placeholder,
+        activeTabId: null,
+      });
+      return;
+    }
+    if (action === "query") {
+      set({
+        toolbarAction: action,
+        centerMode: "query",
+        placeholderFeature: null,
+        activeTabId: null,
+      });
+      return;
+    }
+    if (action === "table") {
+      set({
+        toolbarAction: action,
+        centerMode: get().selectedDatabase ? "objectList" : "welcome",
+        placeholderFeature: null,
+        activeTabId: null,
+      });
+      return;
+    }
+    if (action === "connection") {
+      set({
+        toolbarAction: action,
+        centerMode: "welcome",
+        placeholderFeature: null,
+        activeTabId: null,
+      });
+      return;
+    }
+    set({
+      toolbarAction: action,
+      centerMode: "placeholder",
+      placeholderFeature: action,
+      activeTabId: null,
+    });
+  },
   openTable: (table) => {
     const { activeConnectionId, activeConnection, tabs } = get();
     if (!activeConnectionId || !activeConnection) return;
     const id = `${activeConnectionId}:${table}`;
     const exists = tabs.find((t) => t.id === id);
     if (exists) {
-      set({ activeTabId: id });
+      set({
+        activeTabId: id,
+        centerMode: "table",
+        selectedTable: table,
+        selectionKind: "table",
+        toolbarAction: "table",
+        placeholderFeature: null,
+      });
       return;
     }
     set({
@@ -62,6 +179,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         },
       ],
       activeTabId: id,
+      centerMode: "table",
+      selectedTable: table,
+      selectionKind: "table",
+      toolbarAction: "table",
+      placeholderFeature: null,
     });
   },
   closeTab: (id) => {
@@ -71,12 +193,30 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (!ok) return false;
     }
     const tabs = get().tabs.filter((t) => t.id !== id);
-    const activeTabId =
-      get().activeTabId === id ? (tabs[tabs.length - 1]?.id ?? null) : get().activeTabId;
-    set({ tabs, activeTabId });
+    const closingActive = get().activeTabId === id;
+    const activeTabId = closingActive
+      ? (tabs[tabs.length - 1]?.id ?? null)
+      : get().activeTabId;
+    set({
+      tabs,
+      activeTabId,
+      centerMode: activeTabId
+        ? "table"
+        : get().selectedDatabase
+          ? "objectList"
+          : "welcome",
+    });
     return true;
   },
-  setActiveTab: (id) => set({ activeTabId: id }),
+  setActiveTab: (id) =>
+    set({
+      activeTabId: id,
+      centerMode: "table",
+      toolbarAction: "table",
+      placeholderFeature: null,
+      selectedTable: get().tabs.find((t) => t.id === id)?.table ?? null,
+      selectionKind: "table",
+    }),
   markTabDirty: (id, dirty) =>
     set({
       tabs: get().tabs.map((t) => (t.id === id ? { ...t, dirty } : t)),
