@@ -90,6 +90,11 @@ type WorkspaceState = {
   selectObjectFolder: (database: string, folder: ObjectFolder) => void;
   selectTableMeta: (table: string | null) => void;
   setCenterMode: (mode: CenterMode) => void;
+  /** Activate Console for a connection (optional database context). */
+  openConsole: (opts?: {
+    connection?: ConnectionDto;
+    database?: string | null;
+  }) => void;
   setToolbarAction: (action: ToolbarAction, placeholder?: string | null) => void;
   setObjectListFilter: (filter: string, focus?: boolean) => void;
   consumeObjectListFilterFocus: () => void;
@@ -285,6 +290,27 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             : "connection",
     }),
   setCenterMode: (mode) => set({ centerMode: mode, placeholderFeature: null }),
+  openConsole: (opts) => {
+    const conn = opts?.connection ?? get().activeConnection;
+    if (!conn) {
+      set({ centerMode: "console", placeholderFeature: null });
+      return;
+    }
+    const database =
+      opts && "database" in opts
+        ? opts.database?.trim() || null
+        : get().selectedDatabase || conn.database?.trim() || null;
+    set({
+      activeConnectionId: conn.id,
+      activeConnection: conn,
+      selectedDatabase: database,
+      selectedTable: null,
+      selectedFolder: database ? get().selectedFolder : null,
+      selectionKind: database ? "database" : "connection",
+      centerMode: "console",
+      placeholderFeature: null,
+    });
+  },
   setObjectListFilter: (filter, focus = false) =>
     set({
       objectListFilter: filter,

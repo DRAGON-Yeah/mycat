@@ -61,7 +61,7 @@ export function ConnectionContextMenu({
 
   const openConn = useWorkspaceStore((s) => s.openConnection);
   const openQuery = useWorkspaceStore((s) => s.openQuery);
-  const setCenterMode = useWorkspaceStore((s) => s.setCenterMode);
+  const openConsole = useWorkspaceStore((s) => s.openConsole);
 
   useEffect(() => {
     void listConnProfiles(conn.id).then(setProfiles).catch(() => setProfiles([]));
@@ -275,8 +275,10 @@ export function ConnectionContextMenu({
         type="button"
         disabled={busy}
         onClick={() => {
-          openConn(conn);
-          setCenterMode("console");
+          openConsole({
+            connection: conn,
+            database: conn.database?.trim() || null,
+          });
           onClose();
         }}
       >

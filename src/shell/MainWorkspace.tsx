@@ -24,6 +24,7 @@ export function MainWorkspace() {
   const closeTab = useWorkspaceStore((s) => s.closeTab);
   const closeQueryTab = useWorkspaceStore((s) => s.closeQueryTab);
   const setCenterMode = useWorkspaceStore((s) => s.setCenterMode);
+  const openConsole = useWorkspaceStore((s) => s.openConsole);
   const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
   const activeConnection = useWorkspaceStore((s) => s.activeConnection);
   const openQuery = useWorkspaceStore((s) => s.openQuery);
@@ -67,7 +68,7 @@ export function MainWorkspace() {
             role="tab"
             aria-selected={centerMode === "console"}
             className={`ws-tab ws-tab-system ${centerMode === "console" ? "is-active" : ""}`}
-            onClick={() => setCenterMode("console")}
+            onClick={() => openConsole()}
           >
             <span className="ws-tab-label">Console</span>
           </button>

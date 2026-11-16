@@ -28,6 +28,7 @@ export function TopToolbar() {
   const centerMode = useWorkspaceStore((s) => s.centerMode);
   const setToolbarAction = useWorkspaceStore((s) => s.setToolbarAction);
   const setCenterMode = useWorkspaceStore((s) => s.setCenterMode);
+  const openConsole = useWorkspaceStore((s) => s.openConsole);
 
   return (
     <header className="top-toolbar" aria-label="主工具栏">
@@ -63,7 +64,7 @@ export function TopToolbar() {
         <button
           type="button"
           className={`toolbar-item ${centerMode === "console" ? "is-active" : ""}`}
-          onClick={() => setCenterMode("console")}
+          onClick={() => openConsole()}
         >
           <ToolbarIcon id="console" />
           <span className="toolbar-label">Console</span>

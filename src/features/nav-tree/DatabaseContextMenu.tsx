@@ -45,12 +45,12 @@ export function DatabaseContextMenu({
   const [dumpOpen, setDumpOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const sqlFileRef = useRef<HTMLInputElement>(null);
-  const setCenterMode = useWorkspaceStore((s) => s.setCenterMode);
   const openConn = useWorkspaceStore((s) => s.openConnection);
   const selectDatabase = useWorkspaceStore((s) => s.selectDatabase);
   const selectObjectFolder = useWorkspaceStore((s) => s.selectObjectFolder);
   const setObjectListFilter = useWorkspaceStore((s) => s.setObjectListFilter);
   const openQuery = useWorkspaceStore((s) => s.openQuery);
+  const openConsole = useWorkspaceStore((s) => s.openConsole);
   const setToolbarAction = useWorkspaceStore((s) => s.setToolbarAction);
 
   const { conn, database } = target;
@@ -282,12 +282,11 @@ export function DatabaseContextMenu({
         type="button"
         disabled={busy}
         onClick={() => {
-          ensureContext();
-          setCenterMode("console");
+          openConsole({ connection: conn, database });
           onClose();
         }}
       >
-        命令列界面
+        命令行界面
       </button>
       <button
         type="button"
