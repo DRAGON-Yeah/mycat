@@ -24,6 +24,11 @@ import {
   type ObjectFolder,
 } from "../../stores/workspaceStore";
 import {
+  deleteSavedQuery,
+  listSavedQueries,
+  type SavedQueryDto,
+} from "../query/savedQueriesApi";
+import {
   DatabaseContextMenu,
   type DbMenuTarget,
 } from "./DatabaseContextMenu";
@@ -45,6 +50,10 @@ type ConnNode = {
   error: string | null;
   databases: string[];
   openDbs: Record<string, boolean>;
+  /** `${db}` → whether queries folder is expanded */
+  openQueryFolders: Record<string, boolean>;
+  /** `${db}` → saved queries */
+  savedQueries: Record<string, SavedQueryDto[]>;
 };
 
 const FOLDERS: { id: ObjectFolder; label: string; icon: ReactNode }[] = [
@@ -78,6 +87,10 @@ export function ConnectionTree() {
   );
   const openQuery = useWorkspaceStore((s) => s.openQuery);
   const activeConnection = useWorkspaceStore((s) => s.activeConnection);
+  const activeQueryId = useWorkspaceStore((s) => s.activeQueryId);
+  const queryTabs = useWorkspaceStore((s) => s.queryTabs);
+  const activeSavedQueryId =
+    queryTabs.find((t) => t.id === activeQueryId)?.savedQueryId ?? null;
 
   useEffect(() => {
     function onDocClick() {
@@ -140,6 +153,8 @@ export function ConnectionTree() {
                 error: null,
                 databases: [],
                 openDbs: {},
+                openQueryFolders: {},
+                savedQueries: {},
               };
         });
       });
@@ -229,6 +244,38 @@ export function ConnectionTree() {
       ),
     );
   }
+
+  async function loadSavedQueries(connId: string, database: string) {
+    try {
+      const items = await listSavedQueries(connId, database);
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.conn.id === connId
+            ? {
+                ...n,
+                savedQueries: { ...n.savedQueries, [database]: items },
+                openQueryFolders: { ...n.openQueryFolders, [database]: true },
+              }
+            : n,
+        ),
+      );
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : String(err));
+      window.setTimeout(() => setToast(null), 2500);
+    }
+  }
+
+  useEffect(() => {
+    function onSaved() {
+      const connId = activeConnectionId;
+      const db = selectedDatabase;
+      if (!connId || !db) return;
+      void loadSavedQueries(connId, db);
+    }
+    window.addEventListener("saved-queries-changed", onSaved);
+    return () => window.removeEventListener("saved-queries-changed", onSaved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeConnectionId, selectedDatabase]);
 
   function closeDatabase(connId: string, database: string) {
     setNodes((prev) =>
@@ -458,25 +505,156 @@ export function ConnectionTree() {
                         </div>
                         {dbOpen && (
                           <ul className="tree-children">
-                            {FOLDERS.map((folder) => (
-                              <li key={folder.id}>
-                                <button
-                                  type="button"
-                                  className={`tree-row tree-folder ${
-                                    dbActive && selectedFolder === folder.id
-                                      ? "is-active"
-                                      : ""
-                                  }`}
-                                  onClick={() => {
-                                    openConn(n.conn);
-                                    selectObjectFolder(db, folder.id);
-                                  }}
-                                >
-                                  {folder.icon}
-                                  <span className="tree-text">{folder.label}</span>
-                                </button>
-                              </li>
-                            ))}
+                            {FOLDERS.map((folder) => {
+                              const queriesOpen =
+                                folder.id === "queries" &&
+                                !!n.openQueryFolders[db];
+                              const saved = n.savedQueries[db] ?? [];
+                              return (
+                                <li key={folder.id}>
+                                  <div className="tree-row tree-db">
+                                    {folder.id === "queries" ? (
+                                      <button
+                                        type="button"
+                                        className={`tree-twist ${queriesOpen ? "is-expanded" : ""}`}
+                                        onClick={() => {
+                                          const next = !queriesOpen;
+                                          setNodes((prev) =>
+                                            prev.map((x) =>
+                                              x.conn.id === n.conn.id
+                                                ? {
+                                                    ...x,
+                                                    openQueryFolders: {
+                                                      ...x.openQueryFolders,
+                                                      [db]: next,
+                                                    },
+                                                  }
+                                                : x,
+                                            ),
+                                          );
+                                          if (next) {
+                                            openConn(n.conn);
+                                            void loadSavedQueries(n.conn.id, db);
+                                          }
+                                        }}
+                                        aria-label={
+                                          queriesOpen ? "折叠查询" : "展开查询"
+                                        }
+                                      />
+                                    ) : (
+                                      <span className="tree-twist-spacer" />
+                                    )}
+                                    <button
+                                      type="button"
+                                      className={`tree-label tree-folder ${
+                                        dbActive && selectedFolder === folder.id
+                                          ? "is-active"
+                                          : ""
+                                      }`}
+                                      onClick={() => {
+                                        openConn(n.conn);
+                                        selectObjectFolder(db, folder.id);
+                                        if (folder.id === "queries") {
+                                          setNodes((prev) =>
+                                            prev.map((x) =>
+                                              x.conn.id === n.conn.id
+                                                ? {
+                                                    ...x,
+                                                    openQueryFolders: {
+                                                      ...x.openQueryFolders,
+                                                      [db]: true,
+                                                    },
+                                                  }
+                                                : x,
+                                            ),
+                                          );
+                                          void loadSavedQueries(n.conn.id, db);
+                                        }
+                                      }}
+                                    >
+                                      {folder.icon}
+                                      <span className="tree-text">
+                                        {folder.label}
+                                        {folder.id === "queries" &&
+                                        saved.length > 0
+                                          ? ` (${saved.length})`
+                                          : ""}
+                                      </span>
+                                    </button>
+                                  </div>
+                                  {folder.id === "queries" && queriesOpen && (
+                                    <ul className="tree-children">
+                                      {saved.map((q) => (
+                                        <li key={q.id}>
+                                          <div
+                                            className={`tree-row tree-folder ${
+                                              activeSavedQueryId === q.id
+                                                ? "is-active"
+                                                : ""
+                                            }`}
+                                          >
+                                            <button
+                                              type="button"
+                                              className="tree-label"
+                                              title={q.name}
+                                              onClick={() => {
+                                                openConn(n.conn);
+                                                openQuery({
+                                                  connection: n.conn,
+                                                  database: db,
+                                                  title: q.name,
+                                                  sql: q.sql,
+                                                  savedQueryId: q.id,
+                                                });
+                                              }}
+                                              onContextMenu={(e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                if (
+                                                  !window.confirm(
+                                                    `删除已保存查询「${q.name}」？`,
+                                                  )
+                                                ) {
+                                                  return;
+                                                }
+                                                void deleteSavedQuery(q.id)
+                                                  .then(() =>
+                                                    loadSavedQueries(
+                                                      n.conn.id,
+                                                      db,
+                                                    ),
+                                                  )
+                                                  .catch((err) => {
+                                                    setToast(
+                                                      err instanceof Error
+                                                        ? err.message
+                                                        : String(err),
+                                                    );
+                                                    window.setTimeout(
+                                                      () => setToast(null),
+                                                      2500,
+                                                    );
+                                                  });
+                                              }}
+                                            >
+                                              <IconQueries />
+                                              <span className="tree-text">
+                                                {q.name}
+                                              </span>
+                                            </button>
+                                          </div>
+                                        </li>
+                                      ))}
+                                      {saved.length === 0 && (
+                                        <li className="pane-placeholder tree-query-empty">
+                                          暂无保存的查询（⌘/Ctrl+S）
+                                        </li>
+                                      )}
+                                    </ul>
+                                  )}
+                                </li>
+                              );
+                            })}
                           </ul>
                         )}
                       </li>
@@ -515,7 +693,14 @@ export function ConnectionTree() {
               setNodes((prev) =>
                 prev.map((n) =>
                   n.conn.id === activeConnectionId
-                    ? { ...n, expanded: false, databases: [], openDbs: {} }
+                    ? {
+                        ...n,
+                        expanded: false,
+                        databases: [],
+                        openDbs: {},
+                        openQueryFolders: {},
+                        savedQueries: {},
+                      }
                     : n,
                 ),
               );

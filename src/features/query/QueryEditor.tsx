@@ -16,7 +16,6 @@ import {
   openConnection,
 } from "../connections/sessionApi";
 import type { ConnectionDto } from "../connections/types";
-import { downloadTextFile } from "../import-export/csv";
 import { Splitter } from "../../shell/Splitter";
 import { useUiStore } from "../../stores/uiStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
@@ -24,6 +23,7 @@ import {
   QueryResultPanel,
   type QueryBatchItem,
 } from "./QueryResultPanel";
+import { upsertSavedQuery } from "./savedQueriesApi";
 import {
   isTableNameContext,
   registerSqlCompletions,
@@ -290,23 +290,35 @@ export function QueryEditor() {
     updateQueryTab(tab.id, { sql: next, dirty: true });
   }
 
-  function save() {
+  async function save() {
     if (!tab) return;
-    const name =
-      window
-        .prompt(
-          "保存查询为",
-          tab.title === "无标题" ? "query.sql" : `${tab.title}.sql`,
-        )
-        ?.trim();
+    const suggested =
+      tab.title && tab.title !== "无标题" ? tab.title : "未命名查询";
+    const name = window.prompt("保存查询为", suggested)?.trim();
     if (!name) return;
-    const filename = name.endsWith(".sql") ? name : `${name}.sql`;
-    downloadTextFile(filename, tab.sql || "", "application/sql");
-    updateQueryTab(tab.id, {
-      title: filename.replace(/\.sql$/i, ""),
-      dirty: false,
-    });
-    setStatus(`已保存 ${filename}`);
+    const title = name.replace(/\.sql$/i, "");
+    try {
+      const saved = await upsertSavedQuery({
+        id: tab.savedQueryId || undefined,
+        connectionId: tab.connectionId,
+        database: tab.database || null,
+        name: title,
+        sql: tab.sql || "",
+      });
+      updateQueryTab(tab.id, {
+        title: saved.name,
+        savedQueryId: saved.id,
+        dirty: false,
+      });
+      setStatus(`已保存到「查询」：${saved.name}`);
+      window.dispatchEvent(
+        new CustomEvent("saved-queries-changed", {
+          detail: { connectionId: tab.connectionId, database: tab.database },
+        }),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   function beautify() {
@@ -604,7 +616,9 @@ export function QueryEditor() {
 
   runRef.current = runFromShortcut;
   runSmartRef.current = runSmart;
-  saveRef.current = save;
+  saveRef.current = () => {
+    void save();
+  };
 
   if (!tab) {
     return (
@@ -620,7 +634,7 @@ export function QueryEditor() {
     <div className="query-panel navicat-query">
       <div className="query-icon-bar">
         <div className="query-icon-group">
-          <IconBtn title="保存" onClick={save}>
+          <IconBtn title="保存查询 (⌘/Ctrl+S)" onClick={() => void save()}>
             <IconSave />
           </IconBtn>
           <span className="query-icon-sep" />

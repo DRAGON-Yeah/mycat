@@ -19,6 +19,8 @@ export type QueryTab = {
   database: string;
   sql: string;
   dirty: boolean;
+  /** Persisted saved_queries.id when linked to a stored query. */
+  savedQueryId?: string | null;
 };
 
 export type CenterMode =
@@ -78,7 +80,13 @@ type WorkspaceState = {
   setObjectListFilter: (filter: string, focus?: boolean) => void;
   consumeObjectListFilterFocus: () => void;
   openTable: (table: string) => void;
-  openQuery: (opts?: { connection?: ConnectionDto; database?: string }) => void;
+  openQuery: (opts?: {
+    connection?: ConnectionDto;
+    database?: string;
+    title?: string;
+    sql?: string;
+    savedQueryId?: string;
+  }) => void;
   applyQueryContext: (connection: ConnectionDto, database: string) => void;
   closeTab: (id: string) => boolean;
   closeQueryTab: (id: string) => boolean;
@@ -87,7 +95,17 @@ type WorkspaceState = {
   updateQueryTab: (
     id: string,
     patch: Partial<
-      Pick<QueryTab, "sql" | "title" | "database" | "connectionId" | "connectionName" | "connectionEngine" | "dirty">
+      Pick<
+        QueryTab,
+        | "sql"
+        | "title"
+        | "database"
+        | "connectionId"
+        | "connectionName"
+        | "connectionEngine"
+        | "dirty"
+        | "savedQueryId"
+      >
     >,
   ) => void;
   markTabDirty: (id: string, dirty: boolean) => void;
@@ -172,6 +190,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }),
   selectObjectFolder: (database, folder) => {
     if (folder === "queries") {
+      const { queryTabs, activeQueryId } = get();
+      const hasActive =
+        !!activeQueryId && queryTabs.some((t) => t.id === activeQueryId);
       set({
         selectedDatabase: database,
         selectedFolder: folder,
@@ -179,15 +200,19 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         selectionKind: "folder",
         placeholderFeature: null,
         toolbarAction: "query",
+        centerMode: hasActive
+          ? "query"
+          : queryTabs.length > 0
+            ? "query"
+            : get().selectedDatabase
+              ? "objectList"
+              : "welcome",
+        activeQueryId: hasActive
+          ? activeQueryId
+          : queryTabs.length > 0
+            ? queryTabs[queryTabs.length - 1]!.id
+            : null,
       });
-      const { queryTabs, activeQueryId } = get();
-      if (activeQueryId && queryTabs.some((t) => t.id === activeQueryId)) {
-        set({ centerMode: "query" });
-      } else if (queryTabs.length > 0) {
-        get().setActiveQuery(queryTabs[queryTabs.length - 1]!.id);
-      } else {
-        get().openQuery({ database });
-      }
       return;
     }
     const listable = folder === "tables" || folder === "views";
@@ -326,16 +351,39 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       get().selectedDatabase ||
       conn.database?.trim() ||
       "";
+    // Reuse tab if opening the same saved query.
+    if (opts?.savedQueryId) {
+      const existing = get().queryTabs.find(
+        (t) => t.savedQueryId === opts.savedQueryId,
+      );
+      if (existing) {
+        set({
+          activeConnectionId: conn.id,
+          activeConnection: conn,
+          selectedDatabase: database || existing.database || null,
+          selectedFolder: "queries",
+          selectedTable: null,
+          selectionKind: "connection",
+          activeQueryId: existing.id,
+          activeTabId: null,
+          centerMode: "query",
+          toolbarAction: "query",
+          placeholderFeature: null,
+        });
+        return;
+      }
+    }
     const id = `query-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const tab: QueryTab = {
       id,
-      title: "无标题",
+      title: opts?.title?.trim() || "无标题",
       connectionId: conn.id,
       connectionName: conn.name,
       connectionEngine: String(conn.engine),
       database,
-      sql: "",
+      sql: opts?.sql ?? "",
       dirty: false,
+      savedQueryId: opts?.savedQueryId ?? null,
     };
     set({
       activeConnectionId: conn.id,

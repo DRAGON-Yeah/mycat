@@ -86,6 +86,10 @@ pub fn run() {
             commands::session::execute_sql,
             commands::session::apply_row_changes,
             commands::dump::dump_table_sql,
+            commands::queries::list_saved_queries,
+            commands::queries::upsert_saved_query,
+            commands::queries::delete_saved_query,
+            commands::queries::get_saved_query,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

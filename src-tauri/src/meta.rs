@@ -75,6 +75,19 @@ impl MetaDb {
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS saved_queries (
+              id TEXT PRIMARY KEY NOT NULL,
+              connection_id TEXT NOT NULL,
+              database_name TEXT,
+              name TEXT NOT NULL,
+              sql_text TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_saved_queries_conn
+              ON saved_queries(connection_id, database_name);
             "#,
         )?;
         // Soft migrate for older meta.db created before ssl_trust.
@@ -218,6 +231,115 @@ impl MetaDb {
             .find(|c| c.id == id))
     }
 
+    pub fn list_saved_queries(
+        &self,
+        connection_id: &str,
+        database: Option<&str>,
+    ) -> AppResult<Vec<SavedQueryRecord>> {
+        let conn = self.conn.lock().map_err(|_| AppError::Message("meta lock".into()))?;
+        let mut out = Vec::new();
+        if let Some(db) = database.filter(|d| !d.is_empty()) {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT id, connection_id, database_name, name, sql_text, created_at, updated_at
+                FROM saved_queries
+                WHERE connection_id = ?1 AND (database_name = ?2 OR database_name IS NULL OR database_name = '')
+                ORDER BY name COLLATE NOCASE ASC
+                "#,
+            )?;
+            let rows = stmt.query_map(params![connection_id, db], map_saved_query)?;
+            for row in rows {
+                out.push(row?);
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT id, connection_id, database_name, name, sql_text, created_at, updated_at
+                FROM saved_queries
+                WHERE connection_id = ?1
+                ORDER BY name COLLATE NOCASE ASC
+                "#,
+            )?;
+            let rows = stmt.query_map(params![connection_id], map_saved_query)?;
+            for row in rows {
+                out.push(row?);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn upsert_saved_query(&self, record: &SavedQueryRecord) -> AppResult<()> {
+        let conn = self.conn.lock().map_err(|_| AppError::Message("meta lock".into()))?;
+        conn.execute(
+            r#"
+            INSERT INTO saved_queries (
+              id, connection_id, database_name, name, sql_text, created_at, updated_at
+            ) VALUES (?1,?2,?3,?4,?5,?6,?7)
+            ON CONFLICT(id) DO UPDATE SET
+              connection_id = excluded.connection_id,
+              database_name = excluded.database_name,
+              name = excluded.name,
+              sql_text = excluded.sql_text,
+              updated_at = excluded.updated_at
+            "#,
+            params![
+                record.id,
+                record.connection_id,
+                record.database,
+                record.name,
+                record.sql_text,
+                record.created_at,
+                record.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_saved_query(&self, id: &str) -> AppResult<()> {
+        let conn = self.conn.lock().map_err(|_| AppError::Message("meta lock".into()))?;
+        conn.execute("DELETE FROM saved_queries WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn get_saved_query(&self, id: &str) -> AppResult<Option<SavedQueryRecord>> {
+        let conn = self.conn.lock().map_err(|_| AppError::Message("meta lock".into()))?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, connection_id, database_name, name, sql_text, created_at, updated_at
+            FROM saved_queries WHERE id = ?1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(map_saved_query(row)?))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedQueryRecord {
+    pub id: String,
+    pub connection_id: String,
+    pub database: Option<String>,
+    pub name: String,
+    pub sql_text: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+fn map_saved_query(row: &rusqlite::Row<'_>) -> rusqlite::Result<SavedQueryRecord> {
+    Ok(SavedQueryRecord {
+        id: row.get(0)?,
+        connection_id: row.get(1)?,
+        database: row.get(2)?,
+        name: row.get(3)?,
+        sql_text: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
 }
 
 #[cfg(test)]
