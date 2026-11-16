@@ -138,7 +138,7 @@ type WorkspaceState = {
     database?: string;
     table: string;
     mode: "create" | "alter";
-    /** Seed columns for create mode (e.g. AI suggest). */
+    /** Optional seed columns for create mode. */
     seedColumns?: {
       name: string;
       rawType: string;

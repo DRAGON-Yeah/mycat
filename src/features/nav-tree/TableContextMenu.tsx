@@ -20,7 +20,6 @@ import {
   generateTableRows,
   grantTablePrivilege,
   listTableGrants,
-  suggestColumnsFromPrompt,
 } from "./tableDataTools";
 import {
   copyTable,
@@ -77,8 +76,6 @@ export function TableContextMenu({
   const [copyName, setCopyName] = useState(`${table}_copy`);
   const [genOpen, setGenOpen] = useState(false);
   const [genCount, setGenCount] = useState(10);
-  const [aiOpen, setAiOpen] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState("");
   const [permOpen, setPermOpen] = useState(false);
   const [grants, setGrants] = useState<string[]>([]);
   const [grantUser, setGrantUser] = useState("app@%");
@@ -307,16 +304,6 @@ export function TableContextMenu({
         >
           新建表
           <span className="menu-shortcut">⌘N</span>
-        </button>
-        <button
-          type="button"
-          disabled={busy || isView}
-          onClick={() => {
-            setAiPrompt(`用户表，含邮箱、姓名、状态`);
-            setAiOpen(true);
-          }}
-        >
-          通过 AI 新建表
         </button>
 
         <div className="dg-menu-sep" />
@@ -912,56 +899,6 @@ export function TableContextMenu({
               </button>
               <button type="submit" disabled={busy}>
                 生成
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {aiOpen && (
-        <div className="modal-backdrop" role="presentation">
-          <form
-            className="modal"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const suggested = suggestColumnsFromPrompt(aiPrompt);
-              ensureContext();
-              openTableDesigner({
-                connection: conn,
-                database,
-                table: suggested.tableName,
-                mode: "create",
-                seedColumns: suggested.columns,
-              });
-              setAiOpen(false);
-              onClose();
-            }}
-          >
-            <h2>通过 AI 新建表</h2>
-            <p className="table-io-meta">
-              本地启发式生成列结构（无需外网）。描述表用途与字段即可。
-            </p>
-            <label>
-              需求描述
-              <textarea
-                rows={4}
-                value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
-                autoFocus
-              />
-            </label>
-            <div className="modal-actions">
-              <button
-                type="button"
-                onClick={() => {
-                  setAiOpen(false);
-                  onClose();
-                }}
-              >
-                取消
-              </button>
-              <button type="submit" disabled={!aiPrompt.trim()}>
-                生成并打开设计器
               </button>
             </div>
           </form>
