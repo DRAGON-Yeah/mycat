@@ -16,15 +16,6 @@ export function ToolbarIcon({ id, size = 28 }: Props) {
           <path d="M22.5 22h3M24 20.5v3" stroke="#5D4037" strokeWidth="1.4" strokeLinecap="round" />
         </svg>
       );
-    case "user":
-      return (
-        <svg width={s} height={s} viewBox="0 0 32 32" aria-hidden>
-          <circle cx="16" cy="11" r="5" fill="#42A5F5" />
-          <path d="M6 26c0-5 4.5-8 10-8s10 3 10 8" fill="#90CAF9" />
-          <circle cx="24" cy="22" r="5" fill="#66BB6A" stroke="#FFF" strokeWidth="1.5" />
-          <path d="M24 20v4M22 22h4" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      );
     case "table":
       return (
         <svg width={s} height={s} viewBox="0 0 32 32" aria-hidden>

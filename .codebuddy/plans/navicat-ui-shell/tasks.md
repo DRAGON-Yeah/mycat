@@ -27,7 +27,7 @@
 
 ## 3. Backlog
 
-用户/备份/模型/BI 实装；对象列表行数/引擎/排序规则列；表设计器；旧 ConnectionNav/ObjectTree 可后续删除。
+备份/模型/BI 实装；对象列表行数/引擎/排序规则列；表设计器；旧 ConnectionNav/ObjectTree 可后续删除。应用账号/用户管理明确不做。
 
 ## 4. 审计日志
 

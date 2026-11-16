@@ -70,7 +70,7 @@
 - BI Dashboard  
 - AI Chat / Ask AI  
 - 协作同步（连接、查询、片段、工作区等）  
-- 服务器安全（用户管理、监控）  
+- 服务器监控（不含应用内「用户」账号体系）  
 - MongoDB Aggregation Pipeline、Schema 分析；Redis Pub/Sub、Sentinel / Cluster  
 
 ### 3.2 Out of Scope（首期明确不做或延后）
@@ -78,7 +78,8 @@
 | 项 | 说明 |
 | --- | --- |
 | 浏览器版 / 纯 Web SaaS | 本期聚焦桌面端 |
-| 完全复刻 Navicat Cloud 商业账号体系 | 可自建轻量协作后端，不绑定官方 Cloud |
+| 应用账号登录 / 用户管理 | **纯本地工具**，无软件登录、无顶栏「用户」模块、不复刻 Navicat 服务器用户管理 |
+| 完全复刻 Navicat Cloud 商业账号体系 | 不做 Cloud 账号；连接凭据仅存本机 |
 | 移动端 App | 不在本期 |
 | 与官方 Navicat 文件格式 100% 二进制兼容 | 提供自有项目格式；可考虑后续导入 `.ncx` 等连接导出 |
 
@@ -382,7 +383,7 @@
 | Manipulation | Transfer / Struct Sync / Data Sync / Generate / Mask / Dictionary |
 | Backup | 各引擎备份封装 + Dump SQL |
 | Automation | 调度批处理 + 邮件 |
-| Security | 用户管理、Server/Command Monitor |
+| Security | 不做应用用户管理；可选后续 Server/Command Monitor |
 | Others | ER、URI、Aggregation、Schema 分析、Pub/Sub、Focus/Dark |
 
 ---

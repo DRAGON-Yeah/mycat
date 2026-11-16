@@ -48,7 +48,6 @@ export type CenterMode =
 
 export type ToolbarAction =
   | "connection"
-  | "user"
   | "table"
   | "view"
   | "function"

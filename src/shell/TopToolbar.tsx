@@ -13,7 +13,6 @@ type Item = {
 
 const ITEMS: Item[] = [
   { id: "connection", label: "连接" },
-  { id: "user", label: "用户", placeholder: "user" },
   { id: "table", label: "表" },
   { id: "view", label: "视图", placeholder: "view" },
   { id: "function", label: "函数", placeholder: "function" },

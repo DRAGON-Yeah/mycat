@@ -3,7 +3,6 @@ type Props = {
 };
 
 const LABELS: Record<string, string> = {
-  user: "用户",
   view: "视图",
   function: "函数",
   backup: "备份",

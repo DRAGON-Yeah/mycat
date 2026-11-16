@@ -99,7 +99,7 @@ export function InspectorPane() {
           <dd>{connection.database?.trim() || "—"}</dd>
         </div>
         <div>
-          <dt>用户</dt>
+          <dt>用户名</dt>
           <dd>{connection.user ?? "—"}</dd>
         </div>
         <div>
