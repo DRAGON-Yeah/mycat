@@ -45,6 +45,7 @@ export async function loadDesignerColumns(args: {
     const out = await executeSql(
       connectionId,
       `PRAGMA table_info(${quoteTable(engine, null, table)})`,
+      database,
     );
     return out.rows.map((row) => {
       const name = String(row[1] ?? "");
@@ -79,7 +80,7 @@ FROM information_schema.columns c
 WHERE table_name = '${table.replace(/'/g, "''")}'
   AND table_schema = current_schema()
 ORDER BY ordinal_position`;
-    const out = await executeSql(connectionId, sql);
+    const out = await executeSql(connectionId, sql, database);
     const m = colMap(out.columns);
     return out.rows.map((row) => {
       const name = cell(row, m.column_name);
@@ -103,7 +104,7 @@ ORDER BY ordinal_position`;
   }
 
   const qt = quoteTable(engine, database, table);
-  const out = await executeSql(connectionId, `SHOW FULL COLUMNS FROM ${qt}`);
+  const out = await executeSql(connectionId, `SHOW FULL COLUMNS FROM ${qt}`, database);
   const m = colMap(out.columns);
   return out.rows.map((row) => {
     const name = cell(row, m.field);
@@ -188,7 +189,7 @@ export async function loadTableOptions(args: {
 FROM information_schema.TABLES
 WHERE TABLE_SCHEMA = '${database.replace(/'/g, "''")}'
   AND TABLE_NAME = '${table.replace(/'/g, "''")}'`;
-  const out = await executeSql(connectionId, sql);
+  const out = await executeSql(connectionId, sql, database);
   const row = out.rows[0];
   if (!row) return { options: emptyOptions(), stats: emptyStats };
   const coll = String(row[1] ?? "utf8mb4_unicode_ci");
@@ -230,7 +231,7 @@ export async function loadDesignerIndexes(args: {
   await openConnection(connectionId);
   if (engineKey(engine) !== "mysql") return [];
   const qt = quoteTable(engine, database, table);
-  const out = await executeSql(connectionId, `SHOW INDEX FROM ${qt}`);
+  const out = await executeSql(connectionId, `SHOW INDEX FROM ${qt}`, database);
   const m = colMap(out.columns);
   const byName = new Map<string, DesignerIndex>();
   for (const row of out.rows) {
@@ -271,7 +272,7 @@ WHERE TABLE_SCHEMA = '${database.replace(/'/g, "''")}'
   AND TABLE_NAME = '${table.replace(/'/g, "''")}'
   AND REFERENCED_TABLE_NAME IS NOT NULL
 ORDER BY CONSTRAINT_NAME, ORDINAL_POSITION`;
-  const out = await executeSql(connectionId, sql);
+  const out = await executeSql(connectionId, sql, database);
   const byName = new Map<string, DesignerForeignKey>();
   for (const row of out.rows) {
     const name = String(row[0] ?? "");
@@ -301,7 +302,7 @@ FROM information_schema.REFERENTIAL_CONSTRAINTS
 WHERE CONSTRAINT_SCHEMA = '${database.replace(/'/g, "''")}'
   AND TABLE_NAME = '${table.replace(/'/g, "''")}'`;
   try {
-    const rules = await executeSql(connectionId, rulesSql);
+    const rules = await executeSql(connectionId, rulesSql, database);
     for (const row of rules.rows) {
       const name = String(row[0] ?? "");
       const fk = byName.get(name);
@@ -329,7 +330,7 @@ export async function loadDesignerTriggers(args: {
 FROM information_schema.TRIGGERS
 WHERE TRIGGER_SCHEMA = '${database.replace(/'/g, "''")}'
   AND EVENT_OBJECT_TABLE = '${table.replace(/'/g, "''")}'`;
-  const out = await executeSql(connectionId, sql);
+  const out = await executeSql(connectionId, sql, database);
   return out.rows.map((row) => ({
     key: `tr-${row[0]}`,
     name: String(row[0] ?? ""),
@@ -358,7 +359,7 @@ WHERE tc.TABLE_SCHEMA = '${database.replace(/'/g, "''")}'
   AND tc.TABLE_NAME = '${table.replace(/'/g, "''")}'
   AND tc.CONSTRAINT_TYPE = 'CHECK'`;
   try {
-    const out = await executeSql(connectionId, sql);
+    const out = await executeSql(connectionId, sql, database);
     return out.rows.map((row) => ({
       key: `ck-${row[0]}`,
       name: String(row[0] ?? ""),

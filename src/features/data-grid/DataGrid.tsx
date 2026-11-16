@@ -151,7 +151,7 @@ export function DataGrid({ tab }: Props) {
   const { widthOf, startResize } = useColumnResize({
     defaultWidth: 140,
     minWidth: 48,
-    resetKey: `${tab.connectionId}:${database ?? ""}:${tab.tableName}`,
+    resetKey: `${tab.connectionId}:${database ?? ""}:${tab.table}`,
   });
   const [chooser, setChooser] = useState<{
     row: number;
@@ -203,7 +203,7 @@ ORDER BY ordinal_position`;
           ? `SHOW FULL COLUMNS FROM \`${db}\`.\`${table}\``
           : `SHOW FULL COLUMNS FROM \`${table}\``;
       }
-      const out = await executeSql(tab.connectionId, sql);
+      const out = await executeSql(tab.connectionId, sql, db || database);
       if (engine === "sqlite") {
         // PRAGMA: cid, name, type, notnull, dflt_value, pk
         const map: Record<string, ColumnExtra> = {};

@@ -123,8 +123,9 @@ export function buildCreateTableSql(args: {
         .map((c) => quoteIdent("mysql", c))
         .join(", ");
       if (!cols || !fk.refTable || !refs) continue;
+      const refTable = quoteTable("mysql", database, fk.refTable);
       defs.push(
-        `CONSTRAINT ${quoteIdent("mysql", fk.name)} FOREIGN KEY (${cols}) REFERENCES ${quoteIdent("mysql", fk.refTable)} (${refs}) ON DELETE ${fk.onDelete || "RESTRICT"} ON UPDATE ${fk.onUpdate || "RESTRICT"}`,
+        `CONSTRAINT ${quoteIdent("mysql", fk.name)} FOREIGN KEY (${cols}) REFERENCES ${refTable} (${refs}) ON DELETE ${fk.onDelete || "RESTRICT"} ON UPDATE ${fk.onUpdate || "RESTRICT"}`,
       );
     }
   }
@@ -301,5 +302,6 @@ export function buildTriggerSql(args: {
 }): string {
   const { engine, database, table, trigger } = args;
   const qt = quoteTable(engine, database, table);
-  return `CREATE TRIGGER ${quoteIdent(engine, trigger.name)} ${trigger.timing} ${trigger.event} ON ${qt} FOR EACH ROW\n${trigger.statement}`;
+  const tn = quoteTable(engine, database, trigger.name);
+  return `CREATE TRIGGER ${tn} ${trigger.timing} ${trigger.event} ON ${qt} FOR EACH ROW\n${trigger.statement}`;
 }

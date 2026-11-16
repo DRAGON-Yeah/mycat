@@ -53,13 +53,21 @@ export function fetchTablePage(args: {
   return invoke<RowsPage>("fetch_table_page", args);
 }
 
-export function executeSql(connectionId: string, sql: string) {
+export function executeSql(
+  connectionId: string,
+  sql: string,
+  database?: string | null,
+) {
   return invoke<{
     columns: string[];
     rows: unknown[][];
     rowsAffected: number;
     elapsedMs: number;
-  }>("execute_sql", { connectionId, sql });
+  }>("execute_sql", {
+    connectionId,
+    sql,
+    database: database?.trim() || null,
+  });
 }
 
 export function cancelQuery(connectionId: string) {

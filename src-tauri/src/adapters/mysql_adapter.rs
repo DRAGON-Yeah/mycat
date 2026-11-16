@@ -294,6 +294,21 @@ impl DriverSession for MysqlSession {
         Ok(id.map(|v| i64::from(v)))
     }
 
+    fn use_database(&self, database: Option<&str>) -> AppResult<()> {
+        let Some(db) = database.map(str::trim).filter(|d| !d.is_empty()) else {
+            return Ok(());
+        };
+        if !ident_ok(db) {
+            return Err(AppError::Validation("非法库名".into()));
+        }
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::Message("mysql lock".into()))?;
+        conn.query_drop(format!("USE `{db}`"))?;
+        Ok(())
+    }
+
     fn execute_sql(&self, sql: &str) -> AppResult<QueryOutcome> {
         let started = Instant::now();
         let trimmed = sql.trim();

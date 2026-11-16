@@ -227,7 +227,7 @@ export async function emptyTable(args: {
   const { conn, database, table } = args;
   await openConnection(conn.id);
   const qt = quoteTable(String(conn.engine), database, table);
-  await executeSql(conn.id, `DELETE FROM ${qt}`);
+  await executeSql(conn.id, `DELETE FROM ${qt}`, database);
 }
 
 export async function truncateTable(args: {
@@ -240,17 +240,18 @@ export async function truncateTable(args: {
   const e = engineKey(conn.engine);
   const qt = quoteTable(String(conn.engine), database, table);
   if (e === "sqlite") {
-    await executeSql(conn.id, `DELETE FROM ${qt}`);
+    await executeSql(conn.id, `DELETE FROM ${qt}`, database);
     try {
       await executeSql(
         conn.id,
         `DELETE FROM sqlite_sequence WHERE name = '${table.replace(/'/g, "''")}'`,
+        database,
       );
     } catch {
       // no autoincrement sequence
     }
   } else {
-    await executeSql(conn.id, `TRUNCATE TABLE ${qt}`);
+    await executeSql(conn.id, `TRUNCATE TABLE ${qt}`, database);
   }
 }
 
@@ -266,6 +267,7 @@ export async function dropTableOrView(args: {
   await executeSql(
     conn.id,
     isView ? `DROP VIEW ${qt}` : `DROP TABLE ${qt}`,
+    database,
   );
 }
 
@@ -284,12 +286,12 @@ export async function renameTable(args: {
   const qt = quoteTable(String(conn.engine), database, table);
   const qn = quoteIdent(String(conn.engine), next);
   if (e === "postgres" || e === "postgresql") {
-    await executeSql(conn.id, `ALTER TABLE ${qt} RENAME TO ${qn}`);
+    await executeSql(conn.id, `ALTER TABLE ${qt} RENAME TO ${qn}`, database);
   } else if (e === "sqlite") {
-    await executeSql(conn.id, `ALTER TABLE ${qt} RENAME TO ${qn}`);
+    await executeSql(conn.id, `ALTER TABLE ${qt} RENAME TO ${qn}`, database);
   } else {
     const qnDb = quoteTable(String(conn.engine), database, next);
-    await executeSql(conn.id, `RENAME TABLE ${qt} TO ${qnDb}`);
+    await executeSql(conn.id, `RENAME TABLE ${qt} TO ${qnDb}`, database);
   }
 }
 
@@ -313,9 +315,9 @@ export async function copyTable(args: {
   const dst = quoteTable(String(conn.engine), database, newName);
 
   if (e === "mysql") {
-    await executeSql(conn.id, `CREATE TABLE ${dst} LIKE ${src}`);
+    await executeSql(conn.id, `CREATE TABLE ${dst} LIKE ${src}`, database);
     if (includeData) {
-      await executeSql(conn.id, `INSERT INTO ${dst} SELECT * FROM ${src}`);
+      await executeSql(conn.id, `INSERT INTO ${dst} SELECT * FROM ${src}`, database);
     }
     return;
   }
@@ -323,20 +325,21 @@ export async function copyTable(args: {
   // Postgres / SQLite: CREATE … AS SELECT (structure+data) or WITH NO DATA
   if (e === "postgres" || e === "postgresql") {
     if (includeData) {
-      await executeSql(conn.id, `CREATE TABLE ${dst} AS TABLE ${src}`);
+      await executeSql(conn.id, `CREATE TABLE ${dst} AS TABLE ${src}`, database);
     } else {
-      await executeSql(conn.id, `CREATE TABLE ${dst} AS TABLE ${src} WITH NO DATA`);
+      await executeSql(conn.id, `CREATE TABLE ${dst} AS TABLE ${src} WITH NO DATA`, database);
     }
     return;
   }
 
   // SQLite
   if (includeData) {
-    await executeSql(conn.id, `CREATE TABLE ${dst} AS SELECT * FROM ${src}`);
+    await executeSql(conn.id, `CREATE TABLE ${dst} AS SELECT * FROM ${src}`, database);
   } else {
     await executeSql(
       conn.id,
       `CREATE TABLE ${dst} AS SELECT * FROM ${src} WHERE 0`,
+      database,
     );
   }
 }
@@ -376,6 +379,6 @@ export async function maintainTable(args: {
     };
     sql = map[op];
   }
-  const out = await executeSql(conn.id, sql);
+  const out = await executeSql(conn.id, sql, database);
   return out;
 }

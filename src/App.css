@@ -4189,6 +4189,35 @@ tr.is-inserted {
   background: var(--bg-elevated);
   outline: none;
 }
+.td-grid .td-cell-multi {
+  white-space: normal;
+  min-width: 140px;
+  vertical-align: top;
+}
+.td-multi-check {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  max-height: 72px;
+  overflow: auto;
+  padding: 2px 0;
+}
+.td-multi-check-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+}
+.td-multi-check-item input {
+  width: auto;
+  margin: 0;
+}
+.td-multi-empty {
+  color: var(--text-muted);
+  font-size: 11px;
+}
 .td-grid .td-check { text-align: center; width: 56px; }
 .td-grid .td-col-name {
   min-width: 120px;

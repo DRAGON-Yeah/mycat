@@ -159,17 +159,11 @@ export function ConsolePanel() {
     historyIndex.current = -1;
     draftRef.current = "";
     try {
-      if (
-        database &&
-        String(connection.engine).toLowerCase() === "mysql" &&
-        !/^\s*use\s+/i.test(sql)
-      ) {
-        await executeSql(
-          connection.id,
-          `USE \`${escapeIdent(database)}\``,
-        );
-      }
-      const out = await executeSql(connection.id, sql);
+      const out = await executeSql(
+        connection.id,
+        sql,
+        /^\s*use\s+/i.test(sql) ? null : database,
+      );
       const summary = `Query OK · ${out.rowsAffected} row(s) affected · ${out.elapsedMs} ms · ${out.rows.length} row(s) in set`;
       const next: Line[] = [{ kind: "out", text: summary }];
       if (out.columns.length > 0) {

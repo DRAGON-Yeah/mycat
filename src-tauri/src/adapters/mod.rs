@@ -104,6 +104,10 @@ pub trait DriverSession: Send {
         filter_value: Option<&str>,
     ) -> AppResult<RowsPage>;
     fn execute_sql(&self, sql: &str) -> AppResult<QueryOutcome>;
+    /// Select schema/database for subsequent unqualified SQL (MySQL USE / PG search_path).
+    fn use_database(&self, _database: Option<&str>) -> AppResult<()> {
+        Ok(())
+    }
     fn apply_row_changes(
         &self,
         database: Option<&str>,

@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   executeSql,
+  listTables,
   openConnection,
 } from "../connections/sessionApi";
 import type { DesignerTab } from "../../stores/workspaceStore";
@@ -62,6 +63,15 @@ type DesignerPane =
   | "sql";
 
 type Props = { tab: DesignerTab };
+
+const INDEX_TYPES = ["BTREE", "HASH", "FULLTEXT", "SPATIAL"];
+const FK_ACTIONS = [
+  "RESTRICT",
+  "CASCADE",
+  "SET NULL",
+  "NO ACTION",
+  "SET DEFAULT",
+];
 
 const PANES: { id: DesignerPane; label: string }[] = [
   { id: "fields", label: "字段" },
@@ -126,6 +136,16 @@ export function TableDesigner({ tab }: Props) {
   const [charsetList, setCharsetList] = useState<string[]>([...MYSQL_CHARSETS]);
   const [collationMap, setCollationMap] = useState<Record<string, string[]>>(
     MYSQL_COLLATIONS_BY_CHARSET,
+  );
+  const [dbTableNames, setDbTableNames] = useState<string[]>([]);
+  const [refColCache, setRefColCache] = useState<Record<string, string[]>>({});
+
+  const colNames = useMemo(
+    () =>
+      columns
+        .map((c) => c.name.trim())
+        .filter((n) => n.length > 0),
+    [columns],
   );
 
   // Keep latest tab fields without re-binding load to the whole tab object
@@ -268,6 +288,63 @@ export function TableDesigner({ tab }: Props) {
       });
   }, [tab.id, tab.connectionId, tab.connectionEngine]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        await openConnection(tab.connectionId);
+        const tables = await listTables(tab.connectionId, tab.database);
+        if (!cancelled) {
+          setDbTableNames(
+            tables
+              .map((t) => t.name)
+              .filter(Boolean)
+              .sort((a, b) => a.localeCompare(b)),
+          );
+        }
+      } catch {
+        if (!cancelled) setDbTableNames([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tab.id, tab.connectionId, tab.database]);
+
+  const refColCacheRef = useRef(refColCache);
+  refColCacheRef.current = refColCache;
+
+  const ensureRefCols = useCallback(
+    async (tableNameRaw: string) => {
+      const name = tableNameRaw.trim();
+      if (!name || name in refColCacheRef.current) return;
+      refColCacheRef.current = { ...refColCacheRef.current, [name]: [] };
+      try {
+        const cols = await loadDesignerColumns({
+          connectionId: tab.connectionId,
+          engine: tab.connectionEngine,
+          database: tab.database,
+          table: name,
+        });
+        const names = cols.map((c) => c.name).filter(Boolean);
+        refColCacheRef.current = {
+          ...refColCacheRef.current,
+          [name]: names,
+        };
+        setRefColCache((prev) => ({ ...prev, [name]: names }));
+      } catch {
+        setRefColCache((prev) => ({ ...prev, [name]: [] }));
+      }
+    },
+    [tab.connectionId, tab.connectionEngine, tab.database],
+  );
+
+  useEffect(() => {
+    for (const fk of fks) {
+      if (fk.refTable.trim()) void ensureRefCols(fk.refTable);
+    }
+  }, [fks, ensureRefCols]);
+
   function patchCol(key: string, patch: Partial<DesignerColumn>) {
     setColumns((prev) =>
       prev.map((c) => (c.key === key ? { ...c, ...patch } : c)),
@@ -361,6 +438,13 @@ export function TableDesigner({ tab }: Props) {
     setSaving(true);
     setError(null);
     setMessage(null);
+    const db = tab.database?.trim() || "";
+    if (!db) {
+      setError("未选择数据库，无法保存");
+      setSaving(false);
+      return;
+    }
+    const runSql = (sql: string) => executeSql(tab.connectionId, sql, db);
     try {
       await openConnection(tab.connectionId);
       if (tab.mode === "create") {
@@ -368,7 +452,7 @@ export function TableDesigner({ tab }: Props) {
         if (!identOk(name)) throw new Error("表名仅允许字母、数字、下划线");
         const sql = buildCreateTableSql({
           engine: tab.connectionEngine,
-          database: tab.database,
+          database: db,
           table: name,
           columns,
           indexes: indexes.filter((i) => i.name.toUpperCase() !== "PRIMARY"),
@@ -376,14 +460,13 @@ export function TableDesigner({ tab }: Props) {
           checks,
           options,
         });
-        await executeSql(tab.connectionId, sql);
+        await runSql(sql);
         for (const tr of triggers) {
           if (!tr.name.trim() || !tr.statement.trim()) continue;
-          await executeSql(
-            tab.connectionId,
+          await runSql(
             buildTriggerSql({
               engine: tab.connectionEngine,
-              database: tab.database,
+              database: db,
               table: name,
               trigger: tr,
             }),
@@ -399,7 +482,7 @@ export function TableDesigner({ tab }: Props) {
 
       const stmts = buildAlterTableSql({
         engine: tab.connectionEngine,
-        database: tab.database,
+        database: db,
         table: tab.table,
         baseline,
         columns,
@@ -407,16 +490,16 @@ export function TableDesigner({ tab }: Props) {
         baselineOptions,
       });
       for (const sql of stmts) {
-        await executeSql(tab.connectionId, sql);
+        await runSql(sql);
       }
 
       // index sync (mysql): drop removed, add new
       if (engineKey(tab.connectionEngine) === "mysql") {
-        const qt = quoteTable(tab.connectionEngine, tab.database, tab.table);
+        const qt = quoteTable(tab.connectionEngine, db, tab.table);
         const baseIx = await loadDesignerIndexes({
           connectionId: tab.connectionId,
           engine: tab.connectionEngine,
-          database: tab.database,
+          database: db,
           table: tab.table,
         });
         const want = indexes.filter((i) => i.name.toUpperCase() !== "PRIMARY");
@@ -424,8 +507,7 @@ export function TableDesigner({ tab }: Props) {
         for (const b of baseIx) {
           if (b.name.toUpperCase() === "PRIMARY") continue;
           if (!wantNames.has(b.name)) {
-            await executeSql(
-              tab.connectionId,
+            await runSql(
               `DROP INDEX ${quoteIdent("mysql", b.name)} ON ${qt}`,
             );
           }
@@ -444,8 +526,7 @@ export function TableDesigner({ tab }: Props) {
               .join(", ");
             if (!cols) continue;
             const uniq = ix.unique ? "UNIQUE " : "";
-            await executeSql(
-              tab.connectionId,
+            await runSql(
               `CREATE ${uniq}INDEX ${quoteIdent("mysql", ix.name)} ON ${qt} (${cols})`,
             );
           }
@@ -455,14 +536,13 @@ export function TableDesigner({ tab }: Props) {
         const baseFk = await loadDesignerForeignKeys({
           connectionId: tab.connectionId,
           engine: tab.connectionEngine,
-          database: tab.database,
+          database: db,
           table: tab.table,
         });
         const wantFk = new Set(fks.map((f) => f.name));
         for (const b of baseFk) {
           if (!wantFk.has(b.name)) {
-            await executeSql(
-              tab.connectionId,
+            await runSql(
               `ALTER TABLE ${qt} DROP FOREIGN KEY ${quoteIdent("mysql", b.name)}`,
             );
           }
@@ -484,9 +564,9 @@ export function TableDesigner({ tab }: Props) {
             .map((c) => quoteIdent("mysql", c))
             .join(", ");
           if (!cols || !refs) continue;
-          await executeSql(
-            tab.connectionId,
-            `ALTER TABLE ${qt} ADD CONSTRAINT ${quoteIdent("mysql", fk.name)} FOREIGN KEY (${cols}) REFERENCES ${quoteIdent("mysql", fk.refTable)} (${refs}) ON DELETE ${fk.onDelete} ON UPDATE ${fk.onUpdate}`,
+          const refTable = quoteTable("mysql", db, fk.refTable);
+          await runSql(
+            `ALTER TABLE ${qt} ADD CONSTRAINT ${quoteIdent("mysql", fk.name)} FOREIGN KEY (${cols}) REFERENCES ${refTable} (${refs}) ON DELETE ${fk.onDelete} ON UPDATE ${fk.onUpdate}`,
           );
         }
 
@@ -494,14 +574,13 @@ export function TableDesigner({ tab }: Props) {
         const baseCk = await loadDesignerChecks({
           connectionId: tab.connectionId,
           engine: tab.connectionEngine,
-          database: tab.database,
+          database: db,
           table: tab.table,
         });
         const wantCk = new Set(checks.map((c) => c.name));
         for (const b of baseCk) {
           if (!wantCk.has(b.name)) {
-            await executeSql(
-              tab.connectionId,
+            await runSql(
               `ALTER TABLE ${qt} DROP CHECK ${quoteIdent("mysql", b.name)}`,
             );
           }
@@ -510,8 +589,7 @@ export function TableDesigner({ tab }: Props) {
         for (const ck of checks) {
           if (ck.originalName && haveCk.has(ck.name)) continue;
           if (!identOk(ck.name) || !ck.expression.trim()) continue;
-          await executeSql(
-            tab.connectionId,
+          await runSql(
             `ALTER TABLE ${qt} ADD CONSTRAINT ${quoteIdent("mysql", ck.name)} CHECK (${ck.expression})`,
           );
         }
@@ -520,15 +598,14 @@ export function TableDesigner({ tab }: Props) {
         const baseTr = await loadDesignerTriggers({
           connectionId: tab.connectionId,
           engine: tab.connectionEngine,
-          database: tab.database,
+          database: db,
           table: tab.table,
         });
         const wantTr = new Set(triggers.map((t) => t.name));
         for (const b of baseTr) {
           if (!wantTr.has(b.name)) {
-            await executeSql(
-              tab.connectionId,
-              `DROP TRIGGER IF EXISTS ${quoteIdent("mysql", b.name)}`,
+            await runSql(
+              `DROP TRIGGER IF EXISTS ${quoteTable("mysql", db, b.name)}`,
             );
           }
         }
@@ -544,16 +621,14 @@ export function TableDesigner({ tab }: Props) {
             continue;
           }
           if (old) {
-            await executeSql(
-              tab.connectionId,
-              `DROP TRIGGER IF EXISTS ${quoteIdent("mysql", tr.name)}`,
+            await runSql(
+              `DROP TRIGGER IF EXISTS ${quoteTable("mysql", db, tr.name)}`,
             );
           }
-          await executeSql(
-            tab.connectionId,
+          await runSql(
             buildTriggerSql({
               engine: tab.connectionEngine,
-              database: tab.database,
+              database: db,
               table: tab.table,
               trigger: tr,
             }),
@@ -855,17 +930,28 @@ export function TableDesigner({ tab }: Props) {
               title="索引"
               rows={indexes}
               columns={[
-                { key: "name", label: "名称" },
-                { key: "columns", label: "字段" },
-                { key: "indexType", label: "类型" },
+                { key: "name", label: "名称", editor: "text" },
+                {
+                  key: "columns",
+                  label: "字段",
+                  editor: "select",
+                  options: colNames,
+                  allowEmpty: true,
+                },
+                {
+                  key: "indexType",
+                  label: "类型",
+                  editor: "select",
+                  options: INDEX_TYPES,
+                },
               ]}
               onAdd={() => {
                 setIndexes((prev) => [
                   ...prev,
                   {
                     key: `ix-${Date.now()}`,
-                    name: `idx_${columns[0]?.name || "col"}`,
-                    columns: columns[0]?.name || "",
+                    name: `idx_${colNames[0] || "col"}`,
+                    columns: colNames[0] || "",
                     unique: false,
                     indexType: "BTREE",
                     originalName: null,
@@ -911,12 +997,40 @@ export function TableDesigner({ tab }: Props) {
               title="外键"
               rows={fks}
               columns={[
-                { key: "name", label: "名称" },
-                { key: "columns", label: "字段" },
-                { key: "refTable", label: "引用表" },
-                { key: "refColumns", label: "引用字段" },
-                { key: "onDelete", label: "ON DELETE" },
-                { key: "onUpdate", label: "ON UPDATE" },
+                { key: "name", label: "名称", editor: "text" },
+                {
+                  key: "columns",
+                  label: "字段",
+                  editor: "select",
+                  options: colNames,
+                  allowEmpty: true,
+                },
+                {
+                  key: "refTable",
+                  label: "引用表",
+                  editor: "select",
+                  options: dbTableNames,
+                  allowEmpty: true,
+                },
+                {
+                  key: "refColumns",
+                  label: "引用字段",
+                  editor: "select",
+                  options: (row) => refColCache[row.refTable.trim()] ?? [],
+                  allowEmpty: true,
+                },
+                {
+                  key: "onDelete",
+                  label: "ON DELETE",
+                  editor: "select",
+                  options: FK_ACTIONS,
+                },
+                {
+                  key: "onUpdate",
+                  label: "ON UPDATE",
+                  editor: "select",
+                  options: FK_ACTIONS,
+                },
               ]}
               onAdd={() => {
                 setFks((prev) => [
@@ -924,7 +1038,7 @@ export function TableDesigner({ tab }: Props) {
                   {
                     key: `fk-${Date.now()}`,
                     name: `fk_${tableName || tab.table}_${prev.length + 1}`,
-                    columns: "",
+                    columns: colNames[0] || "",
                     refTable: "",
                     refColumns: "",
                     onDelete: "RESTRICT",
@@ -936,7 +1050,18 @@ export function TableDesigner({ tab }: Props) {
               }}
               onChange={(key, patch) => {
                 setFks((prev) =>
-                  prev.map((r) => (r.key === key ? { ...r, ...patch } : r)),
+                  prev.map((r) => {
+                    if (r.key !== key) return r;
+                    const next = { ...r, ...patch };
+                    if (
+                      patch.refTable != null &&
+                      patch.refTable !== r.refTable
+                    ) {
+                      next.refColumns = "";
+                      void ensureRefCols(String(patch.refTable));
+                    }
+                    return next;
+                  }),
                 );
                 touch();
               }}
@@ -1299,6 +1424,58 @@ export function TableDesigner({ tab }: Props) {
   );
 }
 
+type ObjectEditorColumn<T> = {
+  key: keyof T & string;
+  label: string;
+  editor?: "text" | "select" | "multi-check";
+  options?: string[] | ((row: T) => string[]);
+  /** For select: show an empty first option */
+  allowEmpty?: boolean;
+};
+
+function splitCsv(value: string): string[] {
+  return value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function MultiCheckCell({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: string[];
+  onChange: (next: string) => void;
+}) {
+  const selected = new Set(splitCsv(value));
+  const orphan = splitCsv(value).filter((v) => !options.includes(v));
+  if (options.length === 0 && orphan.length === 0) {
+    return <span className="td-multi-empty">无可用字段</span>;
+  }
+  return (
+    <div className="td-multi-check">
+      {[...options, ...orphan].map((opt) => (
+        <label key={opt} className="td-multi-check-item" title={opt}>
+          <input
+            type="checkbox"
+            checked={selected.has(opt)}
+            onChange={(e) => {
+              const next = new Set(selected);
+              if (e.target.checked) next.add(opt);
+              else next.delete(opt);
+              const ordered = [...options, ...orphan].filter((o) => next.has(o));
+              onChange(ordered.join(","));
+            }}
+          />
+          <span>{opt}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function ObjectEditor<T extends { key: string }>({
   title,
   rows,
@@ -1310,7 +1487,7 @@ function ObjectEditor<T extends { key: string }>({
 }: {
   title: string;
   rows: T[];
-  columns: { key: keyof T & string; label: string }[];
+  columns: ObjectEditorColumn<T>[];
   onAdd: () => void;
   onChange: (key: string, patch: Partial<T>) => void;
   onRemove: (key: string) => void;
@@ -1338,18 +1515,67 @@ function ObjectEditor<T extends { key: string }>({
           <tbody>
             {rows.map((r) => (
               <tr key={r.key}>
-                {columns.map((c) => (
-                  <td key={c.key}>
-                    <input
-                      value={String((r as Record<string, unknown>)[c.key] ?? "")}
-                      onChange={(e) =>
-                        onChange(r.key, {
-                          [c.key]: e.target.value,
-                        } as Partial<T>)
+                {columns.map((c) => {
+                  const raw = String(
+                    (r as Record<string, unknown>)[c.key] ?? "",
+                  );
+                  const opts = Array.isArray(c.options)
+                    ? c.options
+                    : c.options
+                      ? c.options(r)
+                      : [];
+                  const editor = c.editor ?? "text";
+                  return (
+                    <td
+                      key={c.key}
+                      className={
+                        editor === "multi-check" ? "td-cell-multi" : undefined
                       }
-                    />
-                  </td>
-                ))}
+                    >
+                      {editor === "select" ? (
+                        <select
+                          value={raw}
+                          onChange={(e) =>
+                            onChange(r.key, {
+                              [c.key]: e.target.value,
+                            } as Partial<T>)
+                          }
+                        >
+                          {c.allowEmpty && (
+                            <option value="">（选择）</option>
+                          )}
+                          {raw && !opts.includes(raw) && (
+                            <option value={raw}>{raw}</option>
+                          )}
+                          {opts.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      ) : editor === "multi-check" ? (
+                        <MultiCheckCell
+                          value={raw}
+                          options={opts}
+                          onChange={(next) =>
+                            onChange(r.key, {
+                              [c.key]: next,
+                            } as Partial<T>)
+                          }
+                        />
+                      ) : (
+                        <input
+                          value={raw}
+                          onChange={(e) =>
+                            onChange(r.key, {
+                              [c.key]: e.target.value,
+                            } as Partial<T>)
+                          }
+                        />
+                      )}
+                    </td>
+                  );
+                })}
                 {extraCell && <td>{extraCell(r)}</td>}
                 <td>
                   <button

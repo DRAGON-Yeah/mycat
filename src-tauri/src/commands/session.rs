@@ -92,10 +92,14 @@ pub fn execute_sql(
     pool: State<'_, SessionPool>,
     connection_id: String,
     sql: String,
+    database: Option<String>,
 ) -> Result<QueryOutcome, String> {
     pool.begin_query(&connection_id)
         .map_err(|e| e.to_string())?;
-    let result = pool.with_session(&connection_id, |s| s.execute_sql(&sql));
+    let result = pool.with_session(&connection_id, |s| {
+        s.use_database(database.as_deref())?;
+        s.execute_sql(&sql)
+    });
     pool.end_query(&connection_id);
     result.map_err(|e| e.to_string())
 }

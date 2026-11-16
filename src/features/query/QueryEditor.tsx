@@ -755,7 +755,11 @@ export function QueryEditor() {
             let primary = original;
 
             try {
-              const jsonOut = await executeSql(tab.connectionId, jsonSql);
+              const jsonOut = await executeSql(
+                tab.connectionId,
+                jsonSql,
+                tab.database,
+              );
               if (cancelRequestedRef.current) {
                 cancelled = true;
                 throw new Error("已取消");
@@ -779,7 +783,11 @@ export function QueryEditor() {
 
             if (gridSql !== jsonSql || !explainGrid) {
               try {
-                const gridOut = await executeSql(tab.connectionId, gridSql);
+                const gridOut = await executeSql(
+                  tab.connectionId,
+                  gridSql,
+                  tab.database,
+                );
                 if (cancelRequestedRef.current) {
                   cancelled = true;
                   throw new Error("已取消");
@@ -817,7 +825,11 @@ export function QueryEditor() {
               `[${i + 1}/${statements.length}] EXPLAIN OK · ${elapsed} ms`,
             );
           } else {
-            const out = await executeSql(tab.connectionId, original);
+            const out = await executeSql(
+              tab.connectionId,
+              original,
+              tab.database,
+            );
             if (cancelRequestedRef.current) {
               cancelled = true;
               messages.push(
