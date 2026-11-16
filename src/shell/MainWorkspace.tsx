@@ -100,7 +100,12 @@ export function MainWorkspace() {
                   className="ws-tab-close"
                   title="关闭"
                   aria-label={`关闭 ${q.title}`}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
                   onClick={(e) => {
+                    e.preventDefault();
                     e.stopPropagation();
                     closeQueryTab(q.id);
                   }}
@@ -137,7 +142,12 @@ export function MainWorkspace() {
                   className="ws-tab-close"
                   title="关闭"
                   aria-label={`关闭 ${t.table}`}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
                   onClick={(e) => {
+                    e.preventDefault();
                     e.stopPropagation();
                     closeTab(t.id);
                   }}

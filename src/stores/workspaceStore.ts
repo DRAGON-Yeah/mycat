@@ -393,7 +393,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
   closeQueryTab: (id) => {
     const tab = get().queryTabs.find((t) => t.id === id);
-    if (tab?.dirty) {
+    if (tab?.dirty && tab.sql.trim()) {
       const ok = window.confirm(`「${tab.title}」有未保存更改，确定关闭？`);
       if (!ok) return false;
     }

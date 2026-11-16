@@ -20,12 +20,22 @@ import { downloadTextFile } from "../import-export/csv";
 import { useUiStore } from "../../stores/uiStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import {
+  QueryResultPanel,
+  type QueryBatchItem,
+} from "./QueryResultPanel";
+import {
+  isTableNameContext,
   registerSqlCompletions,
   setSqlCompletionContext,
 } from "./sqlCompletions";
 import { formatSql, toggleLineComment } from "./sqlFormat";
+import {
+  isExplainSql,
+  splitSqlStatements,
+  statementAtOffset,
+} from "./sqlSplit";
 
-type RunMode = "all" | "selection";
+type RunMode = "all" | "selection" | "current";
 
 export function QueryEditor() {
   const theme = useUiStore((s) => s.theme);
@@ -39,6 +49,9 @@ export function QueryEditor() {
   const runRef = useRef<(mode: RunMode, explain?: boolean) => Promise<void>>(
     async () => undefined,
   );
+  const runSmartRef = useRef<(explain?: boolean) => Promise<void>>(
+    async () => undefined,
+  );
   const saveRef = useRef<() => void>(() => undefined);
   const [connections, setConnections] = useState<ConnectionDto[]>([]);
   const [databases, setDatabases] = useState<string[]>([]);
@@ -49,13 +62,15 @@ export function QueryEditor() {
   const [dbMenuOpen, setDbMenuOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [result, setResult] = useState<{
-    columns: string[];
-    rows: unknown[][];
-    rowsAffected: number;
-    elapsedMs: number;
-  } | null>(null);
+  const [batchItems, setBatchItems] = useState<QueryBatchItem[]>([]);
+  const [batchMessages, setBatchMessages] = useState<string[]>([]);
   const [resultCollapsed, setResultCollapsed] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findMatchCase, setFindMatchCase] = useState(false);
+  const [findIndex, setFindIndex] = useState(0);
+  const [findCount, setFindCount] = useState(0);
+  const findInputRef = useRef<HTMLInputElement>(null);
 
   const monacoTheme = useMemo(
     () => (theme === "dark" ? "vs-dark" : "light"),
@@ -140,8 +155,15 @@ export function QueryEditor() {
           tab!.database || undefined,
         );
         if (cancelled) return;
+        // Publish tables immediately so FROM autocomplete works without waiting columns.
+        setSqlCompletionContext({
+          connectionId: tab!.connectionId,
+          database: tab!.database || null,
+          engine: tab!.connectionEngine,
+          tables: tables.map((t) => ({ name: t.name, kind: t.kind })),
+          columnsByTable: {},
+        });
         const columnsByTable: Record<string, string[]> = {};
-        // Prefetch columns for first N tables (enough for autocomplete).
         const sample = tables.slice(0, 40);
         await Promise.all(
           sample.map(async (t) => {
@@ -186,11 +208,16 @@ export function QueryEditor() {
 
   useEffect(() => {
     setError(null);
-    setResult(null);
+    setBatchItems([]);
+    setBatchMessages([]);
     setStatus(null);
     setRunMenuOpen(false);
     setConnMenuOpen(false);
     setDbMenuOpen(false);
+    setFindOpen(false);
+    setFindQuery("");
+    setFindCount(0);
+    setFindIndex(0);
   }, [tab?.id]);
 
   useEffect(() => {
@@ -208,12 +235,29 @@ export function QueryEditor() {
     editorRef.current = editor;
     registerSqlCompletions(monaco);
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-      void runRef.current("all");
+      void runSmartRef.current();
     });
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       saveRef.current();
     });
-    // Auto-open suggestions after letters (Navicat-like keyword pick).
+    // Use our Find bar instead of Monaco's (Monaco close icon often broken).
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF, () => {
+      void editor.getAction("closeFindWidget")?.run();
+      setFindOpen(true);
+      window.setTimeout(() => findInputRef.current?.focus(), 0);
+    });
+    editor.addCommand(monaco.KeyCode.Escape, () => {
+      void editor.getAction("closeFindWidget")?.run();
+      setFindOpen(false);
+    });
+    editor.addCommand(
+      monaco.KeyMod.Shift | monaco.KeyCode.Escape,
+      () => {
+        void editor.getAction("closeFindWidget")?.run();
+        setFindOpen(false);
+      },
+    );
+    // Auto-open suggestions: keywords, and table names after FROM/JOIN/…
     let suggestTimer: number | undefined;
     editor.onDidChangeModelContent(() => {
       window.clearTimeout(suggestTimer);
@@ -222,11 +266,15 @@ export function QueryEditor() {
         if (!sel || !sel.isEmpty()) return;
         const model = editor.getModel();
         if (!model) return;
-        const word = model.getWordUntilPosition(sel.getPosition()).word;
-        if (/^[A-Za-z_][\w]*$/.test(word) && word.length >= 1) {
+        const pos = sel.getPosition();
+        const word = model.getWordUntilPosition(pos).word;
+        const want =
+          (/^[A-Za-z_][\w]*$/.test(word) && word.length >= 1) ||
+          isTableNameContext(model, pos);
+        if (want) {
           void editor.trigger("sql-suggest", "editor.action.triggerSuggest", {});
         }
-      }, 80);
+      }, 60);
     });
     editor.focus();
   };
@@ -273,9 +321,85 @@ export function QueryEditor() {
     patchSql(next);
   }
 
-  function findReplace() {
-    editorRef.current?.getAction("actions.find")?.run();
+  function closeFind() {
+    const editor = editorRef.current;
+    void editor?.getAction("closeFindWidget")?.run();
+    // Monaco internal contribution (best-effort).
+    try {
+      const contrib = editor?.getContribution?.(
+        "editor.contrib.findController",
+      ) as { closeFindWidget?: () => void } | null;
+      contrib?.closeFindWidget?.();
+    } catch {
+      // ignore
+    }
+    setFindOpen(false);
+    setFindCount(0);
+    setFindIndex(0);
+    editor?.focus();
   }
+
+  function findReplace() {
+    // Always prefer our controllable Find bar with a real × button.
+    const editor = editorRef.current;
+    void editor?.getAction("closeFindWidget")?.run();
+    setFindOpen((open) => {
+      const next = !open;
+      if (next) window.setTimeout(() => findInputRef.current?.focus(), 0);
+      return next;
+    });
+  }
+
+  function runFind(direction: "next" | "prev" | "fresh" = "fresh") {
+    const editor = editorRef.current;
+    const model = editor?.getModel();
+    if (!editor || !model || !findQuery) {
+      setFindCount(0);
+      setFindIndex(0);
+      return;
+    }
+    const matches = model.findMatches(
+      findQuery,
+      true,
+      false,
+      findMatchCase,
+      null,
+      true,
+    );
+    setFindCount(matches.length);
+    if (matches.length === 0) {
+      setFindIndex(0);
+      return;
+    }
+    let idx = findIndex;
+    if (direction === "fresh") {
+      const pos = editor.getPosition();
+      idx = 0;
+      if (pos) {
+        const found = matches.findIndex(
+          (m) =>
+            m.range.startLineNumber > pos.lineNumber ||
+            (m.range.startLineNumber === pos.lineNumber &&
+              m.range.startColumn >= pos.column),
+        );
+        idx = found >= 0 ? found : 0;
+      }
+    } else if (direction === "next") {
+      idx = (findIndex + 1) % matches.length;
+    } else {
+      idx = (findIndex - 1 + matches.length) % matches.length;
+    }
+    const match = matches[idx]!;
+    setFindIndex(idx);
+    editor.setSelection(match.range);
+    editor.revealRangeInCenter(match.range);
+  }
+
+  useEffect(() => {
+    if (!findOpen) return;
+    runFind("fresh");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findQuery, findMatchCase, findOpen, tab?.id]);
 
   async function switchConnection(connId: string) {
     if (!tab || connId === tab.connectionId) {
@@ -319,13 +443,52 @@ export function QueryEditor() {
     }
   }
 
+  function getSelectedSql(): string {
+    const model = editorRef.current?.getModel();
+    const sel = editorRef.current?.getSelection();
+    if (model && sel && !sel.isEmpty()) {
+      return model.getValueInRange(sel);
+    }
+    return "";
+  }
+
+  function getCurrentStatementSql(): string {
+    const model = editorRef.current?.getModel();
+    const pos = editorRef.current?.getPosition();
+    if (!model || !pos) {
+      const stmts = splitSqlStatements(tab?.sql ?? "");
+      return stmts[0] ?? (tab?.sql ?? "").trim();
+    }
+    const offset = model.getOffsetAt(pos);
+    return (
+      statementAtOffset(model.getValue(), offset) ||
+      getSelectedSql() ||
+      model.getValue().trim()
+    );
+  }
+
+  /**
+   * Main Run:
+   * - 有选中 → 执行选中（可多语句 → 多结果）
+   * - 无选中 → 执行编辑器全部语句（多语句 → 多结果）
+   */
+  async function runSmart(explain = false) {
+    const selected = getSelectedSql().trim();
+    if (selected) {
+      await run("selection", explain);
+    } else {
+      await run("all", explain);
+    }
+  }
+
   async function run(mode: RunMode, explain = false) {
     if (!tab) return;
     setRunMenuOpen(false);
     setRunning(true);
     setError(null);
     setStatus(null);
-    setResult(null);
+    setBatchItems([]);
+    setBatchMessages([]);
     try {
       await openConnection(tab.connectionId);
       if (tab.database && String(tab.connectionEngine) === "mysql") {
@@ -334,31 +497,92 @@ export function QueryEditor() {
           `USE \`${tab.database.replace(/`/g, "``")}\``,
         );
       }
-      let payload = tab.sql;
+
+      let script = "";
       if (mode === "selection") {
-        const model = editorRef.current?.getModel();
-        const sel = editorRef.current?.getSelection();
-        if (model && sel && !sel.isEmpty()) {
-          payload = model.getValueInRange(sel);
-        } else {
-          const browserSel = window.getSelection()?.toString()?.trim();
-          if (browserSel) payload = browserSel;
+        script = getSelectedSql().trim();
+        if (!script) {
+          setError("请先选中要执行的 SQL 行/语句");
+          return;
         }
+      } else if (mode === "current") {
+        script = getCurrentStatementSql().trim();
+      } else {
+        script = tab.sql.trim();
       }
-      payload = payload.trim();
-      if (!payload) {
+
+      if (!script) {
+        setError("没有可执行的 SQL");
+        return;
+      }
+
+      let statements = splitSqlStatements(script);
+      if (statements.length === 0) statements = [script];
+      // Ignore empty / comment-only leftovers
+      statements = statements
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0 && !/^(--|#|\/\*)/.test(s));
+      if (statements.length === 0) {
         setError("没有可执行的 SQL");
         return;
       }
       if (explain) {
-        payload = `EXPLAIN ${payload}`;
+        statements = statements.map((s) =>
+          isExplainSql(s) ? s : `EXPLAIN ${s}`,
+        );
       }
-      const out = await executeSql(tab.connectionId, payload);
-      setResult(out);
+
+      const items: QueryBatchItem[] = [];
+      const messages: string[] = [
+        `执行 ${statements.length} 条语句 · ${mode === "selection" ? "选中内容" : mode === "current" ? "当前语句" : "全部"}`,
+      ];
+
+      for (let i = 0; i < statements.length; i++) {
+        const sql = statements[i]!;
+        const id = `stmt-${Date.now()}-${i}`;
+        try {
+          const out = await executeSql(tab.connectionId, sql);
+          const hasGrid = out.columns.length > 0;
+          const kind =
+            explain || isExplainSql(sql)
+              ? "explain"
+              : hasGrid
+                ? "result"
+                : "message";
+          items.push({
+            id,
+            sql,
+            kind,
+            result: hasGrid ? out : undefined,
+            elapsedMs: out.elapsedMs,
+          });
+          messages.push(
+            hasGrid
+              ? `[${i + 1}/${statements.length}] OK · ${out.rows.length} 行 · ${out.elapsedMs} ms`
+              : `[${i + 1}/${statements.length}] OK · 影响 ${out.rowsAffected} 行 · ${out.elapsedMs} ms`,
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          items.push({ id, sql, kind: "message", error: msg });
+          messages.push(`[${i + 1}/${statements.length}] ERROR: ${msg}`);
+          // continue remaining statements so later SELECTs still produce results
+        }
+      }
+
+      setBatchItems(items);
+      setBatchMessages(messages);
+      const ok = items.filter((x) => !x.error).length;
+      const fail = items.filter((x) => x.error).length;
+      const resultCount = items.filter(
+        (x) => (x.kind === "result" || x.kind === "explain") && x.result,
+      ).length;
       setStatus(
-        `影响 ${out.rowsAffected} 行 · ${out.elapsedMs} ms · ${out.rows.length} 行结果`,
+        `完成：成功 ${ok} · 失败 ${fail} · 结果集 ${resultCount}`,
       );
       setResultCollapsed(false);
+      if (fail && ok === 0) {
+        setError(items.find((x) => x.error)?.error ?? "执行失败");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -366,7 +590,14 @@ export function QueryEditor() {
     }
   }
 
-  runRef.current = run;
+  // Keep ref signature compatible with Ctrl/Cmd+Enter → smart run
+  async function runFromShortcut(mode: RunMode, explain = false) {
+    if (mode === "all") await run("all", explain);
+    else await runSmart(explain);
+  }
+
+  runRef.current = runFromShortcut;
+  runSmartRef.current = runSmart;
   saveRef.current = save;
 
   if (!tab) {
@@ -406,6 +637,75 @@ export function QueryEditor() {
           </IconBtn>
         </div>
       </div>
+
+      {findOpen && (
+        <div className="query-find-bar" onClick={(e) => e.stopPropagation()}>
+          <input
+            ref={findInputRef}
+            className="query-find-input"
+            value={findQuery}
+            placeholder="Find"
+            onChange={(e) => setFindQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                closeFind();
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                runFind(e.shiftKey ? "prev" : "next");
+              }
+            }}
+          />
+          <button
+            type="button"
+            className={`query-find-opt ${findMatchCase ? "is-on" : ""}`}
+            title="区分大小写"
+            onClick={() => setFindMatchCase((v) => !v)}
+          >
+            Aa
+          </button>
+          <span className="query-find-status">
+            {findQuery
+              ? findCount === 0
+                ? "No results"
+                : `${findIndex + 1} of ${findCount}`
+              : ""}
+          </span>
+          <button
+            type="button"
+            className="query-find-nav"
+            title="上一个"
+            onClick={() => runFind("prev")}
+          >
+            ▲
+          </button>
+          <button
+            type="button"
+            className="query-find-nav"
+            title="下一个"
+            onClick={() => runFind("next")}
+          >
+            ▼
+          </button>
+          <button
+            type="button"
+            className="query-find-close"
+            title="关闭查找 (Esc)"
+            aria-label="关闭查找"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              closeFind();
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <div className="query-context-bar" onClick={(e) => e.stopPropagation()}>
         <div className={`query-ctx-dd ${connMenuOpen ? "is-open" : ""}`}>
@@ -509,7 +809,7 @@ export function QueryEditor() {
             type="button"
             className="query-run-btn"
             disabled={running}
-            onClick={() => void run("all")}
+            onClick={() => void runSmart()}
           >
             <span className="query-run-play" aria-hidden />
             运行
@@ -528,12 +828,15 @@ export function QueryEditor() {
           {runMenuOpen && (
             <div className="query-run-menu">
               <button type="button" onClick={() => void run("all")}>
-                运行全部
+                运行全部（多结果）
               </button>
               <button type="button" onClick={() => void run("selection")}>
-                运行选中
+                运行选中（多结果）
               </button>
-              <button type="button" onClick={() => void run("all", true)}>
+              <button type="button" onClick={() => void run("current")}>
+                仅运行当前语句
+              </button>
+              <button type="button" onClick={() => void runSmart(true)}>
                 解释计划 (EXPLAIN)
               </button>
             </div>
@@ -557,7 +860,7 @@ export function QueryEditor() {
           className="query-explain-btn"
           disabled={running}
           title="解释计划"
-          onClick={() => void run("all", true)}
+          onClick={() => void runSmart(true)}
         >
           <span className="query-explain-icon" aria-hidden />
         </button>
@@ -606,44 +909,25 @@ export function QueryEditor() {
 
         {!resultCollapsed && (
           <div className="query-result">
-            <div className="query-result-status">
-              {error ? (
-                <span className="is-error">{error}</span>
-              ) : status ? (
-                <span>{status}</span>
-              ) : (
-                <span className="is-muted">运行结果将显示在此处</span>
-              )}
-            </div>
-            {result && (
-              <div className="data-grid-scroll query-result-table">
-                <table>
-                  <thead>
-                    <tr>
-                      {result.columns.map((c) => (
-                        <th key={c}>{c}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.rows.map((row, i) => (
-                      <tr key={i}>
-                        {row.map((cell, j) => (
-                          <td key={j}>
-                            {cell === null ? "NULL" : String(cell)}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                    {result.rows.length === 0 && (
-                      <tr>
-                        <td colSpan={Math.max(result.columns.length, 1)}>
-                          （无行）
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+            {batchItems.length > 0 ? (
+              <QueryResultPanel
+                items={batchItems}
+                messages={batchMessages}
+                tableHint={
+                  tab.database ? `${tab.database}_result` : "query_result"
+                }
+              />
+            ) : (
+              <div className="query-result-status">
+                {error ? (
+                  <span className="is-error">{error}</span>
+                ) : status ? (
+                  <span>{status}</span>
+                ) : (
+                  <span className="is-muted">
+                    点「运行」执行全部语句（或选中部分）。多条 SELECT 会生成「结果 1」「结果 2」… 页签。
+                  </span>
+                )}
               </div>
             )}
           </div>
