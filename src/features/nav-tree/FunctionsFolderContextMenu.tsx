@@ -6,7 +6,14 @@ import { loadTableGroups, saveTableGroups } from "./tableGroups";
 import { exportAllRoutinesDictionary } from "./routineMenuActions";
 import { isSaveCancelled } from "../import-export/csv";
 import { identOk } from "./sqlIdent";
-import { rewriteCreateRoutineName } from "../function-designer/routineDdl";
+import {
+  buildRoutineTemplateSql,
+  rewriteCreateRoutineName,
+} from "../function-designer/routineDdl";
+import {
+  FunctionWizard,
+  type FunctionWizardResult,
+} from "../function-designer/FunctionWizard";
 
 export type FunctionsFolderMenuTarget = {
   x: number;
@@ -35,7 +42,9 @@ export function FunctionsFolderContextMenu({
   const [newGroup, setNewGroup] = useState("");
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteSql, setPasteSql] = useState("");
-  const [pasteName, setPasteName] = useState("new_proc");
+  const [pasteName, setPasteName] = useState("NewFunc");
+  const [canPaste, setCanPaste] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const openConn = useWorkspaceStore((s) => s.openConnection);
   const selectObjectFolder = useWorkspaceStore((s) => s.selectObjectFolder);
@@ -45,6 +54,12 @@ export function FunctionsFolderContextMenu({
     void loadTableGroups(conn.id, database)
       .then((s) => setGroups(s.groups))
       .catch(() => setGroups([]));
+    void navigator.clipboard
+      .readText()
+      .then((t) =>
+        setCanPaste(/create\s+(function|procedure)/i.test(t)),
+      )
+      .catch(() => setCanPaste(false));
   }, [conn.id, database]);
 
   async function run(action: () => Promise<void>) {
@@ -68,6 +83,34 @@ export function FunctionsFolderContextMenu({
     selectObjectFolder(database, "functions");
   }
 
+  function openFromWizard(result: FunctionWizardResult) {
+    ensureContext();
+    const seedSql = buildRoutineTemplateSql({
+      engine: String(conn.engine),
+      database,
+      name: result.name,
+      routineType: result.routineType,
+      wizardParams: result.skipped
+        ? [{ name: "param1", typeName: "INT", length: "0", mode: "IN" }]
+        : result.params,
+      returnsType: result.returnsType,
+      returnsLength: result.returnsLength,
+      deterministic: result.deterministic,
+      dataAccess: result.dataAccess,
+      securityType: result.securityType,
+    });
+    openFunctionDesigner({
+      connection: conn,
+      database,
+      routine: result.name,
+      mode: "create",
+      routineType: result.routineType,
+      seedSql,
+    });
+    setWizardOpen(false);
+    onClose();
+  }
+
   return (
     <>
       <div
@@ -78,10 +121,6 @@ export function FunctionsFolderContextMenu({
         onContextMenu={(e) => e.preventDefault()}
       >
         <button type="button" disabled title="请先选择一个函数">
-          运行函数
-          <span className="menu-shortcut">⌘O</span>
-        </button>
-        <button type="button" disabled title="请先选择一个函数">
           设计函数
           <span className="menu-shortcut">⌘D</span>
         </button>
@@ -90,14 +129,7 @@ export function FunctionsFolderContextMenu({
           disabled={busy}
           onClick={() => {
             ensureContext();
-            openFunctionDesigner({
-              connection: conn,
-              database,
-              routine: "new_proc",
-              mode: "create",
-              routineType: "PROCEDURE",
-            });
-            onClose();
+            setWizardOpen(true);
           }}
         >
           新建函数
@@ -109,6 +141,9 @@ export function FunctionsFolderContextMenu({
         <button type="button" disabled>
           复制函数
           <span className="menu-shortcut">⇧⌘D</span>
+        </button>
+        <button type="button" disabled title="请先选择一个函数">
+          运行函数
         </button>
         <button type="button" disabled>
           设置权限
@@ -128,6 +163,19 @@ export function FunctionsFolderContextMenu({
           }
         >
           数据字典…
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() =>
+            void run(async () => {
+              ensureContext();
+              const n = await exportAllRoutinesDictionary({ conn, database });
+              onMessage(`已导出 ${n} 个函数的逆向定义（DDL）`);
+            })
+          }
+        >
+          逆向函数到模型…
         </button>
 
         <div className="dg-menu-sep" />
@@ -194,7 +242,7 @@ export function FunctionsFolderContextMenu({
         </button>
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || !canPaste}
           onClick={() =>
             void (async () => {
               try {
@@ -207,11 +255,11 @@ export function FunctionsFolderContextMenu({
                 const m = text.match(
                   /create\s+(?:definer\s*=\s*[^\s]+\s+)?(?:function|procedure)\s+(?:`?[\w]+`?\.)?`?([\w]+)`?/i,
                 );
-                setPasteName(m?.[1] ? `${m[1]}_copy` : "new_proc");
+                setPasteName(m?.[1] ? `${m[1]}_copy` : "NewFunc");
                 setPasteOpen(true);
               } catch {
                 setPasteSql("");
-                setPasteName("new_proc");
+                setPasteName("NewFunc");
                 setPasteOpen(true);
               }
             })()
@@ -237,6 +285,16 @@ export function FunctionsFolderContextMenu({
           <span className="menu-shortcut">⌘R</span>
         </button>
       </div>
+
+      {wizardOpen && (
+        <FunctionWizard
+          onCancel={() => {
+            setWizardOpen(false);
+            onClose();
+          }}
+          onComplete={openFromWizard}
+        />
+      )}
 
       {pasteOpen && (
         <div className="modal-backdrop" role="presentation">
@@ -278,7 +336,7 @@ export function FunctionsFolderContextMenu({
               rows={8}
               value={pasteSql}
               onChange={(e) => setPasteSql(e.target.value)}
-              placeholder="CREATE PROCEDURE ..."
+              placeholder="CREATE FUNCTION ..."
             />
             <div className="modal-actions">
               <button

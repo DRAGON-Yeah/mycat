@@ -165,6 +165,23 @@ function splitArgs(s: string): string[] {
   return out;
 }
 
+export type WizardParam = {
+  name: string;
+  mode: "IN" | "OUT" | "INOUT";
+  typeName: string;
+  length: string;
+};
+
+export function formatParamType(typeName: string, length: string): string {
+  const t = typeName.trim() || "INT";
+  const len = length.trim();
+  if (!len || len === "0") return t;
+  if (/^(varchar|char|varbinary|binary|decimal|numeric|float|double)$/i.test(t)) {
+    return `${t}(${len})`;
+  }
+  return t;
+}
+
 export function buildCreateRoutineSql(args: {
   engine: string;
   database: string;
@@ -174,8 +191,11 @@ export function buildCreateRoutineSql(args: {
   returns: string;
   body: string;
   definer?: string;
+  /** CURRENT_USER or user@host; default CURRENT_USER for new templates */
+  definerCurrentUser?: boolean;
   securityType?: string;
   deterministic?: boolean;
+  dataAccess?: string;
   comment?: string;
 }): string {
   const {
@@ -187,8 +207,10 @@ export function buildCreateRoutineSql(args: {
     returns,
     body,
     definer,
+    definerCurrentUser,
     securityType,
     deterministic,
+    dataAccess,
     comment,
   } = args;
   const qt = quoteTable(engine, database, name);
@@ -196,35 +218,95 @@ export function buildCreateRoutineSql(args: {
     .filter((p) => p.name.trim() && p.dataType.trim())
     .map((p) => {
       const mode =
-        routineType === "FUNCTION"
-          ? ""
-          : `${p.mode} `;
+        routineType === "FUNCTION" ? "" : `${p.mode} `;
       return `${mode}${quoteIdent(engine, p.name.trim())} ${p.dataType.trim()}`;
     })
     .join(", ");
 
-  const parts: string[] = [`CREATE ${routineType} ${qt}(${paramSql})`];
+  let definerClause = "";
+  if (definerCurrentUser) {
+    definerClause = "DEFINER = CURRENT_USER ";
+  } else if (definer?.trim()) {
+    const d = definer.trim();
+    if (/^current_user$/i.test(d)) definerClause = "DEFINER = CURRENT_USER ";
+    else if (d.includes("`")) definerClause = `DEFINER = ${d} `;
+    else {
+      const m = d.match(/^([^@]+)@(.+)$/);
+      definerClause = m
+        ? `DEFINER = \`${m[1]}\`@\`${m[2]}\` `
+        : `DEFINER = \`${d}\`@\`%\` `;
+    }
+  }
+
+  const parts: string[] = [
+    `CREATE ${definerClause}${routineType} ${qt}(${paramSql})`,
+  ];
   if (routineType === "FUNCTION") {
     parts.push(`RETURNS ${returns.trim() || "INT"}`);
   }
   if (deterministic) parts.push("DETERMINISTIC");
   else parts.push("NOT DETERMINISTIC");
+  if (dataAccess?.trim()) {
+    parts.push(dataAccess.trim().toUpperCase());
+  }
   if (securityType === "INVOKER" || securityType === "DEFINER") {
     parts.push(`SQL SECURITY ${securityType}`);
   }
   if (comment?.trim()) {
     parts.push(`COMMENT '${comment.trim().replace(/'/g, "\\'")}'`);
   }
-  // DEFINER is server-side sensitive; only emit if user set it
-  void definer;
 
-  let bodySql = body.trim() || "BEGIN\n\nEND";
-  if (!/;\s*$/.test(bodySql) && !/\bend\s*$/i.test(bodySql)) {
+  let bodySql = body.trim() || "BEGIN\n  #Routine body goes here...\nEND";
+  if (routineType === "FUNCTION" && !/\breturn\b/i.test(bodySql)) {
+    bodySql =
+      "BEGIN\n  #Routine body goes here...\n  RETURN 0;\nEND";
+  }
+  if (!/;\s*$/.test(bodySql)) {
     bodySql = `${bodySql};`;
   }
   parts.push(bodySql);
   const sql = parts.join("\n");
   return sql.endsWith(";") ? sql : `${sql};`;
+}
+
+/** Navicat-style template after wizard / skip. */
+export function buildRoutineTemplateSql(args: {
+  engine: string;
+  database: string;
+  name: string;
+  routineType: RoutineType;
+  wizardParams?: WizardParam[];
+  returnsType?: string;
+  returnsLength?: string;
+  deterministic?: boolean;
+  dataAccess?: string;
+  securityType?: string;
+}): string {
+  const params: RoutineParam[] = (args.wizardParams ?? []).map((p) => ({
+    name: p.name || "param1",
+    mode: args.routineType === "FUNCTION" ? "IN" : p.mode,
+    dataType: formatParamType(p.typeName, p.length),
+  }));
+  if (params.length === 0 && args.routineType === "FUNCTION") {
+    params.push({ name: "param1", mode: "IN", dataType: "INT" });
+  }
+  const returns = formatParamType(
+    args.returnsType || "INT",
+    args.returnsLength || "0",
+  );
+  return buildCreateRoutineSql({
+    engine: args.engine,
+    database: args.database,
+    name: args.name || "NewFunc",
+    routineType: args.routineType,
+    params,
+    returns,
+    body: "",
+    definerCurrentUser: true,
+    deterministic: args.deterministic,
+    dataAccess: args.dataAccess,
+    securityType: args.securityType,
+  });
 }
 
 export function rewriteCreateRoutineName(

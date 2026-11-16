@@ -53,6 +53,11 @@ import { dropRoutine } from "../nav-tree/routineMenuActions";
 import { dropEvent } from "../nav-tree/eventMenuActions";
 import { emitTableDataChanged } from "../../lib/tableEvents";
 import { RunRoutineDialog } from "../function-designer/RunRoutineDialog";
+import {
+  FunctionWizard,
+  type FunctionWizardResult,
+} from "../function-designer/FunctionWizard";
+import { buildRoutineTemplateSql } from "../function-designer/routineDdl";
 
 const TABLE_COLS = [
   { key: "name", label: "名称", defaultWidth: 180 },
@@ -155,6 +160,7 @@ export function ObjectListGrid() {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [runOpen, setRunOpen] = useState(false);
+  const [fnWizardOpen, setFnWizardOpen] = useState(false);
   const filterRef = useRef<HTMLInputElement>(null);
   const listResetKey = useMemo(
     () => `${connection?.id ?? ""}:${database ?? ""}:${folder ?? ""}`,
@@ -285,13 +291,7 @@ export function ObjectListGrid() {
             mode: "create",
           });
         } else if (wantFunctions) {
-          openFunctionDesigner({
-            connection,
-            database,
-            routine: "new_proc",
-            mode: "create",
-            routineType: "PROCEDURE",
-          });
+          setFnWizardOpen(true);
         } else if (wantViews) {
           openViewDesigner({
             connection,
@@ -487,6 +487,33 @@ export function ObjectListGrid() {
     window.setTimeout(() => setToast(null), 2800);
   }
 
+  function completeFnWizard(result: FunctionWizardResult) {
+    if (!connection || !database) return;
+    const seedSql = buildRoutineTemplateSql({
+      engine: String(connection.engine),
+      database,
+      name: result.name,
+      routineType: result.routineType,
+      wizardParams: result.skipped
+        ? [{ name: "param1", typeName: "INT", length: "0", mode: "IN" }]
+        : result.params,
+      returnsType: result.returnsType,
+      returnsLength: result.returnsLength,
+      deterministic: result.deterministic,
+      dataAccess: result.dataAccess,
+      securityType: result.securityType,
+    });
+    openFunctionDesigner({
+      connection,
+      database,
+      routine: result.name,
+      mode: "create",
+      routineType: result.routineType,
+      seedSql,
+    });
+    setFnWizardOpen(false);
+  }
+
   return (
     <div
       className="object-list-grid"
@@ -631,13 +658,7 @@ export function ObjectListGrid() {
                   mode: "create",
                 });
               } else if (wantFunctions) {
-                openFunctionDesigner({
-                  connection,
-                  database,
-                  routine: "new_proc",
-                  mode: "create",
-                  routineType: "PROCEDURE",
-                });
+                setFnWizardOpen(true);
               } else if (wantViews) {
                 openViewDesigner({
                   connection,
@@ -1003,6 +1024,13 @@ export function ObjectListGrid() {
           routineType={selectedRoutine.routineType}
           onClose={() => setRunOpen(false)}
           onMessage={showToast}
+        />
+      )}
+
+      {fnWizardOpen && (
+        <FunctionWizard
+          onCancel={() => setFnWizardOpen(false)}
+          onComplete={completeFnWizard}
         />
       )}
 

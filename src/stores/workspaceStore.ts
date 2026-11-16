@@ -62,6 +62,8 @@ export type DesignerTab = {
   kind?: "table" | "view" | "function" | "event";
   /** Only for kind === "function" */
   routineType?: "FUNCTION" | "PROCEDURE";
+  /** Initial CREATE SQL from function wizard */
+  seedSql?: string;
   dirty?: boolean;
   seedColumns?: {
     name: string;
@@ -162,6 +164,7 @@ type WorkspaceState = {
     routine: string;
     mode: "create" | "alter";
     routineType?: "FUNCTION" | "PROCEDURE";
+    seedSql?: string;
   }) => string | null;
   openEventDesigner: (opts: {
     connection?: ConnectionDto;
@@ -683,8 +686,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       window.alert("请先选择数据库，再设计函数。");
       return null;
     }
-    const routine = opts.routine.trim() || "new_proc";
-    const routineType = opts.routineType ?? "PROCEDURE";
+    const routine = opts.routine.trim() || "NewFunc";
+    const routineType = opts.routineType ?? "FUNCTION";
     const id =
       opts.mode === "create"
         ? `fn-designer-create-${conn.id}:${database}:${Date.now()}`
@@ -720,6 +723,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       mode: opts.mode,
       kind: "function",
       routineType,
+      seedSql: opts.seedSql,
       dirty: false,
     };
     set({

@@ -13,6 +13,11 @@ import { isSaveCancelled } from "../import-export/csv";
 import { downloadTextFile } from "../import-export/csv";
 import { emitTableDataChanged } from "../../lib/tableEvents";
 import { RunRoutineDialog } from "../function-designer/RunRoutineDialog";
+import {
+  FunctionWizard,
+  type FunctionWizardResult,
+} from "../function-designer/FunctionWizard";
+import { buildRoutineTemplateSql } from "../function-designer/routineDdl";
 
 export type RoutineMenuTarget = {
   x: number;
@@ -42,6 +47,7 @@ export function RoutineContextMenu({
   const [renameOpen, setRenameOpen] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
   const [runOpen, setRunOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [nextName, setNextName] = useState(`${name}_copy`);
 
   const openFunctionDesigner = useWorkspaceStore((s) => s.openFunctionDesigner);
@@ -116,14 +122,7 @@ export function RoutineContextMenu({
           disabled={busy}
           onClick={() => {
             ensureContext();
-            openFunctionDesigner({
-              connection: conn,
-              database,
-              routine: "new_proc",
-              mode: "create",
-              routineType: "PROCEDURE",
-            });
-            onClose();
+            setWizardOpen(true);
           }}
         >
           新建函数
@@ -393,6 +392,48 @@ export function RoutineContextMenu({
             onClose();
           }}
           onMessage={onMessage}
+        />
+      )}
+
+      {wizardOpen && (
+        <FunctionWizard
+          onCancel={() => {
+            setWizardOpen(false);
+            onClose();
+          }}
+          onComplete={(result: FunctionWizardResult) => {
+            const seedSql = buildRoutineTemplateSql({
+              engine: String(conn.engine),
+              database,
+              name: result.name,
+              routineType: result.routineType,
+              wizardParams: result.skipped
+                ? [
+                    {
+                      name: "param1",
+                      typeName: "INT",
+                      length: "0",
+                      mode: "IN",
+                    },
+                  ]
+                : result.params,
+              returnsType: result.returnsType,
+              returnsLength: result.returnsLength,
+              deterministic: result.deterministic,
+              dataAccess: result.dataAccess,
+              securityType: result.securityType,
+            });
+            openFunctionDesigner({
+              connection: conn,
+              database,
+              routine: result.name,
+              mode: "create",
+              routineType: result.routineType,
+              seedSql,
+            });
+            setWizardOpen(false);
+            onClose();
+          }}
         />
       )}
     </>
