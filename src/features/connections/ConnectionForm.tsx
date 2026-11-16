@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useMemo, useState, type FormEvent } from "react";
+import { invoke } from "../../lib/invoke";
 import type { ConnectionDto, EngineType, UpsertConnectionInput } from "./types";
 
 type Props = {

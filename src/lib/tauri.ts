@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invoke";
 
 export async function getSetting(key: string): Promise<string | null> {
   return invoke<string | null>("get_setting", { key });
