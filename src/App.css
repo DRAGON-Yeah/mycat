@@ -1455,26 +1455,18 @@ tr.is-inserted {
   background: #ef4444;
 }
 
-.query-explain-icon {
-  width: 12px;
-  height: 12px;
-  border: 1.5px solid #3b82f6;
-  border-radius: 2px;
-  position: relative;
+.query-explain-btn {
+  color: #3b82f6;
 }
 
-.query-explain-icon::after {
-  content: "?";
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  font-weight: 700;
-  color: #3b82f6;
-  line-height: 12px;
-  text-align: center;
+.query-explain-btn:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.query-explain-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .query-body {
@@ -1855,6 +1847,216 @@ tr.is-inserted {
 
 .qrp-summary-list .is-error {
   color: #b91c1c;
+}
+
+/* —— Explain / Visual plan (Navicat-like) —— */
+.exp-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.exp-subtabs {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 8px;
+  min-height: 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-muted);
+  flex-shrink: 0;
+}
+
+.exp-subtabs button {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.exp-subtabs button:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.exp-subtabs button.is-active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+  font-weight: 600;
+}
+
+.exp-subtabs button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.exp-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg-elevated);
+}
+
+.exp-visual {
+  padding: 20px 24px;
+  min-height: 140px;
+  background:
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 0)
+      0 0 / 16px 16px;
+}
+
+.exp-node-wrap {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.exp-node {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 120px;
+  max-width: 280px;
+  padding: 8px 10px;
+  border: 1px solid #93c5fd;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+[data-theme="dark"] .exp-node {
+  background: var(--bg);
+  border-color: #3b82f6;
+}
+
+.exp-node-query_block {
+  border-color: #94a3b8;
+}
+
+.exp-node-table {
+  border-color: #f87171;
+}
+
+.exp-node-icon {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.exp-node-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.exp-node-label.is-table {
+  color: #dc2626;
+}
+
+.exp-node-detail,
+.exp-node-meta {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.exp-children {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-left: 28px;
+  padding-top: 4px;
+}
+
+.exp-edge {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.exp-arrow {
+  width: 1px;
+  height: 14px;
+  margin-left: 20px;
+  background: #94a3b8;
+  position: relative;
+}
+
+.exp-arrow::after {
+  content: "";
+  position: absolute;
+  left: -3px;
+  bottom: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid #94a3b8;
+}
+
+.exp-json {
+  margin: 0;
+  padding: 12px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.exp-stats,
+.exp-info {
+  padding: 12px 14px;
+  font-size: 12px;
+}
+
+.exp-stats dl,
+.exp-info dl {
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.exp-stats dl div,
+.exp-info dl div {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 8px;
+}
+
+.exp-stats dt,
+.exp-info dt {
+  color: var(--text-muted);
+}
+
+.exp-stats dd,
+.exp-info dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.exp-info code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.exp-notes {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+}
+
+.exp-visual .is-muted {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .qr-info {

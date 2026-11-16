@@ -31,6 +31,10 @@ import {
 } from "./sqlCompletions";
 import { formatSql, toggleLineComment } from "./sqlFormat";
 import {
+  jsonFromExplainResult,
+  wrapExplainSql,
+} from "./explainPlan";
+import {
   isExplainSql,
   splitSqlStatements,
   statementAtOffset,
@@ -586,46 +590,91 @@ export function QueryEditor() {
         setError("没有可执行的 SQL");
         return;
       }
-      if (explain) {
-        statements = statements.map((s) =>
-          isExplainSql(s) ? s : `EXPLAIN ${s}`,
-        );
-      }
+      const engine = String(tab.connectionEngine || "mysql");
+      const doExplain = explain;
 
       const items: QueryBatchItem[] = [];
       const messages: string[] = [
-        `执行 ${statements.length} 条语句 · ${mode === "selection" ? "选中内容" : mode === "current" ? "当前语句" : "全部"}`,
+        `${doExplain ? "解释" : "执行"} ${statements.length} 条语句 · ${mode === "selection" ? "选中内容" : mode === "current" ? "当前语句" : "全部"}`,
       ];
 
       for (let i = 0; i < statements.length; i++) {
-        const sql = statements[i]!;
+        const original = statements[i]!;
         const id = `stmt-${Date.now()}-${i}`;
+        const asExplain = doExplain || isExplainSql(original);
         try {
-          const out = await executeSql(tab.connectionId, sql);
-          const hasGrid = out.columns.length > 0;
-          const kind =
-            explain || isExplainSql(sql)
-              ? "explain"
-              : hasGrid
-                ? "result"
-                : "message";
-          items.push({
-            id,
-            sql,
-            kind,
-            result: hasGrid ? out : undefined,
-            elapsedMs: out.elapsedMs,
-          });
-          messages.push(
-            hasGrid
-              ? `[${i + 1}/${statements.length}] OK · ${out.rows.length} 行 · ${out.elapsedMs} ms`
-              : `[${i + 1}/${statements.length}] OK · 影响 ${out.rowsAffected} 行 · ${out.elapsedMs} ms`,
-          );
+          if (asExplain) {
+            const jsonSql = wrapExplainSql(original, engine, "json");
+            const gridSql = wrapExplainSql(original, engine, "traditional");
+            let explainJson: string | undefined;
+            let explainGrid: QueryBatchItem["explainGrid"];
+            let elapsed = 0;
+            let primary = original;
+
+            try {
+              const jsonOut = await executeSql(tab.connectionId, jsonSql);
+              elapsed += jsonOut.elapsedMs;
+              primary = jsonSql;
+              const raw = jsonFromExplainResult(jsonOut.columns, jsonOut.rows);
+              if (raw) explainJson = raw;
+              // If JSON format not available, treat tabular as grid
+              if (!raw && jsonOut.columns.length > 0) {
+                explainGrid = jsonOut;
+              }
+            } catch {
+              /* fall through to traditional */
+            }
+
+            if (gridSql !== jsonSql || !explainGrid) {
+              try {
+                const gridOut = await executeSql(tab.connectionId, gridSql);
+                elapsed += gridOut.elapsedMs;
+                if (!primary.startsWith("EXPLAIN")) primary = gridSql;
+                if (gridOut.columns.length > 0) explainGrid = gridOut;
+                if (!explainJson) {
+                  const raw = jsonFromExplainResult(
+                    gridOut.columns,
+                    gridOut.rows,
+                  );
+                  if (raw) explainJson = raw;
+                }
+              } catch (err) {
+                if (!explainJson && !explainGrid) throw err;
+              }
+            }
+
+            items.push({
+              id,
+              sql: primary,
+              kind: "explain",
+              result: explainGrid,
+              explainGrid,
+              explainJson,
+              elapsedMs: elapsed,
+            });
+            messages.push(
+              `[${i + 1}/${statements.length}] EXPLAIN OK · ${elapsed} ms`,
+            );
+          } else {
+            const out = await executeSql(tab.connectionId, original);
+            const hasGrid = out.columns.length > 0;
+            items.push({
+              id,
+              sql: original,
+              kind: hasGrid ? "result" : "message",
+              result: hasGrid ? out : undefined,
+              elapsedMs: out.elapsedMs,
+            });
+            messages.push(
+              hasGrid
+                ? `[${i + 1}/${statements.length}] OK · ${out.rows.length} 行 · ${out.elapsedMs} ms`
+                : `[${i + 1}/${statements.length}] OK · 影响 ${out.rowsAffected} 行 · ${out.elapsedMs} ms`,
+            );
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          items.push({ id, sql, kind: "message", error: msg });
+          items.push({ id, sql: original, kind: "message", error: msg });
           messages.push(`[${i + 1}/${statements.length}] ERROR: ${msg}`);
-          // continue remaining statements so later SELECTs still produce results
         }
       }
 
@@ -922,10 +971,11 @@ export function QueryEditor() {
           type="button"
           className="query-explain-btn"
           disabled={running}
-          title="解释计划"
+          title="解释 (可视化执行计划)"
+          aria-label="解释"
           onClick={() => void runSmart(true)}
         >
-          <span className="query-explain-icon" aria-hidden />
+          <IconExplain />
         </button>
       </div>
 
@@ -1096,6 +1146,23 @@ function IconSave() {
       />
       <path d="M5 2.5v4h5v-4" stroke="currentColor" strokeWidth="1.2" />
       <rect x="5" y="9.5" width="6" height="4" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
+/** Navicat-style explain / visual plan icon (flowchart). */
+function IconExplain() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <rect x="5" y="1.5" width="6" height="3.2" rx="0.6" stroke="#3b82f6" strokeWidth="1.2" />
+      <rect x="1.5" y="11.3" width="5" height="3.2" rx="0.6" stroke="#3b82f6" strokeWidth="1.2" />
+      <rect x="9.5" y="11.3" width="5" height="3.2" rx="0.6" stroke="#3b82f6" strokeWidth="1.2" />
+      <path
+        d="M8 4.7v2.4M8 7.1H4V11.3M8 7.1h4V11.3"
+        stroke="#3b82f6"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

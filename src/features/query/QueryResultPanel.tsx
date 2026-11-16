@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ExplainPlanPanel } from "./ExplainPlanPanel";
 import {
   QueryResultGrid,
   type QueryResultData,
@@ -9,6 +10,10 @@ export type QueryBatchItem = {
   sql: string;
   kind: "result" | "explain" | "message";
   result?: QueryResultData;
+  /** Traditional EXPLAIN grid (when JSON plan is also available). */
+  explainGrid?: QueryResultData;
+  /** EXPLAIN FORMAT=JSON text. */
+  explainJson?: string;
   error?: string;
   elapsedMs?: number;
 };
@@ -180,7 +185,22 @@ export function QueryResultPanel({ items, messages, tableHint }: Props) {
           </div>
         )}
 
-        {activeResult && (
+        {active.startsWith("explain-") && (() => {
+          const idx = Number(active.slice("explain-".length));
+          const it = explainItems[idx];
+          if (!it) return null;
+          return (
+            <ExplainPlanPanel
+              explainJson={it.explainJson}
+              gridResult={it.explainGrid ?? it.result ?? null}
+              sql={it.sql}
+              elapsedMs={it.result?.elapsedMs ?? it.elapsedMs}
+              tableHint={tableHint}
+            />
+          );
+        })()}
+
+        {active.startsWith("result-") && activeResult && (
           <QueryResultGrid
             result={activeResult}
             tableHint={tableHint}
