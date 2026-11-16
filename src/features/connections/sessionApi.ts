@@ -3,6 +3,13 @@ import { invoke } from "../../lib/invoke";
 export type DbObject = {
   name: string;
   kind: string;
+  tableRows?: number | null;
+  dataLength?: number | null;
+  engine?: string | null;
+  createTime?: string | null;
+  updateTime?: string | null;
+  collation?: string | null;
+  comment?: string | null;
 };
 
 export type RowsPage = {

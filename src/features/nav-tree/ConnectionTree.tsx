@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   deleteConnection,
   exportConnections,
@@ -13,7 +19,20 @@ import {
   listDatabases,
   openConnection,
 } from "../connections/sessionApi";
-import { useWorkspaceStore } from "../../stores/workspaceStore";
+import {
+  useWorkspaceStore,
+  type ObjectFolder,
+} from "../../stores/workspaceStore";
+import {
+  IconBackups,
+  IconDatabase,
+  IconEvents,
+  IconFunctions,
+  IconQueries,
+  IconServer,
+  IconTables,
+  IconViews,
+} from "./TreeIcons";
 
 type ConnNode = {
   conn: ConnectionDto;
@@ -24,18 +43,30 @@ type ConnNode = {
   openDbs: Record<string, boolean>;
 };
 
+const FOLDERS: { id: ObjectFolder; label: string; icon: ReactNode }[] = [
+  { id: "tables", label: "表", icon: <IconTables /> },
+  { id: "views", label: "视图", icon: <IconViews /> },
+  { id: "functions", label: "函数", icon: <IconFunctions /> },
+  { id: "events", label: "事件", icon: <IconEvents /> },
+  { id: "queries", label: "查询", icon: <IconQueries /> },
+  { id: "backups", label: "备份", icon: <IconBackups /> },
+];
+
 export function ConnectionTree() {
   const [nodes, setNodes] = useState<ConnNode[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ConnectionDto | null | undefined>(
     undefined,
   );
+  const [filter, setFilter] = useState("");
 
   const activeConnectionId = useWorkspaceStore((s) => s.activeConnectionId);
   const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
+  const selectedFolder = useWorkspaceStore((s) => s.selectedFolder);
   const openConn = useWorkspaceStore((s) => s.openConnection);
   const clearConnection = useWorkspaceStore((s) => s.clearConnection);
   const selectDatabase = useWorkspaceStore((s) => s.selectDatabase);
+  const selectObjectFolder = useWorkspaceStore((s) => s.selectObjectFolder);
 
   const reload = useCallback(async () => {
     try {
@@ -72,6 +103,15 @@ export function ConnectionTree() {
     return saved;
   }
 
+  async function ensureOpen(node: ConnNode) {
+    openConn(node.conn);
+    await openConnection(node.conn.id);
+    if (node.conn.engine === "sqlite") {
+      return [node.conn.host || "main"];
+    }
+    return listDatabases(node.conn.id);
+  }
+
   async function toggleConnection(id: string) {
     const node = nodes.find((n) => n.conn.id === id);
     if (!node) return;
@@ -85,18 +125,13 @@ export function ConnectionTree() {
 
     setNodes((prev) =>
       prev.map((n) =>
-        n.conn.id === id ? { ...n, loading: true, error: null, expanded: true } : n,
+        n.conn.id === id
+          ? { ...n, loading: true, error: null, expanded: true }
+          : n,
       ),
     );
     try {
-      openConn(node.conn);
-      await openConnection(node.conn.id);
-      let databases: string[] = [];
-      if (node.conn.engine === "sqlite") {
-        databases = [node.conn.host || "main"];
-      } else {
-        databases = await listDatabases(node.conn.id);
-      }
+      const databases = await ensureOpen(node);
       setNodes((prev) =>
         prev.map((n) =>
           n.conn.id === id
@@ -104,9 +139,7 @@ export function ConnectionTree() {
             : n,
         ),
       );
-      if (node.conn.database?.trim()) {
-        selectDatabase(node.conn.database.trim());
-      }
+      openConn(node.conn);
     } catch (err) {
       setNodes((prev) =>
         prev.map((n) =>
@@ -123,17 +156,59 @@ export function ConnectionTree() {
     }
   }
 
-  function toggleDbFolder(connId: string, db: string) {
-    setNodes((prev) =>
-      prev.map((n) => {
-        if (n.conn.id !== connId) return n;
-        return {
-          ...n,
-          openDbs: { ...n.openDbs, [db]: !n.openDbs[db] },
-        };
-      }),
-    );
+  async function onSelectDatabase(node: ConnNode, db: string) {
+    try {
+      if (!node.expanded || node.databases.length === 0) {
+        const databases = await ensureOpen(node);
+        setNodes((prev) =>
+          prev.map((n) =>
+            n.conn.id === node.conn.id
+              ? {
+                  ...n,
+                  expanded: true,
+                  databases,
+                  openDbs: { ...n.openDbs, [db]: true },
+                  error: null,
+                }
+              : n,
+          ),
+        );
+      } else {
+        setNodes((prev) =>
+          prev.map((n) =>
+            n.conn.id === node.conn.id
+              ? { ...n, openDbs: { ...n.openDbs, [db]: true } }
+              : n,
+          ),
+        );
+      }
+      openConn(node.conn);
+      selectDatabase(db);
+      selectObjectFolder(db, "tables");
+    } catch (err) {
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.conn.id === node.conn.id
+            ? {
+                ...n,
+                error: err instanceof Error ? err.message : String(err),
+                expanded: true,
+              }
+            : n,
+        ),
+      );
+    }
   }
+
+  const visibleNodes = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return nodes;
+    return nodes.filter(
+      (n) =>
+        n.conn.name.toLowerCase().includes(q) ||
+        n.databases.some((d) => d.toLowerCase().includes(q)),
+    );
+  }, [nodes, filter]);
 
   return (
     <aside className="pane connection-tree" aria-label="我的连接">
@@ -176,8 +251,7 @@ export function ConnectionTree() {
                 e.target.value = "";
                 if (!file) return;
                 try {
-                  const text = await file.text();
-                  await importConnections(JSON.parse(text));
+                  await importConnections(JSON.parse(await file.text()));
                   await reload();
                 } catch (err) {
                   setListError(err instanceof Error ? err.message : String(err));
@@ -191,19 +265,17 @@ export function ConnectionTree() {
       {listError && <p className="pane-error">{listError}</p>}
 
       <ul className="tree-root">
-        {nodes.map((n) => (
+        {visibleNodes.map((n) => (
           <li key={n.conn.id} className="tree-conn">
             <div
-              className={`tree-row ${activeConnectionId === n.conn.id ? "is-active" : ""}`}
+              className={`tree-row ${activeConnectionId === n.conn.id && !selectedDatabase ? "is-active" : ""}`}
             >
               <button
                 type="button"
-                className="tree-twist"
+                className={`tree-twist ${n.expanded ? "is-expanded" : ""}`}
                 onClick={() => void toggleConnection(n.conn.id)}
                 aria-label={n.expanded ? "折叠" : "展开"}
-              >
-                {n.expanded ? "▾" : "▸"}
-              </button>
+              />
               <button
                 type="button"
                 className="tree-label"
@@ -213,8 +285,11 @@ export function ConnectionTree() {
                   className="color-dot"
                   style={{ background: n.conn.color || "var(--accent)" }}
                 />
-                {n.conn.starred ? "★ " : ""}
-                {n.conn.name}
+                <IconServer />
+                <span className="tree-text">
+                  {n.conn.starred ? "★ " : ""}
+                  {n.conn.name}
+                </span>
               </button>
               <div className="tree-actions">
                 <button type="button" onClick={() => setEditing(n.conn)}>
@@ -237,82 +312,77 @@ export function ConnectionTree() {
                 </button>
               </div>
             </div>
+
             {n.expanded && (
               <ul className="tree-children">
                 {n.loading && <li className="pane-placeholder">加载中…</li>}
                 {n.error && <li className="pane-error">{n.error}</li>}
                 {!n.loading &&
-                  n.databases.map((db) => (
-                    <li key={db}>
-                      <div
-                        className={`tree-row tree-db ${selectedDatabase === db && activeConnectionId === n.conn.id ? "is-active" : ""}`}
-                      >
-                        <button
-                          type="button"
-                          className="tree-twist"
-                          onClick={() => toggleDbFolder(n.conn.id, db)}
+                  n.databases.map((db) => {
+                    const dbOpen = !!n.openDbs[db];
+                    const dbActive =
+                      activeConnectionId === n.conn.id &&
+                      selectedDatabase === db;
+                    return (
+                      <li key={db}>
+                        <div
+                          className={`tree-row tree-db ${dbActive && !selectedFolder ? "is-active" : ""}`}
                         >
-                          {n.openDbs[db] ? "▾" : "▸"}
-                        </button>
-                        <button
-                          type="button"
-                          className="tree-label"
-                          onClick={() => {
-                            openConn(n.conn);
-                            selectDatabase(db);
-                            setNodes((prev) =>
-                              prev.map((x) =>
-                                x.conn.id === n.conn.id
-                                  ? {
-                                      ...x,
-                                      openDbs: { ...x.openDbs, [db]: true },
-                                    }
-                                  : x,
-                              ),
-                            );
-                          }}
-                        >
-                          <span className="tree-icon">D</span>
-                          {db}
-                        </button>
-                      </div>
-                      {n.openDbs[db] && (
-                        <ul className="tree-children">
-                          <li>
-                            <button
-                              type="button"
-                              className={`tree-row tree-folder ${selectedDatabase === db && activeConnectionId === n.conn.id ? "is-active" : ""}`}
-                              onClick={() => {
-                                openConn(n.conn);
-                                selectDatabase(db);
-                              }}
-                            >
-                              <span className="tree-icon">T</span>
-                              表
-                            </button>
-                          </li>
-                          <li>
-                            <div className="tree-row tree-folder is-muted">
-                              <span className="tree-icon">V</span>
-                              视图
-                            </div>
-                          </li>
-                          <li>
-                            <div className="tree-row tree-folder is-muted">
-                              <span className="tree-icon">F</span>
-                              函数
-                            </div>
-                          </li>
-                          <li>
-                            <div className="tree-row tree-folder is-muted">
-                              <span className="tree-icon">Q</span>
-                              查询
-                            </div>
-                          </li>
-                        </ul>
-                      )}
-                    </li>
-                  ))}
+                          <button
+                            type="button"
+                            className={`tree-twist ${dbOpen ? "is-expanded" : ""}`}
+                            onClick={() =>
+                              setNodes((prev) =>
+                                prev.map((x) =>
+                                  x.conn.id === n.conn.id
+                                    ? {
+                                        ...x,
+                                        openDbs: {
+                                          ...x.openDbs,
+                                          [db]: !x.openDbs[db],
+                                        },
+                                      }
+                                    : x,
+                                ),
+                              )
+                            }
+                            aria-label={dbOpen ? "折叠" : "展开"}
+                          />
+                          <button
+                            type="button"
+                            className="tree-label"
+                            onClick={() => void onSelectDatabase(n, db)}
+                          >
+                            <IconDatabase />
+                            <span className="tree-text">{db}</span>
+                          </button>
+                        </div>
+                        {dbOpen && (
+                          <ul className="tree-children">
+                            {FOLDERS.map((folder) => (
+                              <li key={folder.id}>
+                                <button
+                                  type="button"
+                                  className={`tree-row tree-folder ${
+                                    dbActive && selectedFolder === folder.id
+                                      ? "is-active"
+                                      : ""
+                                  }`}
+                                  onClick={() => {
+                                    openConn(n.conn);
+                                    selectObjectFolder(db, folder.id);
+                                  }}
+                                >
+                                  {folder.icon}
+                                  <span className="tree-text">{folder.label}</span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </li>
+                    );
+                  })}
                 {!n.loading && !n.error && n.databases.length === 0 && (
                   <li className="pane-placeholder">无数据库</li>
                 )}
@@ -320,13 +390,19 @@ export function ConnectionTree() {
             )}
           </li>
         ))}
-        {nodes.length === 0 && (
+        {visibleNodes.length === 0 && (
           <li className="pane-placeholder">暂无连接，点击「新建」开始</li>
         )}
       </ul>
 
-      {activeConnectionId && (
-        <div className="tree-footer">
+      <div className="tree-bottom-bar">
+        <input
+          className="tree-search"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="搜索连接 / 数据库"
+        />
+        {activeConnectionId && (
           <button
             type="button"
             className="ghost-btn"
@@ -346,10 +422,10 @@ export function ConnectionTree() {
               );
             }}
           >
-            断开当前连接
+            断开
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {editing !== undefined && (
         <ConnectionForm

@@ -3,6 +3,7 @@ import {
   useWorkspaceStore,
   type ToolbarAction,
 } from "../stores/workspaceStore";
+import { ToolbarIcon } from "./ToolbarIcons";
 
 type Item = {
   id: ToolbarAction;
@@ -25,18 +26,22 @@ const ITEMS: Item[] = [
 
 export function TopToolbar() {
   const toolbarAction = useWorkspaceStore((s) => s.toolbarAction);
+  const centerMode = useWorkspaceStore((s) => s.centerMode);
   const setToolbarAction = useWorkspaceStore((s) => s.setToolbarAction);
   const setCenterMode = useWorkspaceStore((s) => s.setCenterMode);
 
   return (
     <header className="top-toolbar" aria-label="主工具栏">
-      <div className="top-toolbar-brand">My Navicat</div>
+      <div className="top-toolbar-brand">
+        <span className="brand-mark">N</span>
+        <span className="brand-text">My Navicat</span>
+      </div>
       <nav className="top-toolbar-items">
         {ITEMS.map((item) => (
           <button
             key={item.id}
             type="button"
-            className={`toolbar-item ${toolbarAction === item.id ? "is-active" : ""} ${item.placeholder ? "is-soft" : ""}`}
+            className={`toolbar-item ${toolbarAction === item.id && centerMode !== "console" ? "is-active" : ""} ${item.placeholder ? "is-soft" : ""}`}
             onClick={() => {
               if (item.id === "query") {
                 setToolbarAction("query");
@@ -50,9 +55,7 @@ export function TopToolbar() {
               if (item.id === "connection") setCenterMode("welcome");
             }}
           >
-            <span className="toolbar-icon" aria-hidden>
-              {item.label.slice(0, 1)}
-            </span>
+            <ToolbarIcon id={item.id} />
             <span className="toolbar-label">{item.label}</span>
           </button>
         ))}
@@ -60,9 +63,10 @@ export function TopToolbar() {
       <div className="top-toolbar-actions">
         <button
           type="button"
-          className="toolbar-item"
+          className={`toolbar-item ${centerMode === "console" ? "is-active" : ""}`}
           onClick={() => setCenterMode("console")}
         >
+          <ToolbarIcon id="console" />
           <span className="toolbar-label">Console</span>
         </button>
         <ThemeToggle />

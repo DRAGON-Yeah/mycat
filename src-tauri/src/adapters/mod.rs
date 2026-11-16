@@ -34,6 +34,20 @@ pub struct ConnectOpts {
 pub struct DbObject {
     pub name: String,
     pub kind: String,
+    #[serde(default)]
+    pub table_rows: Option<i64>,
+    #[serde(default)]
+    pub data_length: Option<i64>,
+    #[serde(default)]
+    pub engine: Option<String>,
+    #[serde(default)]
+    pub create_time: Option<String>,
+    #[serde(default)]
+    pub update_time: Option<String>,
+    #[serde(default)]
+    pub collation: Option<String>,
+    #[serde(default)]
+    pub comment: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

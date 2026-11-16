@@ -5,15 +5,33 @@ import {
 } from "../connections/sessionApi";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 
+function formatBytes(n?: number | null) {
+  if (n == null || Number.isNaN(n)) return "—";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatRows(n?: number | null) {
+  if (n == null) return "—";
+  return n.toLocaleString();
+}
+
 export function ObjectListGrid() {
   const connection = useWorkspaceStore((s) => s.activeConnection);
   const database = useWorkspaceStore((s) => s.selectedDatabase);
+  const folder = useWorkspaceStore((s) => s.selectedFolder);
   const openTable = useWorkspaceStore((s) => s.openTable);
   const selectTableMeta = useWorkspaceStore((s) => s.selectTableMeta);
+  const selectedTable = useWorkspaceStore((s) => s.selectedTable);
   const [tables, setTables] = useState<DbObject[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("");
+  const [tick, setTick] = useState(0);
+
+  const wantViews = folder === "views";
+  const title = wantViews ? "视图" : "表";
 
   useEffect(() => {
     let cancelled = false;
@@ -22,11 +40,21 @@ export function ObjectListGrid() {
         setTables([]);
         return;
       }
+      if (folder && folder !== "tables" && folder !== "views") {
+        setTables([]);
+        return;
+      }
       setLoading(true);
       setError(null);
       try {
         const items = await listTables(connection.id, database);
-        if (!cancelled) setTables(items);
+        if (!cancelled) {
+          setTables(
+            items.filter((t) =>
+              wantViews ? t.kind === "view" : t.kind !== "view",
+            ),
+          );
+        }
       } catch (err) {
         if (!cancelled) {
           setTables([]);
@@ -40,13 +68,17 @@ export function ObjectListGrid() {
     return () => {
       cancelled = true;
     };
-  }, [connection, database]);
+  }, [connection, database, folder, wantViews, tick]);
 
   if (!connection) {
     return <p className="pane-placeholder">请先打开一个连接。</p>;
   }
   if (!database) {
-    return <p className="pane-placeholder">请在左侧选择一个数据库以查看表清单。</p>;
+    return (
+      <p className="pane-placeholder">
+        请在左侧展开连接，点击数据库下的「表」查看对象列表。
+      </p>
+    );
   }
 
   const filtered = tables.filter((t) =>
@@ -55,16 +87,31 @@ export function ObjectListGrid() {
 
   return (
     <div className="object-list-grid">
-      <div className="object-list-toolbar">
-        <div className="object-list-title">
-          对象 · 表
-          <span className="object-list-count">{filtered.length} 张表</span>
+      <div className="object-list-toolbar navicat-obj-toolbar">
+        <div className="obj-toolbar-left">
+          <button type="button" className="obj-tool-btn" title="刷新" onClick={() => setTick((x) => x + 1)}>
+            ↻
+          </button>
+          <button
+            type="button"
+            className="obj-tool-btn"
+            title="打开表"
+            disabled={!selectedTable}
+            onClick={() => selectedTable && openTable(selectedTable)}
+          >
+            ⊞ 打开
+          </button>
+          <span className="obj-tool-sep" />
+          <span className="object-list-title">
+            对象 · {title}
+            <span className="object-list-count">{filtered.length}</span>
+          </span>
         </div>
         <input
           className="object-list-filter"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="筛选表名"
+          placeholder="搜索"
         />
       </div>
       {loading && <p className="pane-placeholder">加载中…</p>}
@@ -75,9 +122,12 @@ export function ObjectListGrid() {
             <thead>
               <tr>
                 <th>名称</th>
-                <th>类型</th>
                 <th>行</th>
+                <th>数据长度</th>
                 <th>引擎</th>
+                <th>创建日期</th>
+                <th>修改日期</th>
+                <th>排序规则</th>
                 <th>注释</th>
               </tr>
             </thead>
@@ -85,6 +135,7 @@ export function ObjectListGrid() {
               {filtered.map((t) => (
                 <tr
                   key={`${t.kind}-${t.name}`}
+                  className={selectedTable === t.name ? "is-selected" : undefined}
                   onClick={() => selectTableMeta(t.name)}
                   onDoubleClick={() => openTable(t.name)}
                 >
@@ -94,16 +145,19 @@ export function ObjectListGrid() {
                     </span>
                     {t.name}
                   </td>
-                  <td>{t.kind === "view" ? "视图" : "表"}</td>
-                  <td>—</td>
-                  <td>—</td>
-                  <td>—</td>
+                  <td>{formatRows(t.tableRows)}</td>
+                  <td>{formatBytes(t.dataLength)}</td>
+                  <td>{t.engine ?? "—"}</td>
+                  <td>{t.createTime ?? "—"}</td>
+                  <td>{t.updateTime ?? "—"}</td>
+                  <td>{t.collation ?? "—"}</td>
+                  <td className="comment-cell">{t.comment || "—"}</td>
                 </tr>
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="pane-placeholder">
-                    无匹配表
+                  <td colSpan={8} className="pane-placeholder">
+                    无匹配{title}
                   </td>
                 </tr>
               )}

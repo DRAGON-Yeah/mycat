@@ -100,16 +100,44 @@ impl DriverSession for MysqlSession {
             // Select schema so subsequent unqualified queries work.
             conn.query_drop(format!("USE `{db}`"))?;
             let sql = format!(
-                "SELECT TABLE_NAME, TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA = '{db}' ORDER BY TABLE_NAME"
+                "SELECT TABLE_NAME, TABLE_TYPE, TABLE_ROWS, DATA_LENGTH, ENGINE,
+                        DATE_FORMAT(CREATE_TIME, '%Y-%m-%d %H:%i:%s'),
+                        DATE_FORMAT(UPDATE_TIME, '%Y-%m-%d %H:%i:%s'),
+                        TABLE_COLLATION, TABLE_COMMENT
+                 FROM information_schema.TABLES
+                 WHERE TABLE_SCHEMA = '{db}'
+                 ORDER BY TABLE_NAME"
             );
-            let result = conn.query_map(sql, |(name, kind): (String, String)| DbObject {
-                name,
-                kind: if kind.to_uppercase().contains("VIEW") {
-                    "view".into()
-                } else {
-                    "table".into()
+            let result = conn.query_map(
+                sql,
+                |(name, kind, rows, data_len, engine, created, updated, collation, comment): (
+                    String,
+                    String,
+                    Option<i64>,
+                    Option<i64>,
+                    Option<String>,
+                    Option<String>,
+                    Option<String>,
+                    Option<String>,
+                    Option<String>,
+                )| {
+                    DbObject {
+                        name,
+                        kind: if kind.to_uppercase().contains("VIEW") {
+                            "view".into()
+                        } else {
+                            "table".into()
+                        },
+                        table_rows: rows,
+                        data_length: data_len,
+                        engine,
+                        create_time: created,
+                        update_time: updated,
+                        collation,
+                        comment,
+                    }
                 },
-            })?;
+            )?;
             return Ok(result);
         }
 

@@ -76,6 +76,13 @@ impl DriverSession for SqliteSession {
             Ok(DbObject {
                 name: row.get(0)?,
                 kind: row.get(1)?,
+                table_rows: None,
+                data_length: None,
+                engine: Some("sqlite".into()),
+                create_time: None,
+                update_time: None,
+                collation: None,
+                comment: None,
             })
         })?;
         let mut out = Vec::new();

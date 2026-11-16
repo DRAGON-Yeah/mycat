@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyRowChanges,
   dumpTableSql,
@@ -24,6 +24,13 @@ type GridRow = {
   inserted?: boolean;
 };
 
+type MenuState = {
+  x: number;
+  y: number;
+  rowIndex: number;
+  colIndex: number;
+} | null;
+
 function cellText(value: unknown): string {
   if (value === null || value === undefined) return "NULL";
   if (typeof value === "object") return JSON.stringify(value);
@@ -45,14 +52,26 @@ function pickPkColumn(columns: { name: string }[]): string {
   return id?.name ?? columns[0]?.name ?? "id";
 }
 
+function typeHint(dataType: string): string {
+  const t = dataType.toLowerCase();
+  if (t.includes("int") || t.includes("decimal") || t.includes("numeric") || t.includes("float") || t.includes("double")) {
+    return `# ${dataType}`;
+  }
+  if (t.includes("bool") || t === "bit") return `☑ ${dataType}`;
+  if (t.includes("date") || t.includes("time")) return `◷ ${dataType}`;
+  return `abc ${dataType}`;
+}
+
 export function DataGrid({ tab }: Props) {
   const markDirty = useWorkspaceStore((s) => s.markTabDirty);
+  const database = useWorkspaceStore((s) => s.selectedDatabase);
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(100);
+  const [pageSize] = useState(1000);
   const [sortCol, setSortCol] = useState<string | undefined>();
   const [sortDir, setSortDir] = useState<"ASC" | "DESC">("ASC");
   const [filterCol, setFilterCol] = useState("");
   const [filterValue, setFilterValue] = useState("");
+  const [showFilter, setShowFilter] = useState(false);
   const [appliedFilter, setAppliedFilter] = useState<{
     col?: string;
     value?: string;
@@ -60,9 +79,12 @@ export function DataGrid({ tab }: Props) {
   const [data, setData] = useState<RowsPage | null>(null);
   const [rows, setRows] = useState<GridRow[]>([]);
   const [baseline, setBaseline] = useState<GridRow[]>([]);
+  const [selectedRow, setSelectedRow] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [menu, setMenu] = useState<MenuState>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const dirty = useMemo(() => {
     if (rows.length !== baseline.length) return true;
@@ -77,6 +99,14 @@ export function DataGrid({ tab }: Props) {
   useEffect(() => {
     markDirty(tab.id, dirty);
   }, [dirty, markDirty, tab.id]);
+
+  useEffect(() => {
+    function onDocClick() {
+      setMenu(null);
+    }
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,6 +129,7 @@ export function DataGrid({ tab }: Props) {
       }));
       setRows(mapped);
       setBaseline(mapped.map((r) => ({ ...r, values: [...r.values] })));
+      setSelectedRow(0);
     } catch (err) {
       setData(null);
       setRows([]);
@@ -131,11 +162,23 @@ export function DataGrid({ tab }: Props) {
     setFilterCol("");
     setFilterValue("");
     setAppliedFilter({});
+    setShowFilter(false);
   }, [tab.id]);
 
   const totalPages = data
     ? Math.max(1, Math.ceil(data.total / Math.max(1, data.pageSize)))
     : 1;
+
+  const sqlPreview = useMemo(() => {
+    const db = database ? `\`${database}\`.` : "";
+    const where =
+      appliedFilter.col && appliedFilter.value
+        ? ` WHERE \`${appliedFilter.col}\` LIKE '%${appliedFilter.value.replace(/'/g, "''")}%'`
+        : "";
+    const order = sortCol ? ` ORDER BY \`${sortCol}\` ${sortDir}` : "";
+    const offset = (page - 1) * pageSize;
+    return `SELECT * FROM ${db}\`${tab.table}\`${where}${order} LIMIT ${offset},${pageSize}`;
+  }, [database, tab.table, appliedFilter, sortCol, sortDir, page, pageSize]);
 
   function toggleSort(col: string) {
     if (sortCol === col) {
@@ -156,6 +199,30 @@ export function DataGrid({ tab }: Props) {
         return { ...r, values };
       }),
     );
+  }
+
+  function addRow() {
+    if (!data) return;
+    const empty = data.columns.map(() => null);
+    setRows((prev) => [
+      ...prev,
+      { key: `new-${Date.now()}`, values: empty, inserted: true },
+    ]);
+    setSelectedRow(rows.length);
+  }
+
+  function deleteSelected() {
+    if (selectedRow < 0 || selectedRow >= rows.length) return;
+    setRows((prev) =>
+      prev
+        .map((r, i) => (i === selectedRow ? { ...r, deleted: true } : r))
+        .filter((r) => !(r.inserted && r.deleted)),
+    );
+  }
+
+  function discard() {
+    setRows(baseline.map((r) => ({ ...r, values: [...r.values] })));
+    setError(null);
   }
 
   async function commit() {
@@ -233,19 +300,112 @@ export function DataGrid({ tab }: Props) {
     }
   }
 
+  async function copyText(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // ignore
+    }
+  }
+
+  const visibleCount = rows.filter((r) => !r.deleted).length;
+  const recordLabel =
+    visibleCount === 0
+      ? "无记录"
+      : `记录 ${Math.min(selectedRow + 1, visibleCount)} / ${data?.total ?? visibleCount}`;
+
   return (
-    <div className="data-grid">
-      <div className="data-grid-toolbar">
-        <div className="data-grid-title">
-          {tab.connectionName} / {tab.table}
-          {data ? ` · ${data.total} 行` : ""}
+    <div className="data-grid navicat-grid" ref={rootRef}>
+      <div className="dg-toolbar">
+        <button type="button" className="dg-icon-btn" title="添加记录" onClick={addRow} disabled={!data}>
+          <span className="dg-ico plus">+</span>
+        </button>
+        <button
+          type="button"
+          className="dg-icon-btn"
+          title="删除记录"
+          onClick={deleteSelected}
+          disabled={!data || rows.length === 0}
+        >
+          <span className="dg-ico minus">−</span>
+        </button>
+        <span className="dg-sep" />
+        <button
+          type="button"
+          className="dg-icon-btn is-ok"
+          title="应用更改"
+          disabled={!dirty || saving}
+          onClick={() => void commit()}
+        >
+          ✓
+        </button>
+        <button
+          type="button"
+          className="dg-icon-btn is-danger"
+          title="放弃更改"
+          disabled={!dirty || saving}
+          onClick={discard}
+        >
+          ✕
+        </button>
+        <span className="dg-sep" />
+        <button
+          type="button"
+          className="dg-icon-btn"
+          title="刷新"
+          disabled={loading || dirty}
+          onClick={() => void load()}
+        >
+          ↻
+        </button>
+        <button
+          type="button"
+          className={`dg-icon-btn ${showFilter ? "is-active" : ""}`}
+          title="过滤"
+          onClick={() => setShowFilter((v) => !v)}
+        >
+          ⚙︎
+        </button>
+        <span className="dg-sep" />
+        <ExportCsvButton connectionId={tab.connectionId} table={tab.table} />
+        {data && (
+          <ImportCsvButton
+            connectionId={tab.connectionId}
+            table={tab.table}
+            tableColumns={data.columns.map((c) => c.name)}
+          />
+        )}
+        <button
+          type="button"
+          className="dg-text-btn"
+          onClick={async () => {
+            try {
+              const sql = await dumpTableSql({
+                connectionId: tab.connectionId,
+                table: tab.table,
+                includeData: true,
+                engine: tab.connectionEngine,
+              });
+              downloadTextFile(`${tab.table}.sql`, sql, "application/sql");
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              setError(msg);
+              void writeLog("ERROR", `dump_table_sql ${tab.table}: ${msg}`);
+            }
+          }}
+        >
+          Dump
+        </button>
+        <div className="dg-toolbar-spacer" />
+        <span className="dg-title-chip">
+          {tab.table}
           {dirty ? " · 未保存" : ""}
-        </div>
-        <div className="data-grid-filters">
-          <select
-            value={filterCol}
-            onChange={(e) => setFilterCol(e.target.value)}
-          >
+        </span>
+      </div>
+
+      {showFilter && (
+        <div className="dg-filter-bar">
+          <select value={filterCol} onChange={(e) => setFilterCol(e.target.value)}>
             <option value="">过滤列</option>
             {(data?.columns ?? []).map((c) => (
               <option key={c.name} value={c.name}>
@@ -281,69 +441,8 @@ export function DataGrid({ tab }: Props) {
           >
             清除
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              if (!data) return;
-              const empty = data.columns.map(() => null);
-              setRows((prev) => [
-                ...prev,
-                {
-                  key: `new-${Date.now()}`,
-                  values: empty,
-                  inserted: true,
-                },
-              ]);
-            }}
-          >
-            增行
-          </button>
-          <button type="button" disabled={!dirty || saving} onClick={() => void commit()}>
-            {saving ? "提交中…" : "提交"}
-          </button>
-          <button
-            type="button"
-            disabled={!dirty || saving}
-            onClick={() => {
-              setRows(baseline.map((r) => ({ ...r, values: [...r.values] })));
-              setError(null);
-            }}
-          >
-            撤销
-          </button>
-          <button type="button" onClick={() => void load()} disabled={loading || dirty}>
-            刷新
-          </button>
-          <ExportCsvButton connectionId={tab.connectionId} table={tab.table} />
-          {data && (
-            <ImportCsvButton
-              connectionId={tab.connectionId}
-              table={tab.table}
-              tableColumns={data.columns.map((c) => c.name)}
-            />
-          )}
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                const sql = await dumpTableSql({
-                  connectionId: tab.connectionId,
-                  table: tab.table,
-                  includeData: true,
-                  engine: tab.connectionEngine,
-                });
-                downloadTextFile(`${tab.table}.sql`, sql, "application/sql");
-              } catch (err) {
-                const msg = err instanceof Error ? err.message : String(err);
-                setError(msg);
-                void writeLog("ERROR", `dump_table_sql ${tab.table}: ${msg}`);
-              }
-            }}
-          >
-            Dump SQL
-          </button>
         </div>
-      </div>
+      )}
 
       {error && <p className="pane-error">{error}</p>}
       {loading && !data && <p className="pane-placeholder">加载中…</p>}
@@ -352,12 +451,15 @@ export function DataGrid({ tab }: Props) {
         <table>
           <thead>
             <tr>
-              <th className="row-actions-col" />
+              <th className="row-num-col">#</th>
               {(data?.columns ?? []).map((c) => (
                 <th key={c.name}>
-                  <button type="button" onClick={() => toggleSort(c.name)}>
-                    {c.name}
-                    {sortCol === c.name ? (sortDir === "ASC" ? " ↑" : " ↓") : ""}
+                  <button type="button" className="col-head-btn" onClick={() => toggleSort(c.name)}>
+                    <span className="col-name">
+                      {c.name}
+                      {sortCol === c.name ? (sortDir === "ASC" ? " ↑" : " ↓") : ""}
+                    </span>
+                    <span className="col-type">{typeHint(c.dataType)}</span>
                   </button>
                 </th>
               ))}
@@ -367,36 +469,47 @@ export function DataGrid({ tab }: Props) {
             {rows.map((row, ri) => (
               <tr
                 key={row.key}
-                className={
-                  row.deleted ? "is-deleted" : row.inserted ? "is-inserted" : undefined
-                }
+                className={[
+                  selectedRow === ri ? "is-selected" : "",
+                  row.deleted ? "is-deleted" : "",
+                  row.inserted ? "is-inserted" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                onClick={() => setSelectedRow(ri)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setSelectedRow(ri);
+                  setMenu({
+                    x: e.clientX,
+                    y: e.clientY,
+                    rowIndex: ri,
+                    colIndex: 0,
+                  });
+                }}
               >
-                <td className="row-actions-col">
-                  <button
-                    type="button"
-                    disabled={row.deleted}
-                    onClick={() =>
-                      setRows((prev) =>
-                        prev.map((r, i) =>
-                          i === ri
-                            ? r.inserted
-                              ? { ...r, deleted: true }
-                              : { ...r, deleted: true }
-                            : r,
-                        ).filter((r) => !(r.inserted && r.deleted)),
-                      )
-                    }
-                  >
-                    删
-                  </button>
-                </td>
+                <td className="row-num-col">{ri + 1}</td>
                 {row.values.map((cell, ci) => (
-                  <td key={ci} className={cell === null ? "is-null" : undefined}>
+                  <td
+                    key={ci}
+                    className={cell === null ? "is-null" : undefined}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setSelectedRow(ri);
+                      setMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        rowIndex: ri,
+                        colIndex: ci,
+                      });
+                    }}
+                  >
                     <input
                       className="cell-input"
                       disabled={!!row.deleted}
                       value={cellText(cell)}
                       onChange={(e) => updateCell(ri, ci, e.target.value)}
+                      onFocus={() => setSelectedRow(ri)}
                     />
                   </td>
                 ))}
@@ -406,25 +519,74 @@ export function DataGrid({ tab }: Props) {
         </table>
       </div>
 
-      <div className="data-grid-pager">
-        <button
-          type="button"
-          disabled={page <= 1 || loading || dirty}
-          onClick={() => setPage((p) => Math.max(1, p - 1))}
-        >
-          上一页
-        </button>
-        <span>
-          第 {page} / {totalPages} 页（每页 {pageSize}）
-        </span>
-        <button
-          type="button"
-          disabled={page >= totalPages || loading || dirty}
-          onClick={() => setPage((p) => p + 1)}
-        >
-          下一页
-        </button>
+      <div className="dg-sql-bar">
+        <code title={sqlPreview}>{sqlPreview}</code>
+        <div className="dg-pager">
+          <button
+            type="button"
+            disabled={page <= 1 || loading || dirty}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            ‹
+          </button>
+          <span>
+            {page} / {totalPages}
+          </span>
+          <button
+            type="button"
+            disabled={page >= totalPages || loading || dirty}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            ›
+          </button>
+        </div>
       </div>
+
+      <div className="dg-status-bar">
+        <span>{selectedRow >= 0 && rows[selectedRow] && !rows[selectedRow]?.deleted ? "已选 1 行" : "未选中"}</span>
+        <span>{recordLabel}</span>
+        <span>{loading ? "刷新中…" : saving ? "提交中…" : "就绪"}</span>
+      </div>
+
+      {menu && data && (
+        <div
+          className="dg-context-menu"
+          style={{ left: menu.x, top: menu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button type="button" onClick={() => { addRow(); setMenu(null); }}>
+            添加记录
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              deleteSelected();
+              setMenu(null);
+            }}
+          >
+            删除记录
+          </button>
+          <div className="dg-menu-sep" />
+          <button
+            type="button"
+            onClick={() => {
+              void copyText(cellText(rows[menu.rowIndex]?.values[menu.colIndex]));
+              setMenu(null);
+            }}
+          >
+            复制
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void copyText(data.columns[menu.colIndex]?.name ?? "");
+              setMenu(null);
+            }}
+          >
+            复制字段名称
+          </button>
+        </div>
+      )}
     </div>
   );
 }

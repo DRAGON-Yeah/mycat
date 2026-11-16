@@ -30,13 +30,22 @@ export type ToolbarAction =
   | "model"
   | "bi";
 
-export type SelectionKind = "none" | "connection" | "database" | "table";
+export type SelectionKind = "none" | "connection" | "database" | "table" | "folder";
+
+export type ObjectFolder =
+  | "tables"
+  | "views"
+  | "functions"
+  | "events"
+  | "queries"
+  | "backups";
 
 type WorkspaceState = {
   activeConnectionId: string | null;
   activeConnection: ConnectionDto | null;
   selectedDatabase: string | null;
   selectedTable: string | null;
+  selectedFolder: ObjectFolder | null;
   selectionKind: SelectionKind;
   centerMode: CenterMode;
   toolbarAction: ToolbarAction;
@@ -46,6 +55,7 @@ type WorkspaceState = {
   openConnection: (conn: ConnectionDto) => void;
   clearConnection: () => void;
   selectDatabase: (database: string) => void;
+  selectObjectFolder: (database: string, folder: ObjectFolder) => void;
   selectTableMeta: (table: string | null) => void;
   setCenterMode: (mode: CenterMode) => void;
   setToolbarAction: (action: ToolbarAction, placeholder?: string | null) => void;
@@ -60,6 +70,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   activeConnection: null,
   selectedDatabase: null,
   selectedTable: null,
+  selectedFolder: null,
   selectionKind: "none",
   centerMode: "welcome",
   toolbarAction: "connection",
@@ -72,6 +83,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       activeConnection: conn,
       selectedDatabase: conn.database?.trim() || null,
       selectedTable: null,
+      selectedFolder: conn.database?.trim() ? "tables" : null,
       selectionKind: "connection",
       centerMode: conn.database?.trim() ? "objectList" : "welcome",
       toolbarAction: "table",
@@ -83,6 +95,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       activeConnection: null,
       selectedDatabase: null,
       selectedTable: null,
+      selectedFolder: null,
       selectionKind: "none",
       centerMode: "welcome",
       toolbarAction: "connection",
@@ -94,16 +107,66 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({
       selectedDatabase: database,
       selectedTable: null,
+      selectedFolder: "tables",
       selectionKind: "database",
       centerMode: "objectList",
       toolbarAction: "table",
       placeholderFeature: null,
       activeTabId: null,
     }),
+  selectObjectFolder: (database, folder) => {
+    if (folder === "queries") {
+      set({
+        selectedDatabase: database,
+        selectedFolder: folder,
+        selectedTable: null,
+        selectionKind: "folder",
+        centerMode: "query",
+        placeholderFeature: null,
+        toolbarAction: "query",
+        activeTabId: null,
+      });
+      return;
+    }
+    const listable = folder === "tables" || folder === "views";
+    set({
+      selectedDatabase: database,
+      selectedFolder: folder,
+      selectedTable: null,
+      selectionKind: "folder",
+      centerMode: listable ? "objectList" : "placeholder",
+      placeholderFeature: listable
+        ? null
+        : folder === "functions"
+          ? "function"
+          : folder === "backups"
+            ? "backup"
+            : folder === "events"
+              ? "automation"
+              : folder,
+      toolbarAction:
+        folder === "tables"
+          ? "table"
+          : folder === "views"
+            ? "view"
+            : folder === "functions"
+              ? "function"
+              : folder === "backups"
+                ? "backup"
+                : "table",
+      activeTabId: null,
+    });
+  },
   selectTableMeta: (table) =>
     set({
       selectedTable: table,
-      selectionKind: table ? "table" : get().selectedDatabase ? "database" : "connection",
+      selectionKind: table
+        ? "table"
+        : get().selectedFolder
+          ? "folder"
+          : get().selectedDatabase
+            ? "database"
+            : "connection",
     }),
   setCenterMode: (mode) => set({ centerMode: mode, placeholderFeature: null }),
   setToolbarAction: (action, placeholder = null) => {

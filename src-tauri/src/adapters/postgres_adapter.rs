@@ -147,6 +147,13 @@ impl DriverSession for PostgresSession {
                     } else {
                         "table".into()
                     },
+                    table_rows: None,
+                    data_length: None,
+                    engine: None,
+                    create_time: None,
+                    update_time: None,
+                    collation: None,
+                    comment: None,
                 }
             })
             .collect())
