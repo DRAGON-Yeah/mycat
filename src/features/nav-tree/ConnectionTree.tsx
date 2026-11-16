@@ -9,12 +9,12 @@ import {
 import {
   deleteConnection,
   exportConnections,
-  importConnections,
   listConnections,
   upsertConnection,
 } from "../connections/api";
 import { duplicateConnectionSeed } from "../connections/connectionHelpers";
 import { ConnectionForm } from "../connections/ConnectionForm";
+import { ImportConnectionsDialog } from "../connections/ImportConnectionsDialog";
 import type { ConnectionDto, UpsertConnectionInput } from "../connections/types";
 import {
   closeConnection,
@@ -110,6 +110,7 @@ export function ConnectionTree() {
   const [editBusy, setEditBusy] = useState(false);
   const [newDbFor, setNewDbFor] = useState<ConnectionDto | null>(null);
   const [newDbBusy, setNewDbBusy] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const activeConnectionId = useWorkspaceStore((s) => s.activeConnectionId);
   const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
@@ -686,25 +687,13 @@ export function ConnectionTree() {
           >
             导出
           </button>
-          <label className="ghost-btn file-btn">
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={() => setImportOpen(true)}
+          >
             导入
-            <input
-              type="file"
-              accept="application/json,.json"
-              hidden
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                e.target.value = "";
-                if (!file) return;
-                try {
-                  await importConnections(JSON.parse(await file.text()));
-                  await reload();
-                } catch (err) {
-                  setListError(err instanceof Error ? err.message : String(err));
-                }
-              }}
-            />
-          </label>
+          </button>
         </div>
       </div>
 
@@ -1108,6 +1097,17 @@ export function ConnectionTree() {
               setToast(err instanceof Error ? err.message : String(err));
               window.setTimeout(() => setToast(null), 2800);
             });
+          }}
+        />
+      )}
+
+      {importOpen && (
+        <ImportConnectionsDialog
+          onClose={() => setImportOpen(false)}
+          onImported={(count) => {
+            void reload();
+            setToast(`已导入 ${count} 个连接`);
+            window.setTimeout(() => setToast(null), 2500);
           }}
         />
       )}

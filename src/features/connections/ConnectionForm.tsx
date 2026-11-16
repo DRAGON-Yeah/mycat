@@ -194,188 +194,208 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
 
   return (
     <div className="modal-backdrop">
-      <form className="modal" onSubmit={onSubmit}>
+      <form className="modal modal-wide" onSubmit={onSubmit}>
         <h2>{title}</h2>
-        <label>
-          显示名
-          <input value={name} onChange={(e) => setName(e.target.value)} />
-        </label>
-        <label>
-          引擎
-          <select
-            value={engine}
-            onChange={(e) => {
-              const next = e.target.value as EngineType;
-              setEngine(next);
-              if (!initial) setPort(defaultPort[next]);
-            }}
-          >
-            <option value="mysql">MySQL</option>
-            <option value="postgres">PostgreSQL</option>
-            <option value="sqlite">SQLite</option>
-          </select>
-        </label>
-        <label>
-          {engine === "sqlite" ? "文件路径" : "主机"}
-          <input
-            value={host}
-            onChange={onNoChineseField(setHost)}
-            placeholder={engine === "sqlite" ? "/path/to/file.db" : "127.0.0.1"}
-            spellCheck={false}
-          />
-        </label>
-        {engine !== "sqlite" && (
-          <>
-            <label>
-              端口
+        <div className="modal-grid">
+          <label>
+            显示名
+            <input value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label>
+            引擎
+            <select
+              value={engine}
+              onChange={(e) => {
+                const next = e.target.value as EngineType;
+                setEngine(next);
+                if (!initial) setPort(defaultPort[next]);
+              }}
+            >
+              <option value="mysql">MySQL</option>
+              <option value="postgres">PostgreSQL</option>
+              <option value="sqlite">SQLite</option>
+            </select>
+          </label>
+
+          {engine === "sqlite" ? (
+            <label className="modal-span-2">
+              文件路径
               <input
-                type="number"
-                value={port}
-                onChange={(e) => setPort(Number(e.target.value))}
-              />
-            </label>
-            <label>
-              数据库
-              <input
-                value={database}
-                onChange={onNoChineseField(setDatabase)}
+                value={host}
+                onChange={onNoChineseField(setHost)}
+                placeholder="/path/to/file.db"
                 spellCheck={false}
               />
             </label>
-            <label>
-              用户名
-              <input
-                value={user}
-                onChange={onNoChineseField(setUser)}
-                spellCheck={false}
-              />
-            </label>
-            <label>
-              密码
-              <div className="password-field">
+          ) : (
+            <>
+              <label>
+                主机
                 <input
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={onNoChineseField(setPassword)}
-                  autoComplete="off"
+                  value={host}
+                  onChange={onNoChineseField(setHost)}
+                  placeholder="127.0.0.1"
                   spellCheck={false}
                 />
-                <button
-                  type="button"
-                  className="password-toggle"
-                  title={showPassword ? "隐藏密码" : "显示密码"}
-                  aria-label={showPassword ? "隐藏密码" : "显示密码"}
-                  onClick={() => setShowPassword((v) => !v)}
-                >
-                  {showPassword ? <IconEyeOff /> : <IconEye />}
-                </button>
-              </div>
-            </label>
-          </>
-        )}
-        {engine !== "sqlite" && (
-          <>
-            <label>
-              SSL
-              <select value={sslMode} onChange={(e) => setSslMode(e.target.value)}>
-                <option value="disable">disable</option>
-                <option value="require">require</option>
-              </select>
-            </label>
-            {sslMode === "require" && (
-              <label className="row-check">
-                <input
-                  type="checkbox"
-                  checked={sslTrust}
-                  onChange={(e) => setSslTrust(e.target.checked)}
-                />
-                信任服务端证书（危险，仅开发）
               </label>
-            )}
-            <label className="row-check">
+              <label>
+                端口
+                <input
+                  type="number"
+                  value={port}
+                  onChange={(e) => setPort(Number(e.target.value))}
+                />
+              </label>
+              <label>
+                数据库
+                <input
+                  value={database}
+                  onChange={onNoChineseField(setDatabase)}
+                  spellCheck={false}
+                />
+              </label>
+              <label>
+                用户名
+                <input
+                  value={user}
+                  onChange={onNoChineseField(setUser)}
+                  spellCheck={false}
+                />
+              </label>
+              <label>
+                密码
+                <div className="password-field">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={onNoChineseField(setPassword)}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <button
+                    type="button"
+                    className="password-toggle"
+                    title={showPassword ? "隐藏密码" : "显示密码"}
+                    aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                    onClick={() => setShowPassword((v) => !v)}
+                  >
+                    {showPassword ? <IconEyeOff /> : <IconEye />}
+                  </button>
+                </div>
+              </label>
+              <label>
+                SSL
+                <select
+                  value={sslMode}
+                  onChange={(e) => setSslMode(e.target.value)}
+                >
+                  <option value="disable">disable</option>
+                  <option value="require">require</option>
+                </select>
+              </label>
+            </>
+          )}
+
+        </div>
+
+        <div className="modal-opts">
+          {engine !== "sqlite" && sslMode === "require" && (
+            <label className="modal-check">
+              <input
+                type="checkbox"
+                checked={sslTrust}
+                onChange={(e) => setSslTrust(e.target.checked)}
+              />
+              <span>信任服务端证书（危险，仅开发）</span>
+            </label>
+          )}
+          {engine !== "sqlite" && (
+            <label className="modal-check">
               <input
                 type="checkbox"
                 checked={sshEnabled}
                 onChange={(e) => setSshEnabled(e.target.checked)}
               />
-              使用 SSH Tunnel
+              <span>使用 SSH Tunnel</span>
             </label>
-            {sshEnabled && (
-              <>
-                <label>
-                  SSH 主机
+          )}
+          {engine !== "sqlite" && sshEnabled && (
+            <div className="modal-grid modal-ssh-grid">
+              <label>
+                SSH 主机
+                <input
+                  value={sshHost}
+                  onChange={onNoChineseField(setSshHost)}
+                  placeholder="jump.example.com"
+                  spellCheck={false}
+                />
+              </label>
+              <label>
+                SSH 端口
+                <input
+                  type="number"
+                  value={sshPort}
+                  onChange={(e) => setSshPort(Number(e.target.value))}
+                />
+              </label>
+              <label>
+                SSH 用户
+                <input
+                  value={sshUser}
+                  onChange={onNoChineseField(setSshUser)}
+                  spellCheck={false}
+                />
+              </label>
+              <label>
+                SSH 密码
+                <div className="password-field">
                   <input
-                    value={sshHost}
-                    onChange={onNoChineseField(setSshHost)}
-                    placeholder="jump.example.com"
+                    type={showSshPassword ? "text" : "password"}
+                    value={sshPassword}
+                    onChange={onNoChineseField(setSshPassword)}
+                    autoComplete="off"
                     spellCheck={false}
                   />
-                </label>
-                <label>
-                  SSH 端口
-                  <input
-                    type="number"
-                    value={sshPort}
-                    onChange={(e) => setSshPort(Number(e.target.value))}
-                  />
-                </label>
-                <label>
-                  SSH 用户
-                  <input
-                    value={sshUser}
-                    onChange={onNoChineseField(setSshUser)}
-                    spellCheck={false}
-                  />
-                </label>
-                <label>
-                  SSH 密码
-                  <div className="password-field">
-                    <input
-                      type={showSshPassword ? "text" : "password"}
-                      value={sshPassword}
-                      onChange={onNoChineseField(setSshPassword)}
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                    <button
-                      type="button"
-                      className="password-toggle"
-                      title={showSshPassword ? "隐藏密码" : "显示密码"}
-                      aria-label={showSshPassword ? "隐藏密码" : "显示密码"}
-                      onClick={() => setShowSshPassword((v) => !v)}
-                    >
-                      {showSshPassword ? <IconEyeOff /> : <IconEye />}
-                    </button>
-                  </div>
-                </label>
-              </>
-            )}
-          </>
-        )}
-        <label className="row-check">
-          <input
-            type="checkbox"
-            checked={starred}
-            onChange={(e) => setStarred(e.target.checked)}
-          />
-          星标
-        </label>
-        <label>
-          颜色
-          <input
-            type="color"
-            value={color || "#0969da"}
-            onChange={(e) => setColor(e.target.value)}
-          />
-        </label>
-        <label>
-          分组
-          <input
-            value={groupName}
-            onChange={(e) => setGroupName(e.target.value)}
-            placeholder="例如：开发 / 测试"
-          />
-        </label>
+                  <button
+                    type="button"
+                    className="password-toggle"
+                    title={showSshPassword ? "隐藏密码" : "显示密码"}
+                    aria-label={showSshPassword ? "隐藏密码" : "显示密码"}
+                    onClick={() => setShowSshPassword((v) => !v)}
+                  >
+                    {showSshPassword ? <IconEyeOff /> : <IconEye />}
+                  </button>
+                </div>
+              </label>
+            </div>
+          )}
+          <div className="modal-opts-row">
+            <label className="modal-check">
+              <input
+                type="checkbox"
+                checked={starred}
+                onChange={(e) => setStarred(e.target.checked)}
+              />
+              <span>星标</span>
+            </label>
+            <label className="modal-color">
+              <span>颜色</span>
+              <input
+                type="color"
+                value={color || "#0969da"}
+                onChange={(e) => setColor(e.target.value)}
+              />
+            </label>
+          </div>
+          <label className="modal-group">
+            <span>分组</span>
+            <input
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              placeholder="例如：开发 / 测试"
+            />
+          </label>
+        </div>
         {error && <p className="form-error">{error}</p>}
         {info && <p className="form-info">{info}</p>}
         <div className="modal-actions">
