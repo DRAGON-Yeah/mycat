@@ -3741,8 +3741,42 @@ tr.is-inserted {
   background: linear-gradient(160deg, #66bb6a, #2e7d32);
 }
 
-.inspector-badge:not(.db):not(.conn) {
+.inspector-badge.view {
+  background: linear-gradient(160deg, #9575cd, #5e35b1);
+}
+
+.inspector-badge:not(.db):not(.conn):not(.view) {
   background: linear-gradient(160deg, #42a5f5, #1565c0);
+}
+
+.inspector-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.inspector-conn-line {
+  margin: 0 12px 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.inspector-pane .link-btn {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.object-kind.is-view {
+  background: #7e57c2;
+}
+
+.obj-tool-btn.is-danger-text {
+  color: #c62828;
 }
 
 .inspector-badge.conn {

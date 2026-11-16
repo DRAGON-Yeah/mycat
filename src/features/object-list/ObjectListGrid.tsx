@@ -14,8 +14,16 @@ import {
 } from "../nav-tree/ViewsFolderContextMenu";
 import { loadTableGroups } from "../nav-tree/tableGroups";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import {
+  formatCheckOption,
+  formatUpdatable,
+  listViewMeta,
+  type ViewMeta,
+} from "./viewMeta";
+import { dropTableOrView } from "../nav-tree/tableMenuActions";
+import { emitTableDataChanged } from "../../lib/tableEvents";
 
-const OBJ_COLS = [
+const TABLE_COLS = [
   { key: "name", label: "名称", defaultWidth: 180 },
   { key: "group", label: "组", defaultWidth: 80 },
   { key: "rows", label: "行", defaultWidth: 72 },
@@ -25,6 +33,14 @@ const OBJ_COLS = [
   { key: "updateTime", label: "修改日期", defaultWidth: 150 },
   { key: "collation", label: "排序规则", defaultWidth: 160 },
   { key: "comment", label: "注释", defaultWidth: 180 },
+] as const;
+
+const VIEW_COLS = [
+  { key: "name", label: "名称", defaultWidth: 200 },
+  { key: "securityType", label: "SQL 安全性", defaultWidth: 120 },
+  { key: "checkOption", label: "检查选项", defaultWidth: 120 },
+  { key: "updatable", label: "可以更新", defaultWidth: 100 },
+  { key: "definer", label: "定义者", defaultWidth: 160 },
 ] as const;
 
 function formatBytes(n?: number | null) {
@@ -66,6 +82,7 @@ export function ObjectListGrid() {
   const [viewsFolderMenu, setViewsFolderMenu] =
     useState<ViewsFolderMenuTarget | null>(null);
   const [groupMap, setGroupMap] = useState<Record<string, string>>({});
+  const [viewMetaMap, setViewMetaMap] = useState<Record<string, ViewMeta>>({});
   const filterRef = useRef<HTMLInputElement>(null);
   const listResetKey = useMemo(
     () => `${connection?.id ?? ""}:${database ?? ""}:${folder ?? ""}`,
@@ -190,26 +207,40 @@ export function ObjectListGrid() {
     async function load() {
       if (!connection || !database) {
         setTables([]);
+        setViewMetaMap({});
         return;
       }
       if (folder && folder !== "tables" && folder !== "views") {
         setTables([]);
+        setViewMetaMap({});
         return;
       }
       setLoading(true);
       setError(null);
       try {
         const items = await listTables(connection.id, database);
-        if (!cancelled) {
-          setTables(
-            items.filter((t) =>
-              wantViews ? t.kind === "view" : t.kind !== "view",
-            ),
-          );
+        const filtered = items.filter((t) =>
+          wantViews ? t.kind === "view" : t.kind !== "view",
+        );
+        if (!cancelled) setTables(filtered);
+        if (wantViews && !cancelled) {
+          try {
+            const meta = await listViewMeta({
+              connectionId: connection.id,
+              engine: String(connection.engine),
+              database,
+            });
+            if (!cancelled) setViewMetaMap(meta);
+          } catch {
+            if (!cancelled) setViewMetaMap({});
+          }
+        } else if (!cancelled) {
+          setViewMetaMap({});
         }
       } catch (err) {
         if (!cancelled) {
           setTables([]);
+          setViewMetaMap({});
           setError(err instanceof Error ? err.message : String(err));
         }
       } finally {
@@ -223,14 +254,16 @@ export function ObjectListGrid() {
   }, [connection, database, folder, wantViews, tick]);
 
   useEffect(() => {
-    if (!connection || !database) {
-      setGroupMap({});
+    if (!connection || !database || wantViews) {
+      if (wantViews) setGroupMap({});
       return;
     }
     void loadTableGroups(connection.id, database)
       .then((s) => setGroupMap(s.membership))
       .catch(() => setGroupMap({}));
-  }, [connection, database, tick]);
+  }, [connection, database, tick, wantViews]);
+
+  const cols = wantViews ? VIEW_COLS : TABLE_COLS;
 
   if (!connection) {
     return <p className="pane-placeholder">请先打开一个连接。</p>;
@@ -341,6 +374,48 @@ export function ObjectListGrid() {
           >
             新建
           </button>
+          {wantViews && (
+            <button
+              type="button"
+              className="obj-tool-btn is-danger-text"
+              title="删除视图"
+              disabled={!selectedTable}
+              onClick={() => {
+                if (!selectedTable || !connection || !database) return;
+                if (
+                  !window.confirm(
+                    `确定删除视图「${database}.${selectedTable}」？此操作不可恢复。`,
+                  )
+                ) {
+                  return;
+                }
+                void (async () => {
+                  try {
+                    await dropTableOrView({
+                      conn: connection,
+                      database,
+                      table: selectedTable,
+                      isView: true,
+                    });
+                    emitTableDataChanged({
+                      connectionId: connection.id,
+                      database,
+                      table: selectedTable,
+                    });
+                    selectTableMeta(null);
+                    setTick((x) => x + 1);
+                    setToast(`已删除视图 ${selectedTable}`);
+                    window.setTimeout(() => setToast(null), 2800);
+                  } catch (err) {
+                    setToast(err instanceof Error ? err.message : String(err));
+                    window.setTimeout(() => setToast(null), 2800);
+                  }
+                })();
+              }}
+            >
+              删除
+            </button>
+          )}
           <span className="obj-tool-sep" />
           <span className="object-list-title">
             对象 · {title}
@@ -355,7 +430,7 @@ export function ObjectListGrid() {
             setFilter(e.target.value);
             setObjectListFilter(e.target.value);
           }}
-          placeholder="搜索 / 在数据库中查找"
+          placeholder={wantViews ? "搜索" : "搜索 / 在数据库中查找"}
         />
       </div>
       {toast && <p className="obj-toast">{toast}</p>}
@@ -368,7 +443,7 @@ export function ObjectListGrid() {
           <table className="object-list-table">
             <thead>
               <tr>
-                {OBJ_COLS.map((c) => {
+                {cols.map((c) => {
                   const w = colW(c.key, c.defaultWidth);
                   return (
                     <th
@@ -387,52 +462,68 @@ export function ObjectListGrid() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((t) => (
-                <tr
-                  key={`${t.kind}-${t.name}`}
-                  className={
-                    selectedTable === t.name ? "is-selected" : undefined
-                  }
-                  onClick={() => selectTableMeta(t.name)}
-                  onDoubleClick={() => openTable(t.name)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    selectTableMeta(t.name);
-                    setMenu({
-                      x: e.clientX,
-                      y: e.clientY,
-                      conn: connection,
-                      database,
-                      table: t.name,
-                      kind: t.kind,
-                    });
-                  }}
-                >
-                  <td
-                    style={{
-                      width: colW("name", 180),
-                      maxWidth: colW("name", 180),
+              {filtered.map((t) => {
+                const vm = viewMetaMap[t.name];
+                return (
+                  <tr
+                    key={`${t.kind}-${t.name}`}
+                    className={
+                      selectedTable === t.name ? "is-selected" : undefined
+                    }
+                    onClick={() => selectTableMeta(t.name)}
+                    onDoubleClick={() => openTable(t.name)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      selectTableMeta(t.name);
+                      setMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        conn: connection,
+                        database,
+                        table: t.name,
+                        kind: t.kind,
+                      });
                     }}
                   >
-                    <span className="object-kind">
-                      {t.kind === "view" ? "V" : "T"}
-                    </span>
-                    {t.name}
-                  </td>
-                  <td>{groupMap[t.name] || "—"}</td>
-                  <td>{formatRows(t.tableRows)}</td>
-                  <td>{formatBytes(t.dataLength)}</td>
-                  <td>{t.engine ?? "—"}</td>
-                  <td>{t.createTime ?? "—"}</td>
-                  <td>{t.updateTime ?? "—"}</td>
-                  <td>{t.collation ?? "—"}</td>
-                  <td className="comment-cell">{t.comment || "—"}</td>
-                </tr>
-              ))}
+                    <td
+                      style={{
+                        width: colW("name", wantViews ? 200 : 180),
+                        maxWidth: colW("name", wantViews ? 200 : 180),
+                      }}
+                    >
+                      <span
+                        className={`object-kind ${wantViews ? "is-view" : ""}`}
+                      >
+                        {t.kind === "view" ? "V" : "T"}
+                      </span>
+                      {t.name}
+                    </td>
+                    {wantViews ? (
+                      <>
+                        <td>{vm?.securityType || "—"}</td>
+                        <td>{formatCheckOption(vm?.checkOption) || ""}</td>
+                        <td>{formatUpdatable(vm?.isUpdatable)}</td>
+                        <td className="comment-cell">{vm?.definer || "—"}</td>
+                      </>
+                    ) : (
+                      <>
+                        <td>{groupMap[t.name] || "—"}</td>
+                        <td>{formatRows(t.tableRows)}</td>
+                        <td>{formatBytes(t.dataLength)}</td>
+                        <td>{t.engine ?? "—"}</td>
+                        <td>{t.createTime ?? "—"}</td>
+                        <td>{t.updateTime ?? "—"}</td>
+                        <td>{t.collation ?? "—"}</td>
+                        <td className="comment-cell">{t.comment || "—"}</td>
+                      </>
+                    )}
+                  </tr>
+                );
+              })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="pane-placeholder">
+                  <td colSpan={cols.length} className="pane-placeholder">
                     {loading ? "加载中…" : `无匹配${title}`}
                   </td>
                 </tr>

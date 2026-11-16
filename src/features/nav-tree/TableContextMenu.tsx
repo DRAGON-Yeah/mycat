@@ -860,11 +860,15 @@ export function TableContextMenu({
                 `${header}${ddl}\n`,
                 "application/sql",
               );
-              onMessage("已导出共享包（可恢复的结构 SQL）");
+              onMessage(
+                isView
+                  ? "已导出共享包（视图 DDL）"
+                  : "已导出共享包（可恢复的结构 SQL）",
+              );
             })
           }
         >
-          导出共享包…
+          {isView ? "共享…" : "导出共享包…"}
         </button>
         <button
           type="button"

@@ -1,21 +1,134 @@
+import { useEffect, useState } from "react";
+import { executeSql, openConnection } from "../connections/sessionApi";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { IconEngine } from "../nav-tree/EngineIcons";
+import {
+  formatCheckOption,
+  formatUpdatable,
+  listViewMeta,
+  type ViewMeta,
+} from "../object-list/viewMeta";
 
 export function InspectorPane() {
   const connection = useWorkspaceStore((s) => s.activeConnection);
   const database = useWorkspaceStore((s) => s.selectedDatabase);
   const table = useWorkspaceStore((s) => s.selectedTable);
+  const folder = useWorkspaceStore((s) => s.selectedFolder);
   const kind = useWorkspaceStore((s) => s.selectionKind);
   const centerMode = useWorkspaceStore((s) => s.centerMode);
   const activeQueryId = useWorkspaceStore((s) => s.activeQueryId);
   const queryTabs = useWorkspaceStore((s) => s.queryTabs);
   const activeQuery = queryTabs.find((t) => t.id === activeQueryId) ?? null;
 
+  const [viewMeta, setViewMeta] = useState<ViewMeta | null>(null);
+  const [rowCount, setRowCount] = useState<number | null>(null);
+  const [rowBusy, setRowBusy] = useState(false);
+
+  useEffect(() => {
+    if (!connection || !database || !table || folder !== "views") {
+      setViewMeta(null);
+      setRowCount(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const map = await listViewMeta({
+          connectionId: connection.id,
+          engine: String(connection.engine),
+          database,
+        });
+        if (!cancelled) setViewMeta(map[table] ?? null);
+      } catch {
+        if (!cancelled) setViewMeta(null);
+      }
+    })();
+    setRowCount(null);
+    return () => {
+      cancelled = true;
+    };
+  }, [connection, database, table, folder]);
+
+  async function fetchRowCount() {
+    if (!connection || !database || !table) return;
+    setRowBusy(true);
+    try {
+      await openConnection(connection.id);
+      const out = await executeSql(
+        connection.id,
+        `SELECT COUNT(*) FROM \`${database.replace(/`/g, "``")}\`.\`${table.replace(/`/g, "``")}\``,
+        database,
+      );
+      const n = Number(out.rows[0]?.[0] ?? 0);
+      setRowCount(Number.isFinite(n) ? n : 0);
+    } catch {
+      setRowCount(null);
+    } finally {
+      setRowBusy(false);
+    }
+  }
+
   if (kind === "none" || !connection) {
     return (
       <aside className="pane inspector-pane" aria-label="信息">
         <div className="pane-title">信息</div>
         <p className="pane-placeholder">选中连接、数据库或表以查看详情。</p>
+      </aside>
+    );
+  }
+
+  if (kind === "table" && table && folder === "views") {
+    const check = formatCheckOption(viewMeta?.checkOption);
+    return (
+      <aside className="pane inspector-pane" aria-label="信息">
+        <div className="pane-title">信息</div>
+        <div className="inspector-hero">
+          <div className="inspector-badge view">V</div>
+          <div>
+            <h3>{table}</h3>
+            <p className="inspector-sub">视图</p>
+          </div>
+        </div>
+        <p className="inspector-conn-line">
+          {connection.name}
+          <span> · </span>
+          {database}
+        </p>
+        <dl className="inspector-meta">
+          <div>
+            <dt>行</dt>
+            <dd>
+              {rowCount != null ? (
+                rowCount.toLocaleString()
+              ) : (
+                <button
+                  type="button"
+                  className="link-btn"
+                  disabled={rowBusy}
+                  onClick={() => void fetchRowCount()}
+                >
+                  {rowBusy ? "统计中…" : "获取行的总数"}
+                </button>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt>是否可以更新</dt>
+            <dd>{formatUpdatable(viewMeta?.isUpdatable)}</dd>
+          </div>
+          <div>
+            <dt>定义者</dt>
+            <dd>{viewMeta?.definer || "—"}</dd>
+          </div>
+          <div>
+            <dt>定义者安全性</dt>
+            <dd>{viewMeta?.securityType || "—"}</dd>
+          </div>
+          <div>
+            <dt>检查选项</dt>
+            <dd>{check || "—"}</dd>
+          </div>
+        </dl>
       </aside>
     );
   }
