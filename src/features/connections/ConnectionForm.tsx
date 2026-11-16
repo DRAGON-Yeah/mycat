@@ -1,10 +1,12 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ChangeEvent,
   type FormEvent,
 } from "react";
+import { useModSaveShortcut } from "../../hooks/useModSaveShortcut";
 import { invoke } from "../../lib/invoke";
 import { getConnectionSecrets } from "./api";
 import type { ConnectionDto, EngineType, UpsertConnectionInput } from "./types";
@@ -70,6 +72,11 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
   const [info, setInfo] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  useModSaveShortcut(() => {
+    if (!saving && !testing) formRef.current?.requestSubmit();
+  }, !saving && !testing);
 
   useEffect(() => {
     if (!initial?.id || !initial.hasPassword) return;
@@ -194,7 +201,7 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
 
   return (
     <div className="modal-backdrop">
-      <form className="modal modal-wide" onSubmit={onSubmit}>
+      <form ref={formRef} className="modal modal-wide" onSubmit={onSubmit}>
         <h2>{title}</h2>
         <div className="modal-grid">
           <label>
@@ -409,7 +416,11 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
           >
             {testing ? "测试中…" : "测试连接"}
           </button>
-          <button type="submit" disabled={saving || testing}>
+          <button
+            type="submit"
+            disabled={saving || testing}
+            title="保存 (⌘/Ctrl+S)"
+          >
             {saving ? "保存中…" : "保存"}
           </button>
         </div>

@@ -1296,6 +1296,12 @@ export function ConnectionTree() {
         >
           <form
             className="modal"
+            onKeyDown={(e) => {
+              if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+              if (e.key.toLowerCase() !== "s") return;
+              e.preventDefault();
+              e.currentTarget.requestSubmit();
+            }}
             onSubmit={(e) => {
               e.preventDefault();
               const name = renameSaved.name.trim();
@@ -1355,6 +1361,7 @@ export function ConnectionTree() {
               <button
                 type="submit"
                 disabled={renameBusy || !renameSaved.name.trim()}
+                title="确定 (⌘/Ctrl+S)"
               >
                 {renameBusy ? "保存中…" : "确定"}
               </button>

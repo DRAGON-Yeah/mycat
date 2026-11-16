@@ -12,6 +12,7 @@ import {
   listTables,
   openConnection,
 } from "../connections/sessionApi";
+import { useModSaveShortcut } from "../../hooks/useModSaveShortcut";
 import type { DesignerTab } from "../../stores/workspaceStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { engineKey, identOk, quoteIdent, quoteTable } from "../nav-tree/sqlIdent";
@@ -674,6 +675,10 @@ export function TableDesigner({ tab }: Props) {
     columns.length > 0 &&
     (tab.mode === "create" || dirty);
 
+  useModSaveShortcut(() => {
+    if (canSave) void onSave();
+  }, canSave);
+
   return (
     <div className="table-designer navicat-designer">
       <div className="td-topbar">
@@ -761,6 +766,7 @@ export function TableDesigner({ tab }: Props) {
             className="td-save-btn"
             disabled={!canSave}
             onClick={() => void onSave()}
+            title="保存 (⌘/Ctrl+S)"
           >
             {saving ? "保存中…" : dirty || tab.mode === "create" ? "保存" : "已保存"}
           </button>

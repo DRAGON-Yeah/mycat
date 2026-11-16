@@ -23,6 +23,7 @@ import {
   type ColumnExtra,
   type EditorKind,
 } from "./columnEditors";
+import { useModSaveShortcut } from "../../hooks/useModSaveShortcut";
 import { useColumnResize } from "./useColumnResize";
 import {
   buildCsvData,
@@ -496,6 +497,10 @@ ORDER BY ordinal_position`;
     }
   }
 
+  useModSaveShortcut(() => {
+    if (dirty && !saving) void commit();
+  }, Boolean(data) && dirty && !saving);
+
   async function copyText(text: string) {
     setClipboard(text);
     try {
@@ -838,7 +843,7 @@ ORDER BY ordinal_position`;
           <button
             type="button"
             className="dg-icon-btn is-ok"
-            title="应用更改"
+            title="应用更改 (⌘/Ctrl+S)"
             disabled={!dirty || saving}
             onClick={() => void commit()}
           >

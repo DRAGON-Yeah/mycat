@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useModSaveShortcut } from "../../hooks/useModSaveShortcut";
 import { loadMysqlCharsets } from "../table-designer/loadColumns";
 import {
   MYSQL_CHARSETS,
@@ -32,6 +33,11 @@ export function NewDatabaseDialog({
     MYSQL_COLLATIONS_BY_CHARSET,
   );
   const inputRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  useModSaveShortcut(() => {
+    if (!busy && name.trim()) formRef.current?.requestSubmit();
+  }, !busy);
 
   useEffect(() => {
     if (!connectionId) return;
@@ -62,6 +68,7 @@ export function NewDatabaseDialog({
       }}
     >
       <form
+        ref={formRef}
         className="modal"
         onSubmit={(e) => {
           e.preventDefault();
@@ -130,7 +137,11 @@ export function NewDatabaseDialog({
           <button type="button" disabled={busy} onClick={onCancel}>
             取消
           </button>
-          <button type="submit" disabled={busy || !name.trim()}>
+          <button
+            type="submit"
+            disabled={busy || !name.trim()}
+            title="创建 (⌘/Ctrl+S)"
+          >
             {busy ? "创建中…" : "创建"}
           </button>
         </div>

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useModSaveShortcut } from "../../hooks/useModSaveShortcut";
 import { loadMysqlCharsets } from "../table-designer/loadColumns";
 import {
   MYSQL_CHARSETS,
@@ -28,6 +29,11 @@ export function EditDatabaseDialog({
   const [collationMap, setCollationMap] = useState<Record<string, string[]>>(
     MYSQL_COLLATIONS_BY_CHARSET,
   );
+  const formRef = useRef<HTMLFormElement>(null);
+
+  useModSaveShortcut(() => {
+    if (!busy && charset.trim()) formRef.current?.requestSubmit();
+  }, !busy);
 
   useEffect(() => {
     if (!connectionId) return;
@@ -58,6 +64,7 @@ export function EditDatabaseDialog({
       }}
     >
       <form
+        ref={formRef}
         className="modal"
         onSubmit={(e) => {
           e.preventDefault();
@@ -110,7 +117,11 @@ export function EditDatabaseDialog({
           <button type="button" disabled={busy} onClick={onCancel}>
             取消
           </button>
-          <button type="submit" disabled={busy || !charset.trim()}>
+          <button
+            type="submit"
+            disabled={busy || !charset.trim()}
+            title="确定 (⌘/Ctrl+S)"
+          >
             {busy ? "应用中…" : "确定"}
           </button>
         </div>
