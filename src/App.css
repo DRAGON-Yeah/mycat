@@ -4057,6 +4057,19 @@ tr.is-inserted {
   border-color: transparent !important;
   padding: 0 12px !important;
 }
+.td-dirty-flag {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+.td-dirty-flag.is-dirty {
+  color: #c45c00;
+  font-weight: 600;
+}
+.td-grid input:disabled {
+  opacity: 0.45;
+  background: transparent;
+}
 .td-tabs {
   display: flex;
   gap: 0;

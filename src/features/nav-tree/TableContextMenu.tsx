@@ -95,7 +95,9 @@ export function TableContextMenu({
   const openTableDesigner = useWorkspaceStore((s) => s.openTableDesigner);
   const setToolbarAction = useWorkspaceStore((s) => s.setToolbarAction);
   const tabs = useWorkspaceStore((s) => s.tabs);
+  const designerTabs = useWorkspaceStore((s) => s.designerTabs);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
+  const closeDesignerTab = useWorkspaceStore((s) => s.closeDesignerTab);
 
   const isView = kind === "view";
   const maintainOps = maintainOpsForEngine(String(conn.engine));
@@ -137,6 +139,15 @@ export function TableContextMenu({
     );
     for (const t of related) {
       closeTab(t.id, { force: true });
+    }
+    const designers = designerTabs.filter(
+      (t) =>
+        t.connectionId === conn.id &&
+        t.database === database &&
+        t.table === tableName,
+    );
+    for (const t of designers) {
+      closeDesignerTab(t.id, { force: true });
     }
   }
 

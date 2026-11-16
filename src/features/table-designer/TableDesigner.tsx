@@ -23,8 +23,17 @@ import {
   loadDesignerForeignKeys,
   loadDesignerIndexes,
   loadDesignerTriggers,
+  loadMysqlCharsets,
   loadTableOptions,
 } from "./loadColumns";
+import {
+  MYSQL_CHARSETS,
+  MYSQL_COLLATIONS_BY_CHARSET,
+  collationsForCharset,
+  defaultCollationForCharset,
+  typeSupportsDecimals,
+  typeSupportsLength,
+} from "./mysqlCharsets";
 import {
   MYSQL_TYPES,
   composedType,
@@ -108,13 +117,25 @@ export function TableDesigner({ tab }: Props) {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [charsetList, setCharsetList] = useState<string[]>([...MYSQL_CHARSETS]);
+  const [collationMap, setCollationMap] = useState<Record<string, string[]>>(
+    MYSQL_COLLATIONS_BY_CHARSET,
+  );
 
   const touch = useCallback(() => {
+    setDirty(true);
     markDirty(tab.id, true);
     setMessage(null);
   }, [markDirty, tab.id]);
+
+  const collationChoices = useMemo(() => {
+    const fromServer = collationMap[options.charset];
+    if (fromServer?.length) return fromServer;
+    return collationsForCharset(options.charset);
+  }, [collationMap, options.charset]);
 
   const load = useCallback(async () => {
     if (tab.mode === "create") {
@@ -141,6 +162,8 @@ export function TableDesigner({ tab }: Props) {
       setBaselineOptions(emptyOptions());
       setTableName(tab.table || "new_table");
       setSelectedIdx(0);
+      setDirty(true);
+      markDirty(tab.id, true);
       return;
     }
     setLoading(true);
@@ -157,7 +180,7 @@ export function TableDesigner({ tab }: Props) {
       setTableName(tab.table);
       setSelectedIdx(0);
 
-      const [ix, fk, tr, ck, meta] = await Promise.all([
+      const [ix, fk, tr, ck, meta, cs] = await Promise.all([
         loadDesignerIndexes({
           connectionId: tab.connectionId,
           engine: tab.connectionEngine,
@@ -188,6 +211,9 @@ export function TableDesigner({ tab }: Props) {
           database: tab.database,
           table: tab.table,
         }),
+        engineKey(tab.connectionEngine) === "mysql"
+          ? loadMysqlCharsets({ connectionId: tab.connectionId })
+          : Promise.resolve({ charsets: [], collationsByCharset: {} }),
       ]);
       setIndexes(ix);
       setFks(fk);
@@ -196,12 +222,35 @@ export function TableDesigner({ tab }: Props) {
       setOptions(meta.options);
       setBaselineOptions({ ...meta.options });
       setStats(meta.stats);
+      if (cs.charsets.length) {
+        setCharsetList(cs.charsets);
+      }
+      if (Object.keys(cs.collationsByCharset).length) {
+        setCollationMap(cs.collationsByCharset);
+      }
+      setDirty(false);
+      markDirty(tab.id, false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [tab]);
+  }, [tab, markDirty]);
+
+  useEffect(() => {
+    if (engineKey(tab.connectionEngine) !== "mysql") return;
+    if (tab.mode !== "create") return;
+    void loadMysqlCharsets({ connectionId: tab.connectionId })
+      .then((cs) => {
+        if (cs.charsets.length) setCharsetList(cs.charsets);
+        if (Object.keys(cs.collationsByCharset).length) {
+          setCollationMap(cs.collationsByCharset);
+        }
+      })
+      .catch(() => {
+        /* keep defaults */
+      });
+  }, [tab.connectionId, tab.connectionEngine, tab.mode]);
 
   useEffect(() => {
     void load();
@@ -330,6 +379,7 @@ export function TableDesigner({ tab }: Props) {
         }
         updateTab(tab.id, { table: name, dirty: false });
         markDirty(tab.id, false);
+        setDirty(false);
         setMessage(`已创建表 ${name}`);
         openTable(name);
         return;
@@ -500,6 +550,7 @@ export function TableDesigner({ tab }: Props) {
       }
 
       markDirty(tab.id, false);
+      setDirty(false);
       setMessage("已保存设计更改");
       await load();
     } catch (err) {
@@ -509,7 +560,19 @@ export function TableDesigner({ tab }: Props) {
     }
   }
 
+  function onDiscard() {
+    if (!dirty) return;
+    if (!window.confirm("放弃未保存的设计更改？")) return;
+    void load();
+    setMessage("已放弃更改");
+  }
+
   const isMysql = engineKey(tab.connectionEngine) === "mysql";
+  const canSave =
+    !saving &&
+    !loading &&
+    columns.length > 0 &&
+    (tab.mode === "create" || dirty);
 
   return (
     <div className="table-designer navicat-designer">
@@ -554,13 +617,24 @@ export function TableDesigner({ tab }: Props) {
               />
             </label>
           )}
+          <span className={`td-dirty-flag ${dirty ? "is-dirty" : ""}`}>
+            {dirty ? "未保存" : "已保存"}
+          </span>
+          <button
+            type="button"
+            disabled={saving || loading || !dirty}
+            onClick={onDiscard}
+            title="放弃更改"
+          >
+            放弃
+          </button>
           <button
             type="button"
             className="td-save-btn"
-            disabled={saving || loading || columns.length === 0}
+            disabled={!canSave}
             onClick={() => void onSave()}
           >
-            {saving ? "保存中…" : "保存"}
+            {saving ? "保存中…" : dirty || tab.mode === "create" ? "保存" : "已保存"}
           </button>
         </div>
         <div className="td-tabs" role="tablist">
@@ -617,9 +691,23 @@ export function TableDesigner({ tab }: Props) {
                       <td>
                         <select
                           value={c.typeName}
-                          onChange={(e) =>
-                            patchCol(c.key, { typeName: e.target.value })
-                          }
+                          onChange={(e) => {
+                            const typeName = e.target.value;
+                            const patch: Partial<DesignerColumn> = { typeName };
+                            if (!typeSupportsLength(typeName)) {
+                              patch.length = "";
+                              patch.decimals = "";
+                            } else if (
+                              typeName === "varchar" &&
+                              !c.length.trim()
+                            ) {
+                              patch.length = "255";
+                            }
+                            if (!typeSupportsDecimals(typeName)) {
+                              patch.decimals = "";
+                            }
+                            patchCol(c.key, patch);
+                          }}
                         >
                           {!MYSQL_TYPES.includes(c.typeName) && (
                             <option value={c.typeName}>{c.typeName}</option>
@@ -634,6 +722,7 @@ export function TableDesigner({ tab }: Props) {
                       <td>
                         <input
                           value={c.length}
+                          disabled={!typeSupportsLength(c.typeName)}
                           onChange={(e) =>
                             patchCol(c.key, { length: e.target.value })
                           }
@@ -642,6 +731,7 @@ export function TableDesigner({ tab }: Props) {
                       <td>
                         <input
                           value={c.decimals}
+                          disabled={!typeSupportsDecimals(c.typeName)}
                           onChange={(e) =>
                             patchCol(c.key, { decimals: e.target.value })
                           }
@@ -958,30 +1048,70 @@ export function TableDesigner({ tab }: Props) {
                     touch();
                   }}
                 >
-                  <option>InnoDB</option>
-                  <option>MyISAM</option>
-                  <option>MEMORY</option>
+                  {["InnoDB", "MyISAM", "MEMORY", "CSV", "ARCHIVE"]
+                    .concat(
+                      options.engine &&
+                        !["InnoDB", "MyISAM", "MEMORY", "CSV", "ARCHIVE"].includes(
+                          options.engine,
+                        )
+                        ? [options.engine]
+                        : [],
+                    )
+                    .map((eng) => (
+                      <option key={eng} value={eng}>
+                        {eng}
+                      </option>
+                    ))}
                 </select>
               </label>
               <label>
                 字符集
-                <input
+                <select
                   value={options.charset}
                   onChange={(e) => {
-                    setOptions((o) => ({ ...o, charset: e.target.value }));
+                    const charset = e.target.value;
+                    const nextColl =
+                      collationMap[charset]?.[0] ||
+                      defaultCollationForCharset(charset);
+                    setOptions((o) => ({
+                      ...o,
+                      charset,
+                      collation: nextColl,
+                    }));
                     touch();
                   }}
-                />
+                >
+                  {!charsetList.includes(options.charset) && options.charset && (
+                    <option value={options.charset}>{options.charset}</option>
+                  )}
+                  {charsetList.map((cs) => (
+                    <option key={cs} value={cs}>
+                      {cs}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
                 排序规则
-                <input
+                <select
                   value={options.collation}
                   onChange={(e) => {
                     setOptions((o) => ({ ...o, collation: e.target.value }));
                     touch();
                   }}
-                />
+                >
+                  {!collationChoices.includes(options.collation) &&
+                    options.collation && (
+                      <option value={options.collation}>
+                        {options.collation}
+                      </option>
+                    )}
+                  {collationChoices.map((cl) => (
+                    <option key={cl} value={cl}>
+                      {cl}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
                 行格式
@@ -992,15 +1122,30 @@ export function TableDesigner({ tab }: Props) {
                     touch();
                   }}
                 >
-                  <option>Dynamic</option>
-                  <option>Compact</option>
-                  <option>Redundant</option>
-                  <option>Compressed</option>
+                  {["Dynamic", "Compact", "Redundant", "Compressed"]
+                    .concat(
+                      options.rowFormat &&
+                        ![
+                          "Dynamic",
+                          "Compact",
+                          "Redundant",
+                          "Compressed",
+                        ].includes(options.rowFormat)
+                        ? [options.rowFormat]
+                        : [],
+                    )
+                    .map((rf) => (
+                      <option key={rf} value={rf}>
+                        {rf}
+                      </option>
+                    ))}
                 </select>
               </label>
               <label>
                 自增值
                 <input
+                  type="number"
+                  min={0}
                   value={options.autoIncrement}
                   onChange={(e) => {
                     setOptions((o) => ({

@@ -130,6 +130,38 @@ ORDER BY ordinal_position`;
   });
 }
 
+export async function loadMysqlCharsets(args: {
+  connectionId: string;
+}): Promise<{ charsets: string[]; collationsByCharset: Record<string, string[]> }> {
+  await openConnection(args.connectionId);
+  const charsets: string[] = [];
+  const collationsByCharset: Record<string, string[]> = {};
+  try {
+    const cs = await executeSql(args.connectionId, "SHOW CHARACTER SET");
+    const m = colMap(cs.columns);
+    for (const row of cs.rows) {
+      const name = cell(row, m.charset ?? m.Charset);
+      if (name) charsets.push(name);
+    }
+  } catch {
+    /* fallback elsewhere */
+  }
+  try {
+    const cl = await executeSql(args.connectionId, "SHOW COLLATION");
+    const m = colMap(cl.columns);
+    for (const row of cl.rows) {
+      const coll = cell(row, m.collation ?? m.Collation);
+      const cs = cell(row, m.charset ?? m.Charset);
+      if (!coll || !cs) continue;
+      if (!collationsByCharset[cs]) collationsByCharset[cs] = [];
+      collationsByCharset[cs]!.push(coll);
+    }
+  } catch {
+    /* fallback elsewhere */
+  }
+  return { charsets, collationsByCharset };
+}
+
 export async function loadTableOptions(args: {
   connectionId: string;
   engine: string;
