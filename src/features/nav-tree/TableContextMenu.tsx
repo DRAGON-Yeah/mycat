@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ConnectionDto } from "../connections/types";
 import { executeSql, openConnection } from "../connections/sessionApi";
-import { downloadTextFile } from "../import-export/csv";
+import { downloadTextFile, isSaveCancelled } from "../import-export/csv";
 import { TableIoWizard } from "../import-export/TableIoWizard";
 import { emitTableDataChanged } from "../../lib/tableEvents";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
@@ -135,6 +135,10 @@ export function TableContextMenu({
       await action();
       onClose();
     } catch (err) {
+      if (isSaveCancelled(err)) {
+        onClose();
+        return;
+      }
       onMessage(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
@@ -821,7 +825,7 @@ export function TableContextMenu({
                 `-- Restore: open SQL file or use Paste on table menu`,
                 "",
               ].join("\n");
-              downloadTextFile(
+              await downloadTextFile(
                 `${table}-share.sql`,
                 `${header}${ddl}\n`,
                 "application/sql",

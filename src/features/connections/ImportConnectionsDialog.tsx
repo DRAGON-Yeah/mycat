@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { downloadTextFile } from "../import-export/csv";
+import { downloadTextFile, isSaveCancelled } from "../import-export/csv";
 import { importConnections, type ConnectionExportItem } from "./api";
 
 type Props = {
@@ -42,17 +42,20 @@ export function ImportConnectionsDialog({ onClose, onImported }: Props) {
   const [downloaded, setDownloaded] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  function downloadTemplate() {
+  async function downloadTemplate() {
     setError(null);
-    downloadTextFile(
-      "mycat-connections-template.json",
-      `${JSON.stringify(TEMPLATE, null, 2)}\n`,
-      "application/json",
-    );
-    setDownloaded(true);
-    setInfo(
-      "模板已开始下载：mycat-connections-template.json。请到浏览器/系统的「下载」文件夹查看。",
-    );
+    try {
+      const path = await downloadTextFile(
+        "mycat-connections-template.json",
+        `${JSON.stringify(TEMPLATE, null, 2)}\n`,
+        "application/json",
+      );
+      setDownloaded(true);
+      setInfo(`模板已保存：${path}`);
+    } catch (err) {
+      if (isSaveCancelled(err)) return;
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function acceptFile(next: File | null) {
@@ -132,7 +135,7 @@ export function ImportConnectionsDialog({ onClose, onImported }: Props) {
             type="button"
             className="import-conn-btn"
             disabled={busy}
-            onClick={downloadTemplate}
+            onClick={() => void downloadTemplate()}
           >
             {downloaded ? "再次下载模板" : "下载 mycat-connections-template.json"}
           </button>

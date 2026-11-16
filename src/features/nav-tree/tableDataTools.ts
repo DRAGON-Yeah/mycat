@@ -178,7 +178,7 @@ export async function exportMaskedCsv(args: {
     page += 1;
   }
   const name = (fileName || `${table}-masked`).replace(/\.csv$/i, "");
-  downloadTextFile(
+  await downloadTextFile(
     `${name}.csv`,
     rowsToCsv(columns, allRows, { bom }),
     "text/csv;charset=utf-8",

@@ -41,6 +41,8 @@ fn migrate_legacy_settings(db: &MetaDb) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             let _ = logging::init();
             #[cfg(target_os = "macos")]

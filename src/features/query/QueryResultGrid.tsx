@@ -15,7 +15,7 @@ import {
   buildUpdateSql,
 } from "../data-grid/copyAs";
 import { useColumnResize } from "../data-grid/useColumnResize";
-import { downloadTextFile } from "../import-export/csv";
+import { downloadTextFile, isSaveCancelled } from "../import-export/csv";
 
 export type QueryResultData = {
   columns: string[];
@@ -305,17 +305,22 @@ export function QueryResultGrid({
     setMenu(null);
   }
 
-  function exportCsv() {
-    const lines = [
-      buildCsvHeaders(columns),
-      ...rows.map((r) => buildCsvData(r)),
-    ];
-    downloadTextFile(
-      `${tableHint}-result.csv`,
-      lines.join("\n"),
-      "text/csv;charset=utf-8",
-    );
-    showToast("已导出 CSV");
+  async function exportCsv() {
+    try {
+      const lines = [
+        buildCsvHeaders(columns),
+        ...rows.map((r) => buildCsvData(r)),
+      ];
+      await downloadTextFile(
+        `${tableHint}-result.csv`,
+        lines.join("\n"),
+        "text/csv;charset=utf-8",
+      );
+      showToast("已导出 CSV");
+    } catch (err) {
+      if (isSaveCancelled(err)) return;
+      showToast(err instanceof Error ? err.message : String(err));
+    }
   }
 
   function openMenu(e: ReactMouseEvent, ri: number, ci: number) {
@@ -358,7 +363,7 @@ export function QueryResultGrid({
               type="button"
               className="qr-tool-btn"
               title="导出 CSV"
-              onClick={exportCsv}
+              onClick={() => void exportCsv()}
             >
               ⇩
             </button>
@@ -398,7 +403,7 @@ export function QueryResultGrid({
               type="button"
               className="qr-tool-btn"
               title="导出 CSV"
-              onClick={exportCsv}
+              onClick={() => void exportCsv()}
             >
               ⇩
             </button>

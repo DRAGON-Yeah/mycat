@@ -11,7 +11,7 @@ import {
 } from "../connections/sessionApi";
 import { ExportCsvButton } from "../import-export/ExportCsvButton";
 import { ImportCsvButton } from "../import-export/ImportCsvButton";
-import { downloadTextFile } from "../import-export/csv";
+import { downloadTextFile, isSaveCancelled } from "../import-export/csv";
 import type { TableTab } from "../../stores/workspaceStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import {
@@ -721,8 +721,9 @@ ORDER BY ordinal_position`;
                 engine: tab.connectionEngine,
                 database: database || undefined,
               });
-              downloadTextFile(`${tab.table}.sql`, sql, "application/sql");
+              await downloadTextFile(`${tab.table}.sql`, sql, "application/sql");
             } catch (err) {
+              if (isSaveCancelled(err)) return;
               const msg = err instanceof Error ? err.message : String(err);
               setError(msg);
               void writeLog("ERROR", `dump_table_sql ${tab.table}: ${msg}`);

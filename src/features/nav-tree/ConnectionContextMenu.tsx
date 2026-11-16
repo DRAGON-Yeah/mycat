@@ -12,7 +12,7 @@ import {
 import { upsertConnection } from "../connections/api";
 import type { ConnectionDto } from "../connections/types";
 import { openConnection } from "../connections/sessionApi";
-import { downloadTextFile } from "../import-export/csv";
+import { downloadTextFile, isSaveCancelled } from "../import-export/csv";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 
 export type ConnMenuTarget = {
@@ -79,6 +79,10 @@ export function ConnectionContextMenu({
       await action();
       onClose();
     } catch (err) {
+      if (isSaveCancelled(err)) {
+        onClose();
+        return;
+      }
       onMessage(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
@@ -121,7 +125,7 @@ export function ConnectionContextMenu({
     onMessage(`已保存配置「${name}」`);
   }
 
-  function shareConnection() {
+  async function shareConnection() {
     const payload = {
       name: conn.name,
       engine: conn.engine,
@@ -140,7 +144,7 @@ export function ConnectionContextMenu({
       groupName: conn.groupName,
       hasPassword: conn.hasPassword,
     };
-    downloadTextFile(
+    await downloadTextFile(
       `${conn.name || "connection"}.json`,
       `${JSON.stringify(payload, null, 2)}\n`,
       "application/json",
@@ -459,7 +463,7 @@ export function ConnectionContextMenu({
         type="button"
         disabled={busy}
         onClick={() => {
-          shareConnection();
+          void run(() => shareConnection());
           onClose();
         }}
       >

@@ -1,3 +1,6 @@
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
+
 export function escapeCsvCell(value: unknown): string {
   if (value === null || value === undefined) return "";
   const text =
@@ -102,12 +105,67 @@ export function parseCsv(text: string): { columns: string[]; rows: string[][] } 
   return { columns, rows: rows.slice(1) };
 }
 
-export function downloadTextFile(filename: string, content: string, mime: string) {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+export class SaveCancelledError extends Error {
+  constructor() {
+    super("已取消保存");
+    this.name = "SaveCancelledError";
+  }
+}
+
+export function isSaveCancelled(err: unknown): boolean {
+  return (
+    err instanceof SaveCancelledError ||
+    (err instanceof Error && err.name === "SaveCancelledError")
+  );
+}
+
+function extFromFilename(filename: string): string {
+  const m = filename.match(/\.([A-Za-z0-9]+)$/);
+  return m?.[1]?.toLowerCase() || "txt";
+}
+
+function filtersFor(filename: string, mime?: string) {
+  const ext = extFromFilename(filename);
+  if (ext === "csv" || mime?.includes("csv")) {
+    return [{ name: "CSV", extensions: ["csv"] }];
+  }
+  if (ext === "sql" || mime?.includes("sql")) {
+    return [{ name: "SQL", extensions: ["sql"] }];
+  }
+  if (ext === "md" || mime?.includes("markdown")) {
+    return [{ name: "Markdown", extensions: ["md"] }];
+  }
+  if (ext === "json" || mime?.includes("json")) {
+    return [{ name: "JSON", extensions: ["json"] }];
+  }
+  if (ext === "txt") {
+    return [{ name: "Text", extensions: ["txt"] }];
+  }
+  return [
+    { name: ext.toUpperCase(), extensions: [ext] },
+    { name: "All", extensions: ["*"] },
+  ];
+}
+
+/**
+ * 弹出系统「另存为」对话框，让用户选择目录与文件名后写入。
+ * 取消时抛出 SaveCancelledError。
+ * @returns 实际保存路径
+ */
+export async function downloadTextFile(
+  filename: string,
+  content: string,
+  mime?: string,
+): Promise<string> {
+  const path = await save({
+    title: "保存文件",
+    defaultPath: filename,
+    filters: filtersFor(filename, mime),
+    canCreateDirectories: true,
+  });
+  if (!path) {
+    throw new SaveCancelledError();
+  }
+  await writeTextFile(path, content);
+  return path;
 }

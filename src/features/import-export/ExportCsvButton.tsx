@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { fetchTablePage } from "../connections/sessionApi";
-import { downloadTextFile, rowsToCsv } from "./csv";
+import { downloadTextFile, isSaveCancelled, rowsToCsv } from "./csv";
 
 type Props = {
   connectionId: string;
@@ -51,9 +51,13 @@ export function ExportCsvButton({ connectionId, table, database }: Props) {
         return;
       }
       const csv = rowsToCsv(columns, allRows);
-      downloadTextFile(`${table}.csv`, csv, "text/csv;charset=utf-8");
+      await downloadTextFile(`${table}.csv`, csv, "text/csv;charset=utf-8");
       setProgress(`完成 ${allRows.length} 行`);
     } catch (err) {
+      if (isSaveCancelled(err)) {
+        setProgress("已取消");
+        return;
+      }
       setProgress(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);

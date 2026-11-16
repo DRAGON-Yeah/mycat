@@ -30,7 +30,7 @@ export async function dumpSingleTable(args: {
     engine: String(conn.engine),
     database,
   });
-  downloadTextFile(
+  await downloadTextFile(
     `${table}${includeData ? "" : "-structure"}.sql`,
     sql,
     "application/sql",
@@ -88,7 +88,7 @@ export async function exportTableDictionary(args: {
     ),
     "",
   ];
-  downloadTextFile(
+  await downloadTextFile(
     `${table}-data-dictionary.md`,
     lines.join("\n"),
     "text/markdown",
@@ -140,7 +140,7 @@ export async function reverseSingleTableModel(args: {
     "",
   ];
   const md = lines.join("\n");
-  downloadTextFile(`${table}-model.md`, md, "text/markdown");
+  await downloadTextFile(`${table}-model.md`, md, "text/markdown");
   return md;
 }
 
@@ -222,7 +222,7 @@ export async function exportTableCsv(args: {
   }
   const idxs = selected.map((c) => allColumns.indexOf(c));
   const projected = allRows.map((row) => idxs.map((i) => row[i]));
-  downloadTextFile(
+  await downloadTextFile(
     `${table}.csv`,
     rowsToCsv(selected, projected, { bom }),
     "text/csv;charset=utf-8",

@@ -6,7 +6,7 @@ import {
   fetchTablePage,
   listTables,
 } from "../connections/sessionApi";
-import { downloadTextFile } from "../import-export/csv";
+import { downloadTextFile, isSaveCancelled } from "../import-export/csv";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 
 export type DbMenuTarget = {
@@ -69,6 +69,10 @@ export function DatabaseContextMenu({
       await action();
       onClose();
     } catch (err) {
+      if (isSaveCancelled(err)) {
+        onClose();
+        return;
+      }
       onMessage(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
@@ -96,7 +100,7 @@ export function DatabaseContextMenu({
       });
       parts.push(sql, "");
     }
-    downloadTextFile(
+    await downloadTextFile(
       `${database}${includeData ? "" : "-structure"}.sql`,
       parts.join("\n"),
       "application/sql",
@@ -141,7 +145,7 @@ export function DatabaseContextMenu({
       }
       lines.push("");
     }
-    downloadTextFile(
+    await downloadTextFile(
       `${database}-data-dictionary.md`,
       lines.join("\n"),
       "text/markdown",
@@ -180,7 +184,7 @@ export function DatabaseContextMenu({
       lines.push("  }");
     }
     lines.push("```", "");
-    downloadTextFile(
+    await downloadTextFile(
       `${database}-model.md`,
       lines.join("\n"),
       "text/markdown",
