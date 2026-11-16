@@ -3379,7 +3379,7 @@ tr.is-inserted {
 }
 
 .tree-children {
-  padding-left: 12px;
+  padding-left: 16px;
 }
 
 /* Saved queries: sit tightly under「查询」, aligned with folder text */
@@ -3389,7 +3389,7 @@ tr.is-inserted {
 }
 
 .tree-query-list .tree-row {
-  padding-left: 0;
+  padding-left: 2px;
 }
 
 .tree-query-list .tree-twist-spacer {
@@ -3439,6 +3439,7 @@ tr.is-inserted {
   align-items: center;
   gap: 1px;
   min-height: 24px;
+  padding-left: 8px;
   padding-right: 4px;
   width: 100%;
   border: 0;
