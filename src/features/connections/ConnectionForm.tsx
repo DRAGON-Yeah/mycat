@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from "react";
 import { invoke } from "../../lib/invoke";
 import { getConnectionSecrets } from "./api";
 import type { ConnectionDto, EngineType, UpsertConnectionInput } from "./types";
@@ -15,6 +21,26 @@ const defaultPort: Record<EngineType, number> = {
   postgres: 5432,
   sqlite: 0,
 };
+
+/** CJK ideographs / compatibility — blocked on technical fields. */
+const CHINESE_RE =
+  /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3000-\u303f\uff00-\uffef]/g;
+
+function stripChinese(value: string): string {
+  return value.replace(CHINESE_RE, "");
+}
+
+function hasChinese(value: string): boolean {
+  return /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3000-\u303f\uff00-\uffef]/.test(
+    value,
+  );
+}
+
+function onNoChineseField(
+  setter: (v: string) => void,
+): (e: ChangeEvent<HTMLInputElement>) => void {
+  return (e) => setter(stripChinese(e.target.value));
+}
 
 export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
   const [engine, setEngine] = useState<EngineType>(
@@ -92,9 +118,33 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
     };
   }
 
+  /** 显示名、分组可中文；其余技术字段禁止中文。 */
+  function assertNoChineseFields(): string | null {
+    const checks: [string, string][] = [
+      [engine === "sqlite" ? "文件路径" : "主机", host],
+      ["数据库", database],
+      ["用户名", user],
+      ["密码", password],
+      ["SSH 主机", sshHost],
+      ["SSH 用户", sshUser],
+      ["SSH 密码", sshPassword],
+    ];
+    for (const [label, value] of checks) {
+      if (value && hasChinese(value)) {
+        return `「${label}」不能包含中文`;
+      }
+    }
+    return null;
+  }
+
   async function onTest() {
     setError(null);
     setInfo(null);
+    const chineseErr = assertNoChineseFields();
+    if (chineseErr) {
+      setError(chineseErr);
+      return;
+    }
     setTesting(true);
     try {
       await invoke("test_connection", {
@@ -126,6 +176,11 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
     e.preventDefault();
     setError(null);
     setInfo(null);
+    const chineseErr = assertNoChineseFields();
+    if (chineseErr) {
+      setError(chineseErr);
+      return;
+    }
     setSaving(true);
     try {
       const saved = await save(buildInput());
@@ -164,8 +219,9 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
           {engine === "sqlite" ? "文件路径" : "主机"}
           <input
             value={host}
-            onChange={(e) => setHost(e.target.value)}
+            onChange={onNoChineseField(setHost)}
             placeholder={engine === "sqlite" ? "/path/to/file.db" : "127.0.0.1"}
+            spellCheck={false}
           />
         </label>
         {engine !== "sqlite" && (
@@ -182,12 +238,17 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
               数据库
               <input
                 value={database}
-                onChange={(e) => setDatabase(e.target.value)}
+                onChange={onNoChineseField(setDatabase)}
+                spellCheck={false}
               />
             </label>
             <label>
               用户名
-              <input value={user} onChange={(e) => setUser(e.target.value)} />
+              <input
+                value={user}
+                onChange={onNoChineseField(setUser)}
+                spellCheck={false}
+              />
             </label>
             <label>
               密码
@@ -195,7 +256,7 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
                 <input
                   type={showPassword ? "text" : "password"}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={onNoChineseField(setPassword)}
                   autoComplete="off"
                   spellCheck={false}
                 />
@@ -245,8 +306,9 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
                   SSH 主机
                   <input
                     value={sshHost}
-                    onChange={(e) => setSshHost(e.target.value)}
-                    placeholder="跳板机地址"
+                    onChange={onNoChineseField(setSshHost)}
+                    placeholder="jump.example.com"
+                    spellCheck={false}
                   />
                 </label>
                 <label>
@@ -261,7 +323,8 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
                   SSH 用户
                   <input
                     value={sshUser}
-                    onChange={(e) => setSshUser(e.target.value)}
+                    onChange={onNoChineseField(setSshUser)}
+                    spellCheck={false}
                   />
                 </label>
                 <label>
@@ -270,7 +333,7 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
                     <input
                       type={showSshPassword ? "text" : "password"}
                       value={sshPassword}
-                      onChange={(e) => setSshPassword(e.target.value)}
+                      onChange={onNoChineseField(setSshPassword)}
                       autoComplete="off"
                       spellCheck={false}
                     />
