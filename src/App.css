@@ -2434,6 +2434,91 @@ tr.is-inserted {
   color: #fff;
 }
 
+.tree-group-header {
+  list-style: none;
+  padding: 6px 10px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+.conn-context-menu {
+  min-width: 220px;
+}
+
+.conn-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 8px;
+}
+
+.conn-color-label {
+  font-size: 12px;
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.conn-color-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.conn-color-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  padding: 0;
+  cursor: pointer;
+}
+
+.conn-color-dot.is-active {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.conn-group-submenu {
+  min-width: 160px;
+}
+
+.conn-group-new {
+  display: flex;
+  gap: 4px;
+  padding: 4px 8px 6px;
+}
+
+.conn-group-new input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 12px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.conn-group-new button {
+  height: 24px;
+  padding: 0 8px !important;
+  font-size: 12px;
+}
+
+.dg-submenu button.is-checked {
+  font-weight: 600;
+}
+
+.dg-submenu button.is-muted {
+  opacity: 0.65;
+  cursor: default;
+}
+
 /* —— Navicat shell —— */
 .connection-tree {
   position: relative;

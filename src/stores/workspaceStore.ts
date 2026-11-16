@@ -128,10 +128,15 @@ type WorkspaceState = {
     connectionId: string,
     database: string,
   ) => DatabaseRelatedTabs;
+  listTabsForConnection: (connectionId: string) => DatabaseRelatedTabs;
   /** Force-close related tabs. mode save-queries assumes queries already saved & cleaned. */
   closeDatabaseWorkspace: (
     connectionId: string,
     database: string,
+    mode?: "force" | "save-queries",
+  ) => CloseDatabaseWorkspaceResult;
+  closeConnectionWorkspace: (
+    connectionId: string,
     mode?: "force" | "save-queries",
   ) => CloseDatabaseWorkspaceResult;
 };
@@ -573,6 +578,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       dirtyQueries: queries.filter((t) => t.dirty && t.sql.trim().length > 0),
     };
   },
+  listTabsForConnection: (connectionId) => {
+    const tables = get().tabs.filter((t) => t.connectionId === connectionId);
+    const queries = get().queryTabs.filter(
+      (t) => t.connectionId === connectionId,
+    );
+    return {
+      tables,
+      queries,
+      dirtyTables: tables.filter((t) => t.dirty),
+      dirtyQueries: queries.filter((t) => t.dirty && t.sql.trim().length > 0),
+    };
+  },
   closeDatabaseWorkspace: (connectionId, database, mode = "force") => {
     const related = get().listTabsForDatabase(connectionId, database);
     if (mode === "save-queries" && related.dirtyTables.length > 0) {
@@ -623,6 +640,59 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             : get().selectedDatabase
               ? "objectList"
               : "welcome",
+      toolbarAction: activeQueryId
+        ? "query"
+        : activeTabId
+          ? "table"
+          : "connection",
+      placeholderFeature: null,
+    });
+    return { ok: true };
+  },
+  closeConnectionWorkspace: (connectionId, mode = "force") => {
+    const related = get().listTabsForConnection(connectionId);
+    if (mode === "save-queries" && related.dirtyTables.length > 0) {
+      return {
+        ok: false,
+        blockedByTableId: related.dirtyTables[0]!.id,
+      };
+    }
+
+    const tabs = get().tabs.filter((t) => t.connectionId !== connectionId);
+    const queryTabs = get().queryTabs.filter(
+      (t) => t.connectionId !== connectionId,
+    );
+    const activeTabId = tabs.some((t) => t.id === get().activeTabId)
+      ? get().activeTabId
+      : (tabs[tabs.length - 1]?.id ?? null);
+    const activeQueryId = queryTabs.some((t) => t.id === get().activeQueryId)
+      ? get().activeQueryId
+      : (queryTabs[queryTabs.length - 1]?.id ?? null);
+
+    const clearing = get().activeConnectionId === connectionId;
+
+    set({
+      tabs,
+      queryTabs,
+      activeTabId,
+      activeQueryId,
+      ...(clearing
+        ? {
+            activeConnectionId: null,
+            activeConnection: null,
+            selectedDatabase: null,
+            selectedTable: null,
+            selectedFolder: null,
+            selectionKind: "none",
+            objectListFilter: "",
+            focusObjectListFilter: false,
+          }
+        : {}),
+      centerMode: activeQueryId
+        ? "query"
+        : activeTabId
+          ? "table"
+          : "welcome",
       toolbarAction: activeQueryId
         ? "query"
         : activeTabId

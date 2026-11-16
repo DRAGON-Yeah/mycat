@@ -42,14 +42,16 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
 
-  const title = useMemo(
-    () => (initial ? "编辑连接" : "新建连接"),
-    [initial],
-  );
+  const title = useMemo(() => {
+    if (!initial?.id) {
+      return initial?.name?.includes("副本") ? "复制连接" : "新建连接";
+    }
+    return "编辑连接";
+  }, [initial]);
 
   function buildInput(): UpsertConnectionInput {
     return {
-      id: initial?.id,
+      id: initial?.id || undefined,
       name,
       engine,
       host: host || undefined,
