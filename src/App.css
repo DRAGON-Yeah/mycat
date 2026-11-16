@@ -4175,6 +4175,22 @@ tr.is-inserted {
   outline: none;
 }
 .td-grid .td-check { text-align: center; width: 56px; }
+.td-grid .td-col-name {
+  min-width: 120px;
+  width: 140px;
+}
+.td-grid .td-col-type {
+  min-width: 130px;
+  width: 140px;
+}
+.td-grid .td-col-type select {
+  min-width: 120px;
+  width: 100%;
+}
+.td-grid .td-col-len {
+  min-width: 64px;
+  width: 72px;
+}
 .td-key button {
   border: none;
   background: transparent;

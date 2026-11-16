@@ -676,9 +676,9 @@ export function TableDesigner({ tab }: Props) {
               <table className="td-grid">
                 <thead>
                   <tr>
-                    <th>名称</th>
-                    <th>类型</th>
-                    <th>长度</th>
+                    <th className="td-col-name">名称</th>
+                    <th className="td-col-type">类型</th>
+                    <th className="td-col-len">长度</th>
                     <th>小数点</th>
                     <th>不是 Null</th>
                     <th>虚拟</th>
@@ -694,13 +694,13 @@ export function TableDesigner({ tab }: Props) {
                       className={i === selectedIdx ? "is-selected" : undefined}
                       onClick={() => setSelectedIdx(i)}
                     >
-                      <td>
+                      <td className="td-col-name">
                         <input
                           value={c.name}
                           onChange={(e) => patchCol(c.key, { name: e.target.value })}
                         />
                       </td>
-                      <td>
+                      <td className="td-col-type">
                         <select
                           value={c.typeName}
                           onChange={(e) => {
