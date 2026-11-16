@@ -77,6 +77,10 @@ export function QueryEditor() {
   const [findIndex, setFindIndex] = useState(0);
   const [findCount, setFindCount] = useState(0);
   const findInputRef = useRef<HTMLInputElement>(null);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [saveBusy, setSaveBusy] = useState(false);
+  const saveNameInputRef = useRef<HTMLInputElement>(null);
 
   const monacoTheme = useMemo(
     () => (theme === "dark" ? "vs-dark" : "light"),
@@ -237,6 +241,21 @@ export function QueryEditor() {
     return () => document.removeEventListener("click", onDoc);
   }, [connMenuOpen, dbMenuOpen, runMenuOpen]);
 
+  // Global ⌘/Ctrl+S — Tauri/WebView may not route browser save; Monaco alone
+  // only fires when the editor has focus.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      if (e.key.toLowerCase() !== "s") return;
+      if (!tab) return;
+      e.preventDefault();
+      e.stopPropagation();
+      saveRef.current();
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [tab]);
+
   const onMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     registerSqlCompletions(monaco);
@@ -290,13 +309,29 @@ export function QueryEditor() {
     updateQueryTab(tab.id, { sql: next, dirty: true });
   }
 
-  async function save() {
+  function openSaveDialog() {
     if (!tab) return;
+    // Already linked: overwrite without rename prompt (Navicat Save).
+    if (tab.savedQueryId && tab.title && tab.title !== "无标题") {
+      void persistSave(tab.title);
+      return;
+    }
     const suggested =
       tab.title && tab.title !== "无标题" ? tab.title : "未命名查询";
-    const name = window.prompt("保存查询为", suggested)?.trim();
-    if (!name) return;
-    const title = name.replace(/\.sql$/i, "");
+    setSaveName(suggested);
+    setSaveDialogOpen(true);
+    window.setTimeout(() => {
+      saveNameInputRef.current?.focus();
+      saveNameInputRef.current?.select();
+    }, 0);
+  }
+
+  async function persistSave(rawName: string) {
+    if (!tab) return;
+    const title = rawName.trim().replace(/\.sql$/i, "");
+    if (!title) return;
+    setSaveBusy(true);
+    setError(null);
     try {
       const saved = await upsertSavedQuery({
         id: tab.savedQueryId || undefined,
@@ -310,6 +345,7 @@ export function QueryEditor() {
         savedQueryId: saved.id,
         dirty: false,
       });
+      setSaveDialogOpen(false);
       setStatus(`已保存到「查询」：${saved.name}`);
       window.dispatchEvent(
         new CustomEvent("saved-queries-changed", {
@@ -318,7 +354,13 @@ export function QueryEditor() {
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaveBusy(false);
     }
+  }
+
+  function save() {
+    openSaveDialog();
   }
 
   function beautify() {
@@ -631,10 +673,11 @@ export function QueryEditor() {
   }
 
   return (
+    <>
     <div className="query-panel navicat-query">
       <div className="query-icon-bar">
         <div className="query-icon-group">
-          <IconBtn title="保存查询 (⌘/Ctrl+S)" onClick={() => void save()}>
+          <IconBtn title="保存查询 (⌘/Ctrl+S)" onClick={save}>
             <IconSave />
           </IconBtn>
           <span className="query-icon-sep" />
@@ -975,6 +1018,55 @@ export function QueryEditor() {
         )}
       </div>
     </div>
+
+    {saveDialogOpen && (
+      <div
+        className="modal-backdrop"
+        role="presentation"
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget && !saveBusy) {
+            setSaveDialogOpen(false);
+          }
+        }}
+      >
+        <form
+          className="modal"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void persistSave(saveName);
+          }}
+        >
+          <h2>保存查询</h2>
+          <label>
+            查询名称
+            <input
+              ref={saveNameInputRef}
+              value={saveName}
+              onChange={(e) => setSaveName(e.target.value)}
+              placeholder="未命名查询"
+              disabled={saveBusy}
+              autoComplete="off"
+            />
+          </label>
+          <p className="save-query-hint">
+            保存后可在左侧对象树「查询」中打开。
+          </p>
+          <div className="modal-actions">
+            <button
+              type="button"
+              disabled={saveBusy}
+              onClick={() => setSaveDialogOpen(false)}
+            >
+              取消
+            </button>
+            <button type="submit" disabled={saveBusy || !saveName.trim()}>
+              {saveBusy ? "保存中…" : "保存"}
+            </button>
+          </div>
+        </form>
+      </div>
+    )}
+    </>
   );
 }
 
