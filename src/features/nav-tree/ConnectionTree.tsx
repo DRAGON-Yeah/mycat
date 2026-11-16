@@ -673,16 +673,30 @@ export function ConnectionTree() {
             type="button"
             className="ghost-btn"
             onClick={async () => {
-              const data = await exportConnections();
-              const blob = new Blob([JSON.stringify(data, null, 2)], {
-                type: "application/json",
-              });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = "mycat-connections.json";
-              a.click();
-              URL.revokeObjectURL(url);
+              try {
+                const data = await exportConnections();
+                if (data.length === 0) {
+                  setToast("当前没有可导出的连接");
+                  window.setTimeout(() => setToast(null), 2500);
+                  return;
+                }
+                const blob = new Blob([JSON.stringify(data, null, 2)], {
+                  type: "application/json",
+                });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "mycat-connections.json";
+                a.click();
+                URL.revokeObjectURL(url);
+                setToast(
+                  `已导出 ${data.length} 条连接到 mycat-connections.json（请到下载文件夹查看）`,
+                );
+                window.setTimeout(() => setToast(null), 3500);
+              } catch (err) {
+                setToast(err instanceof Error ? err.message : String(err));
+                window.setTimeout(() => setToast(null), 2800);
+              }
             }}
           >
             导出
@@ -1106,8 +1120,10 @@ export function ConnectionTree() {
           onClose={() => setImportOpen(false)}
           onImported={(count) => {
             void reload();
-            setToast(`已导入 ${count} 个连接`);
-            window.setTimeout(() => setToast(null), 2500);
+            setToast(
+              `导入成功：已新增 ${count} 条连接。请编辑连接并补填密码后再测试。`,
+            );
+            window.setTimeout(() => setToast(null), 4000);
           }}
         />
       )}

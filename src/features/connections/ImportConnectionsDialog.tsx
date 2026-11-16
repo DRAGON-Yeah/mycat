@@ -28,38 +28,81 @@ const TEMPLATE: ConnectionExportItem[] = [
   },
 ];
 
+type Picked = {
+  file: File;
+  items: ConnectionExportItem[];
+};
+
 export function ImportConnectionsDialog({ onClose, onImported }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fileName, setFileName] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Picked | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [downloaded, setDownloaded] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   function downloadTemplate() {
+    setError(null);
     downloadTextFile(
       "mycat-connections-template.json",
       `${JSON.stringify(TEMPLATE, null, 2)}\n`,
       "application/json",
     );
+    setDownloaded(true);
+    setInfo(
+      "模板已开始下载：mycat-connections-template.json。请到浏览器/系统的「下载」文件夹查看。",
+    );
   }
 
-  async function onPickFile(file: File) {
+  async function acceptFile(next: File | null) {
     setError(null);
-    setFileName(file.name);
-    setBusy(true);
+    setInfo(null);
+    setPicked(null);
+    if (!next) return;
+
+    if (!/\.json$/i.test(next.name) && next.type && next.type !== "application/json") {
+      setError("请选择 .json 文件");
+      return;
+    }
+
     try {
-      const text = await file.text();
+      const text = await next.text();
       const parsed = JSON.parse(text) as unknown;
       if (!Array.isArray(parsed)) {
-        throw new Error("模板应为 JSON 数组");
+        throw new Error("文件内容应为 JSON 数组，请使用下载的模板格式");
       }
-      const count = await importConnections(parsed as ConnectionExportItem[]);
+      if (parsed.length === 0) {
+        throw new Error("文件中没有连接条目");
+      }
+      setPicked({ file: next, items: parsed as ConnectionExportItem[] });
+      setInfo(`已选择「${next.name}」，检测到 ${parsed.length} 条连接，确认无误后点击「开始导入」。`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function onImport() {
+    if (!picked) return;
+    const ok = window.confirm(
+      `即将导入 ${picked.items.length} 条连接。\n\n密码不会随文件导入，导入后请在「编辑连接」中补填。\n\n是否继续？`,
+    );
+    if (!ok) {
+      setInfo("已取消导入，可重新选择文件或修改后再试。");
+      return;
+    }
+
+    setError(null);
+    setBusy(true);
+    try {
+      const count = await importConnections(picked.items);
+      setInfo(`导入成功：已新增 ${count} 条连接。`);
       onImported(count);
-      onClose();
+      window.setTimeout(() => onClose(), 600);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
-      if (fileRef.current) fileRef.current.value = "";
     }
   }
 
@@ -74,46 +117,109 @@ export function ImportConnectionsDialog({ onClose, onImported }: Props) {
       <div className="modal import-conn-dialog" role="dialog" aria-modal="true">
         <h2>导入连接</h2>
         <p className="save-query-hint">
-          先下载 JSON 模板并按格式填写（不含密码），再上传导入。导入后请在编辑连接中补填密码。
+          按模板填写连接信息后上传。文件不含密码，导入后请在「编辑连接」中补填。
         </p>
-        <ol className="import-conn-steps">
-          <li>
-            <button
-              type="button"
-              className="ghost-btn"
-              disabled={busy}
-              onClick={downloadTemplate}
-            >
-              下载模板
-            </button>
-            <span className="is-muted">mycat-connections-template.json</span>
-          </li>
-          <li>
-            <button
-              type="button"
-              className="ghost-btn"
-              disabled={busy}
-              onClick={() => fileRef.current?.click()}
-            >
-              {busy ? "导入中…" : "选择文件上传"}
-            </button>
-            <span className="is-muted">{fileName ?? "未选择文件"}</span>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="application/json,.json"
-              hidden
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void onPickFile(file);
-              }}
-            />
-          </li>
-        </ol>
-        {error && <p className="form-error">{error}</p>}
+
+        <div className={`import-conn-card ${downloaded ? "is-done" : ""}`}>
+          <div className="import-conn-card-head">
+            <span className="import-conn-step">{downloaded ? "✓" : "1"}</span>
+            <div>
+              <strong>下载模板</strong>
+              <p>获取 JSON 示例并按字段填写</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="import-conn-btn"
+            disabled={busy}
+            onClick={downloadTemplate}
+          >
+            {downloaded ? "再次下载模板" : "下载 mycat-connections-template.json"}
+          </button>
+          {downloaded && (
+            <p className="import-conn-banner is-ok">
+              已触发下载，请到系统「下载」文件夹查找该文件。
+            </p>
+          )}
+        </div>
+
+        <div className={`import-conn-card ${picked ? "is-done" : ""}`}>
+          <div className="import-conn-card-head">
+            <span className="import-conn-step">{picked ? "✓" : "2"}</span>
+            <div>
+              <strong>选择文件</strong>
+              <p>支持拖拽或点击选择 .json</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className={`import-conn-drop ${dragOver ? "is-drag" : ""} ${picked ? "has-file" : ""}`}
+            disabled={busy}
+            onClick={() => fileRef.current?.click()}
+            onDragEnter={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              const next = e.dataTransfer.files?.[0] ?? null;
+              void acceptFile(next);
+            }}
+          >
+            {picked ? (
+              <>
+                <span className="import-conn-file">{picked.file.name}</span>
+                <span className="import-conn-hint">
+                  共 {picked.items.length} 条 · 点击可重新选择
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="import-conn-file">将文件拖到此处，或点击选择</span>
+                <span className="import-conn-hint">仅支持 .json</span>
+              </>
+            )}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/json,.json"
+            hidden
+            onChange={(e) => {
+              const next = e.target.files?.[0] ?? null;
+              e.target.value = "";
+              void acceptFile(next);
+            }}
+          />
+        </div>
+
+        {info && <p className="form-info import-conn-feedback">{info}</p>}
+        {error && <p className="form-error import-conn-feedback">{error}</p>}
+
         <div className="modal-actions">
           <button type="button" disabled={busy} onClick={onClose}>
-            关闭
+            取消
+          </button>
+          <button
+            type="button"
+            className="import-conn-primary"
+            disabled={busy || !picked}
+            onClick={() => void onImport()}
+          >
+            {busy
+              ? "导入中…"
+              : picked
+                ? `开始导入（${picked.items.length}）`
+                : "开始导入"}
           </button>
         </div>
       </div>
