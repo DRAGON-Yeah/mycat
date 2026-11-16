@@ -121,9 +121,12 @@ export function MainWorkspace() {
                   aria-label={`关闭 ${q.title}`}
                   onPointerDown={(e) => {
                     // Close on pointerdown so the action isn't lost if click is swallowed.
+                    // Defer confirm/close past this pointer gesture — sync window.confirm
+                    // during pointerdown often auto-cancels (mouseup hits Cancel).
                     e.preventDefault();
                     e.stopPropagation();
-                    closeQueryTab(q.id);
+                    const id = q.id;
+                    window.setTimeout(() => closeQueryTab(id), 0);
                   }}
                   onClick={(e) => {
                     e.preventDefault();
@@ -208,10 +211,12 @@ export function MainWorkspace() {
                   title="关闭"
                   aria-label={`关闭 ${label}`}
                   onPointerDown={(e) => {
-                    // Same as query tabs: close on pointerdown so click isn't swallowed.
+                    // Close immediately on pointerdown (works while a cell is focused).
+                    // Designer close discards unsaved edits — no native confirm.
                     e.preventDefault();
                     e.stopPropagation();
-                    closeDesignerTab(t.id);
+                    (document.activeElement as HTMLElement | null)?.blur?.();
+                    closeDesignerTab(t.id, { force: true });
                   }}
                   onClick={(e) => {
                     e.preventDefault();

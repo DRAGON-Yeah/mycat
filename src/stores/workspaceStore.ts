@@ -550,17 +550,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       selectionKind: "table",
     });
   },
-  closeDesignerTab: (id, opts) => {
+  closeDesignerTab: (id, _opts) => {
     const tab = get().designerTabs.find((t) => t.id === id);
     if (!tab) return false;
-    if (!opts?.force && tab.dirty) {
-      const ok = window.confirm(
-        tab.mode === "create"
-          ? `新建表「${tab.table}」尚未保存，确定关闭并丢弃？`
-          : `设计器「${tab.table}」有未保存更改，确定关闭？`,
-      );
-      if (!ok) return false;
-    }
+    // Always allow exit without saving — unsaved designer edits are discarded.
+    // Native confirm during cell editing is unreliable in the webview.
     const designerTabs = get().designerTabs.filter((t) => t.id !== id);
     const closingActive = get().activeDesignerId === id;
     const activeDesignerId = closingActive

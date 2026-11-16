@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import {
@@ -94,6 +95,7 @@ function seedToColumn(s: {
 export function TableDesigner({ tab }: Props) {
   const markDirty = useWorkspaceStore((s) => s.markDesignerDirty);
   const updateTab = useWorkspaceStore((s) => s.updateDesignerTab);
+  const closeDesignerTab = useWorkspaceStore((s) => s.closeDesignerTab);
   const openTable = useWorkspaceStore((s) => s.openTable);
 
   const [pane, setPane] = useState<DesignerPane>("fields");
@@ -571,14 +573,23 @@ export function TableDesigner({ tab }: Props) {
   }
 
   function onDiscard() {
+    // Exit/revert immediately — no native confirm (unreliable while a cell is focused).
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    if (tab.mode === "create") {
+      closeDesignerTab(tab.id, { force: true });
+      return;
+    }
     if (!dirty) return;
-    const msg =
-      tab.mode === "create"
-        ? "放弃未保存的新建表设计并恢复默认字段？"
-        : "放弃未保存的设计更改？";
-    if (!window.confirm(msg)) return;
     void load();
     setMessage("已放弃更改");
+  }
+
+  /** Fire toolbar actions on mousedown so they work while a cell input is focused. */
+  function toolAction(e: ReactMouseEvent, fn: () => void) {
+    e.preventDefault();
+    e.stopPropagation();
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    fn();
   }
 
   const isMysql = engineKey(tab.connectionEngine) === "mysql";
@@ -594,25 +605,45 @@ export function TableDesigner({ tab }: Props) {
         <div className="td-tools">
           {pane === "fields" && (
             <>
-              <button type="button" title="添加字段" disabled={saving} onClick={() => addCol()}>
+              <button
+                type="button"
+                title="添加字段"
+                disabled={saving}
+                onMouseDown={(e) => toolAction(e, () => addCol())}
+              >
                 ＋
               </button>
               <button
                 type="button"
                 title="在下方插入"
                 disabled={saving}
-                onClick={() => addCol(selectedIdx)}
+                onMouseDown={(e) => toolAction(e, () => addCol(selectedIdx))}
               >
                 插入
               </button>
-              <button type="button" title="删除字段" disabled={saving} onClick={removeSelected}>
+              <button
+                type="button"
+                title="删除字段"
+                disabled={saving}
+                onMouseDown={(e) => toolAction(e, removeSelected)}
+              >
                 －
               </button>
               <span className="td-tool-sep" />
-              <button type="button" title="上移" disabled={saving} onClick={() => moveSelected(-1)}>
+              <button
+                type="button"
+                title="上移"
+                disabled={saving}
+                onMouseDown={(e) => toolAction(e, () => moveSelected(-1))}
+              >
                 ↑
               </button>
-              <button type="button" title="下移" disabled={saving} onClick={() => moveSelected(1)}>
+              <button
+                type="button"
+                title="下移"
+                disabled={saving}
+                onMouseDown={(e) => toolAction(e, () => moveSelected(1))}
+              >
                 ↓
               </button>
             </>
@@ -640,9 +671,13 @@ export function TableDesigner({ tab }: Props) {
           </span>
           <button
             type="button"
-            disabled={saving || loading || !dirty}
-            onClick={onDiscard}
-            title="放弃更改"
+            disabled={saving || loading || (tab.mode !== "create" && !dirty)}
+            onMouseDown={(e) => toolAction(e, onDiscard)}
+            title={
+              tab.mode === "create"
+                ? "放弃新建并关闭（不保存）"
+                : "放弃更改并恢复"
+            }
           >
             放弃
           </button>
