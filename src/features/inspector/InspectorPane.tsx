@@ -1,4 +1,5 @@
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { IconEngine } from "../nav-tree/EngineIcons";
 
 export function InspectorPane() {
   const connection = useWorkspaceStore((s) => s.activeConnection);
@@ -75,10 +76,9 @@ export function InspectorPane() {
     <aside className="pane inspector-pane" aria-label="信息">
       <div className="pane-title">连接</div>
       <div className="inspector-hero">
-        <div
-          className="inspector-badge conn"
-          style={{ background: connection.color || "var(--accent)" }}
-        />
+        <div className="inspector-badge conn inspector-engine-badge">
+          <IconEngine engine={connection.engine} active large />
+        </div>
         <h3>{connection.name}</h3>
       </div>
       <dl className="inspector-meta">

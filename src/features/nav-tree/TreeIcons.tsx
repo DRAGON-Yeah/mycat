@@ -9,6 +9,13 @@ export function IconServer() {
   );
 }
 
+export {
+  IconEngine,
+  IconEngineMysql,
+  IconEnginePostgres,
+  IconEngineSqlite,
+} from "./EngineIcons";
+
 export function IconDatabase() {
   return (
     <svg className="tree-svg" viewBox="0 0 16 16" aria-hidden>

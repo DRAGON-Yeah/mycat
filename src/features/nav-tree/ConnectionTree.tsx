@@ -43,13 +43,13 @@ import {
 import { CloseWorkspaceDialog } from "./CloseWorkspaceDialog";
 import { EditDatabaseDialog } from "./EditDatabaseDialog";
 import { NewDatabaseDialog } from "./NewDatabaseDialog";
+import { IconEngine } from "./EngineIcons";
 import {
   IconBackups,
   IconDatabase,
   IconEvents,
   IconFunctions,
   IconQueries,
-  IconServer,
   IconTables,
   IconViews,
 } from "./TreeIcons";
@@ -747,11 +747,7 @@ export function ConnectionTree() {
                 className="tree-label"
                 onClick={() => void toggleConnection(n.conn.id)}
               >
-                <span
-                  className="color-dot"
-                  style={{ background: n.conn.color || "var(--accent)" }}
-                />
-                <IconServer />
+                <IconEngine engine={n.conn.engine} active={n.expanded} />
                 <span className="tree-text">
                   {n.conn.starred ? "★ " : ""}
                   {n.conn.name}

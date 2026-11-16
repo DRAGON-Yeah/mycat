@@ -3026,6 +3026,45 @@ tr.is-inserted {
   display: block;
 }
 
+.tree-engine-badge {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: #eceff1;
+  box-sizing: border-box;
+  padding: 1px;
+}
+
+.tree-engine-badge.is-active {
+  background: #c8e6c9;
+  outline: 1px solid #66bb6a;
+}
+
+.tree-engine-badge.is-large {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  padding: 6px;
+  background: #eceff1;
+  outline: none;
+}
+
+.tree-engine-mark {
+  width: 16px;
+  height: 16px;
+  display: block;
+  object-fit: contain;
+}
+
+.tree-engine-badge.is-large .tree-engine-mark {
+  width: 44px;
+  height: 44px;
+}
+
 .tree-text {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3131,8 +3170,14 @@ tr.is-inserted {
 }
 
 .inspector-badge.conn {
-  border-radius: 50%;
+  border-radius: 12px;
   box-shadow: none;
+  background: transparent;
+  padding: 0;
+}
+
+.inspector-engine-badge {
+  overflow: visible;
 }
 
 .inspector-meta {
