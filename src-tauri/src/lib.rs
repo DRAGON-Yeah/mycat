@@ -74,6 +74,7 @@ pub fn run() {
             commands::connections::list_connections,
             commands::connections::upsert_connection,
             commands::connections::delete_connection,
+            commands::connections::get_connection_secrets,
             commands::connections::export_connections,
             commands::connections::import_connections,
             commands::session::test_connection,

@@ -166,6 +166,41 @@ pub fn delete_connection(state: State<'_, MetaDb>, id: String) -> Result<(), Str
     state.delete_connection(&id).map_err(|e| e.to_string())
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionSecretsDto {
+    pub password: Option<String>,
+    pub ssh_password: Option<String>,
+}
+
+/// Reveal stored secrets for the edit form (local vault only).
+#[tauri::command]
+pub fn get_connection_secrets(
+    state: State<'_, MetaDb>,
+    id: String,
+) -> Result<ConnectionSecretsDto, String> {
+    let existing = state
+        .get_connection(&id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "连接不存在".to_string())?;
+    let Some(secret_ref) = existing.secret_ref else {
+        return Ok(ConnectionSecretsDto {
+            password: None,
+            ssh_password: None,
+        });
+    };
+    let password = vault::get_secret(&secret_ref).map_err(|e| e.to_string())?;
+    let ssh_password = if existing.ssh_enabled {
+        vault::get_secret(&format!("{secret_ref}:ssh")).map_err(|e| e.to_string())?
+    } else {
+        None
+    };
+    Ok(ConnectionSecretsDto {
+        password,
+        ssh_password,
+    })
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionExportItem {

@@ -1,5 +1,6 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { invoke } from "../../lib/invoke";
+import { getConnectionSecrets } from "./api";
 import type { ConnectionDto, EngineType, UpsertConnectionInput } from "./types";
 
 type Props = {
@@ -27,6 +28,7 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
   const [database, setDatabase] = useState(initial?.database ?? "");
   const [user, setUser] = useState(initial?.user ?? "");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [sslMode, setSslMode] = useState(initial?.sslMode ?? "disable");
   const [sslTrust, setSslTrust] = useState(initial?.sslTrust ?? false);
   const [sshEnabled, setSshEnabled] = useState(initial?.sshEnabled ?? false);
@@ -34,6 +36,7 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
   const [sshPort, setSshPort] = useState<number>(initial?.sshPort ?? 22);
   const [sshUser, setSshUser] = useState(initial?.sshUser ?? "");
   const [sshPassword, setSshPassword] = useState("");
+  const [showSshPassword, setShowSshPassword] = useState(false);
   const [starred, setStarred] = useState(initial?.starred ?? false);
   const [color, setColor] = useState(initial?.color ?? "#0969da");
   const [groupName, setGroupName] = useState(initial?.groupName ?? "");
@@ -41,6 +44,23 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
   const [info, setInfo] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+
+  useEffect(() => {
+    if (!initial?.id || !initial.hasPassword) return;
+    let cancelled = false;
+    void getConnectionSecrets(initial.id)
+      .then((secrets) => {
+        if (cancelled) return;
+        if (secrets.password) setPassword(secrets.password);
+        if (secrets.sshPassword) setSshPassword(secrets.sshPassword);
+      })
+      .catch(() => {
+        /* keep empty; user can re-enter */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initial?.id, initial?.hasPassword]);
 
   const title = useMemo(() => {
     if (!initial?.id) {
@@ -171,12 +191,24 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
             </label>
             <label>
               密码
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={initial?.hasPassword ? "留空则保持原密码" : ""}
-              />
+              <div className="password-field">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  className="password-toggle"
+                  title={showPassword ? "隐藏密码" : "显示密码"}
+                  aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                  onClick={() => setShowPassword((v) => !v)}
+                >
+                  {showPassword ? <IconEyeOff /> : <IconEye />}
+                </button>
+              </div>
             </label>
           </>
         )}
@@ -234,12 +266,24 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
                 </label>
                 <label>
                   SSH 密码
-                  <input
-                    type="password"
-                    value={sshPassword}
-                    onChange={(e) => setSshPassword(e.target.value)}
-                    placeholder={initial?.sshEnabled ? "留空则保持原密码" : ""}
-                  />
+                  <div className="password-field">
+                    <input
+                      type={showSshPassword ? "text" : "password"}
+                      value={sshPassword}
+                      onChange={(e) => setSshPassword(e.target.value)}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <button
+                      type="button"
+                      className="password-toggle"
+                      title={showSshPassword ? "隐藏密码" : "显示密码"}
+                      aria-label={showSshPassword ? "隐藏密码" : "显示密码"}
+                      onClick={() => setShowSshPassword((v) => !v)}
+                    >
+                      {showSshPassword ? <IconEyeOff /> : <IconEye />}
+                    </button>
+                  </div>
                 </label>
               </>
             )}
@@ -288,5 +332,32 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
         </div>
       </form>
     </div>
+  );
+}
+
+function IconEye() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+      />
+      <circle cx="8" cy="8" r="2" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  );
+}
+
+function IconEyeOff() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+      />
+      <circle cx="8" cy="8" r="2" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M3 13.5 13 2.5" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
   );
 }

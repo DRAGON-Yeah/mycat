@@ -13,6 +13,15 @@ export function deleteConnection(id: string) {
   return invoke<void>("delete_connection", { id });
 }
 
+export type ConnectionSecretsDto = {
+  password?: string | null;
+  sshPassword?: string | null;
+};
+
+export function getConnectionSecrets(id: string) {
+  return invoke<ConnectionSecretsDto>("get_connection_secrets", { id });
+}
+
 export type ConnectionExportItem = {
   name: string;
   engine: string;
