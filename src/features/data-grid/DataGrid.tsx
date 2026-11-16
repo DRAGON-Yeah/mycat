@@ -23,6 +23,7 @@ import {
   type ColumnExtra,
   type EditorKind,
 } from "./columnEditors";
+import { useColumnResize } from "./useColumnResize";
 import {
   buildCsvData,
   buildCsvHeaders,
@@ -147,6 +148,11 @@ export function DataGrid({ tab }: Props) {
   const [columnExtras, setColumnExtras] = useState<
     Record<string, ColumnExtra>
   >({});
+  const { widthOf, startResize } = useColumnResize({
+    defaultWidth: 140,
+    minWidth: 48,
+    resetKey: `${tab.connectionId}:${database ?? ""}:${tab.tableName}`,
+  });
   const [chooser, setChooser] = useState<{
     row: number;
     col: number;
@@ -655,17 +661,36 @@ ORDER BY ordinal_position`;
           <thead>
             <tr>
               <th className="row-num-col">#</th>
-              {(data?.columns ?? []).map((c) => (
-                <th key={c.name}>
-                  <button type="button" className="col-head-btn" onClick={() => toggleSort(c.name)}>
-                    <span className="col-name">
-                      {c.name}
-                      {sortCol === c.name ? (sortDir === "ASC" ? " ↑" : " ↓") : ""}
-                    </span>
-                    <span className="col-type">{typeHint(c.dataType)}</span>
-                  </button>
-                </th>
-              ))}
+              {(data?.columns ?? []).map((c) => {
+                const w = widthOf(c.name);
+                return (
+                  <th
+                    key={c.name}
+                    style={{ width: w, minWidth: w, maxWidth: w }}
+                  >
+                    <button
+                      type="button"
+                      className="col-head-btn"
+                      onClick={() => toggleSort(c.name)}
+                    >
+                      <span className="col-name">
+                        {c.name}
+                        {sortCol === c.name
+                          ? sortDir === "ASC"
+                            ? " ↑"
+                            : " ↓"
+                          : ""}
+                      </span>
+                      <span className="col-type">{typeHint(c.dataType)}</span>
+                    </button>
+                    <span
+                      className="col-resize-handle"
+                      onMouseDown={(e) => startResize(c.name, e)}
+                      title="拖拽调整列宽"
+                    />
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -702,6 +727,8 @@ ORDER BY ordinal_position`;
                     : undefined;
                   const kind = editorKindForCol(ci);
                   const chooserCol = needsChooser(kind, extra);
+                  const colName = colMeta?.name ?? `c${ci}`;
+                  const w = widthOf(colName);
                   return (
                     <td
                       key={ci}
@@ -711,6 +738,7 @@ ORDER BY ordinal_position`;
                       ]
                         .filter(Boolean)
                         .join(" ") || undefined}
+                      style={{ width: w, minWidth: w, maxWidth: w }}
                       onContextMenu={(e) => {
                         e.preventDefault();
                         setSelectedRow(ri);

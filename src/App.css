@@ -815,6 +815,21 @@ body.is-row-resizing * {
   vertical-align: top;
 }
 
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 3;
+}
+
+.col-resize-handle:hover,
+.col-resize-handle:active {
+  background: color-mix(in srgb, var(--accent, #3b82f6) 45%, transparent);
+}
+
 [data-theme="dark"] .data-grid th {
   background: var(--bg-muted);
 }

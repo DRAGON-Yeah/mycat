@@ -14,6 +14,7 @@ import {
   buildTsvHeaders,
   buildUpdateSql,
 } from "../data-grid/copyAs";
+import { useColumnResize } from "../data-grid/useColumnResize";
 import { downloadTextFile } from "../import-export/csv";
 
 export type QueryResultData = {
@@ -80,7 +81,6 @@ export function QueryResultGrid({
   const [anchorRow, setAnchorRow] = useState(0);
   const [rowHeight, setRowHeight] = useState(24);
   const [zoom, setZoom] = useState(100);
-  const [colWidths, setColWidths] = useState<Record<string, number>>({});
   const [frozenUntil, setFrozenUntil] = useState<number>(-1);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [copyAsOpen, setCopyAsOpen] = useState(false);
@@ -90,13 +90,26 @@ export function QueryResultGrid({
 
   const columns = result.columns;
   const rows = result.rows;
+  const resultKey = useMemo(
+    () => `${columns.join("\0")}|${rows.length}|${result.elapsedMs}`,
+    [columns, rows.length, result.elapsedMs],
+  );
+  const {
+    widths: colWidths,
+    setWidths: setColWidths,
+    setWidth,
+    startResize,
+  } = useColumnResize({
+    defaultWidth: DEFAULT_COL_WIDTH,
+    minWidth: MIN_COL_WIDTH,
+    resetKey: resultKey,
+  });
 
   useEffect(() => {
     setSelectedRows(new Set(rows.length ? [0] : []));
     setSelectedCol(0);
     setAnchorRow(0);
     setView("data");
-    setColWidths({});
     setFrozenUntil(-1);
     setMenu(null);
   }, [result, rows.length]);
@@ -178,7 +191,7 @@ export function QueryResultGrid({
       max = Math.max(max, cellText(row[colIndex]).length);
     }
     const w = measureWidth("x".repeat(max), name);
-    setColWidths((prev) => ({ ...prev, [name]: w }));
+    setWidth(name, w);
   }
 
   function fitAllColumns() {
@@ -201,7 +214,7 @@ export function QueryResultGrid({
     if (!raw) return;
     const n = Number(raw);
     if (!Number.isFinite(n) || n < MIN_COL_WIDTH) return;
-    setColWidths((prev) => ({ ...prev, [name]: Math.round(n) }));
+    setWidth(name, n);
   }
 
   function setAllColumnWidths() {
@@ -465,6 +478,11 @@ export function QueryResultGrid({
                       title={c}
                     >
                       {c}
+                      <span
+                        className="col-resize-handle"
+                        onMouseDown={(e) => startResize(c, e)}
+                        title="拖拽调整列宽"
+                      />
                     </th>
                   );
                 })}
