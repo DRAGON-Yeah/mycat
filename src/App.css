@@ -2445,11 +2445,12 @@ tr.is-inserted {
 }
 
 .tree-children {
-  padding-left: 12px;
+  padding-left: 14px;
 }
 
+/* Saved queries: clearly nested under「查询」 */
 .tree-query-list {
-  padding-left: 18px;
+  padding-left: 28px;
 }
 
 .tree-query-list .tree-row {
@@ -2459,7 +2460,7 @@ tr.is-inserted {
 .tree-row {
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: 1px;
   min-height: 24px;
   padding-right: 4px;
   width: 100%;
@@ -2487,17 +2488,18 @@ tr.is-inserted {
 }
 
 .tree-twist-spacer {
-  width: 14px;
+  width: 12px;
   flex-shrink: 0;
 }
 
 .tree-query-empty {
-  margin: 2px 4px 6px 16px !important;
-  padding-left: 14px !important;
+  margin: 2px 4px 6px 12px !important;
+  padding-left: 12px !important;
   font-size: 11px !important;
 }
 
-.tree-twist {  width: 16px;
+.tree-twist {
+  width: 12px;
   height: 22px;
   border: 0;
   background: transparent;
@@ -2510,7 +2512,7 @@ tr.is-inserted {
 .tree-twist::before {
   content: "";
   position: absolute;
-  left: 5px;
+  left: 3px;
   top: 7px;
   width: 5px;
   height: 5px;
@@ -2521,7 +2523,7 @@ tr.is-inserted {
 }
 
 .tree-twist.is-expanded::before {
-  left: 4px;
+  left: 2px;
   top: 6px;
   transform: rotate(45deg);
 }
@@ -2534,14 +2536,14 @@ tr.is-inserted {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   border: 0;
   background: transparent;
   color: inherit;
   font-size: 12.5px;
   cursor: pointer;
   min-width: 0;
-  padding: 2px 4px;
+  padding: 2px 2px 2px 0;
   border-radius: 0;
 }
 
@@ -2630,8 +2632,9 @@ tr.is-inserted {
 }
 
 .tree-folder {
-  padding-left: 16px;
-  gap: 6px;
+  /* Keep icon+text tight against the twist; indent comes from twist/spacer only */
+  padding-left: 0;
+  gap: 4px;
 }
 
 .navicat-obj-toolbar {
