@@ -10,13 +10,19 @@ import {
 import { listConnections } from "../connections/api";
 import {
   executeSql,
+  fetchTablePage,
   listDatabases,
+  listTables,
   openConnection,
 } from "../connections/sessionApi";
 import type { ConnectionDto } from "../connections/types";
 import { downloadTextFile } from "../import-export/csv";
 import { useUiStore } from "../../stores/uiStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import {
+  registerSqlCompletions,
+  setSqlCompletionContext,
+} from "./sqlCompletions";
 import { formatSql, toggleLineComment } from "./sqlFormat";
 
 type RunMode = "all" | "selection";
@@ -103,6 +109,81 @@ export function QueryEditor() {
     void loadDatabases(tab.connectionId, tab.connectionEngine);
   }, [tab?.connectionId, tab?.connectionEngine, loadDatabases]);
 
+  // Refresh autocomplete metadata for current connection/database.
+  useEffect(() => {
+    if (!tab?.connectionId) {
+      setSqlCompletionContext({
+        connectionId: null,
+        database: null,
+        engine: null,
+        tables: [],
+        columnsByTable: {},
+      });
+      return;
+    }
+    let cancelled = false;
+    async function loadMeta() {
+      try {
+        await openConnection(tab!.connectionId);
+        if (tab!.database && String(tab!.connectionEngine) === "mysql") {
+          try {
+            await executeSql(
+              tab!.connectionId,
+              `USE \`${tab!.database.replace(/`/g, "``")}\``,
+            );
+          } catch {
+            // ignore
+          }
+        }
+        const tables = await listTables(
+          tab!.connectionId,
+          tab!.database || undefined,
+        );
+        if (cancelled) return;
+        const columnsByTable: Record<string, string[]> = {};
+        // Prefetch columns for first N tables (enough for autocomplete).
+        const sample = tables.slice(0, 40);
+        await Promise.all(
+          sample.map(async (t) => {
+            try {
+              const page = await fetchTablePage({
+                connectionId: tab!.connectionId,
+                table: t.name,
+                page: 1,
+                pageSize: 1,
+              });
+              columnsByTable[t.name] = page.columns.map((c) => c.name);
+            } catch {
+              columnsByTable[t.name] = [];
+            }
+          }),
+        );
+        if (cancelled) return;
+        setSqlCompletionContext({
+          connectionId: tab!.connectionId,
+          database: tab!.database || null,
+          engine: tab!.connectionEngine,
+          tables: tables.map((t) => ({ name: t.name, kind: t.kind })),
+          columnsByTable,
+        });
+      } catch {
+        if (!cancelled) {
+          setSqlCompletionContext({
+            connectionId: tab!.connectionId,
+            database: tab!.database || null,
+            engine: tab!.connectionEngine,
+            tables: [],
+            columnsByTable: {},
+          });
+        }
+      }
+    }
+    void loadMeta();
+    return () => {
+      cancelled = true;
+    };
+  }, [tab?.connectionId, tab?.database, tab?.connectionEngine]);
+
   useEffect(() => {
     setError(null);
     setResult(null);
@@ -125,11 +206,27 @@ export function QueryEditor() {
 
   const onMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
+    registerSqlCompletions(monaco);
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
       void runRef.current("all");
     });
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       saveRef.current();
+    });
+    // Auto-open suggestions after letters (Navicat-like keyword pick).
+    let suggestTimer: number | undefined;
+    editor.onDidChangeModelContent(() => {
+      window.clearTimeout(suggestTimer);
+      suggestTimer = window.setTimeout(() => {
+        const sel = editor.getSelection();
+        if (!sel || !sel.isEmpty()) return;
+        const model = editor.getModel();
+        if (!model) return;
+        const word = model.getWordUntilPosition(sel.getPosition()).word;
+        if (/^[A-Za-z_][\w]*$/.test(word) && word.length >= 1) {
+          void editor.trigger("sql-suggest", "editor.action.triggerSuggest", {});
+        }
+      }, 80);
     });
     editor.focus();
   };
@@ -488,6 +585,21 @@ export function QueryEditor() {
               padding: { top: 8 },
               fontFamily:
                 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+              quickSuggestions: {
+                other: true,
+                comments: false,
+                strings: false,
+              },
+              suggestOnTriggerCharacters: true,
+              wordBasedSuggestions: "off",
+              tabCompletion: "on",
+              snippetSuggestions: "inline",
+              suggest: {
+                showKeywords: true,
+                showSnippets: true,
+                preview: true,
+                insertMode: "replace",
+              },
             }}
           />
         </div>
