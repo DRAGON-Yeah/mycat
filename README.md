@@ -1,4 +1,4 @@
-# My Navicat
+# Mycat
 
 跨平台桌面端多数据库管理工具（Phase 0 MVP）。技术栈：**Tauri 2 + React + TypeScript + Rust**。
 

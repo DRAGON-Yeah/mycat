@@ -57,7 +57,7 @@ export function ConnectionNav() {
               const url = URL.createObjectURL(blob);
               const a = document.createElement("a");
               a.href = url;
-              a.download = "my-navicat-connections.json";
+              a.download = "mycat-connections.json";
               a.click();
               URL.revokeObjectURL(url);
             }}

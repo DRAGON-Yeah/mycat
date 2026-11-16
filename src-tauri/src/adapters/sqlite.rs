@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn sqlite_connect_list_tables_and_page() {
-        let path = std::env::temp_dir().join(format!("my-navicat-t6-{}.db", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("mycat-t6-{}.db", uuid::Uuid::new_v4()));
         let _ = fs::remove_file(&path);
         {
             let conn = Connection::open(&path).unwrap();

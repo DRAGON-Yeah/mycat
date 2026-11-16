@@ -2526,7 +2526,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "my-navicat"
+name = "mycat"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",

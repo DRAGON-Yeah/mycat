@@ -1,4 +1,4 @@
-# 设计文档（Design）— My Navicat Phase 0 Desktop MVP
+# 设计文档（Design）— Mycat Phase 0 Desktop MVP
 
 > 状态：已批准 2026-11-16
 > 关联：[requirements.md](./requirements.md) · [tasks.md](./tasks.md)
@@ -78,7 +78,7 @@ flowchart TB
 建议仓库结构（新建）：
 
 ```
-my-navicat/
+mycat/
 ├── package.json                 # 前端工作区 / Tauri scripts
 ├── src/                         # React UI
 │   ├── main.tsx
@@ -145,7 +145,7 @@ my-navicat/
 
 ### 4.2 Vault
 
-- Keyring service：`my-navicat`，account：`conn:{id}:password` / `conn:{id}:ssh_password`
+- Keyring service：`mycat`，account：`conn:{id}:password` / `conn:{id}:ssh_password`
 - Fallback 文件：`credentials.enc`（AES-GCM，主密钥由首次启动生成并尽量放入 keyring）
 
 ### 4.3 配置
@@ -189,7 +189,7 @@ my-navicat/
 
 - 仓库现为绿场，仅有 `navicat-prd.md`；本设计落实 PRD Phase 0 与 §6 技术建议（Adapter、本地元数据、OS 密钥）  
 - 计划文档落在 `.codebuddy/plans/phase0-desktop-mvp/`，与敏捷技能约定一致  
-- 命名：产品工作名 **My Navicat**；包名建议 `my-navicat`（可后续品牌化）
+- 命名：产品工作名 **Mycat**；包名建议 `mycat`（可后续品牌化）
 
 ## 8. 风险与对策
 

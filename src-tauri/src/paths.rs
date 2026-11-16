@@ -5,7 +5,7 @@ use std::path::PathBuf;
 pub fn app_data_dir() -> AppResult<PathBuf> {
     let dir = dirs::data_dir()
         .ok_or_else(|| AppError::Message("无法定位应用数据目录".into()))?
-        .join("my-navicat");
+        .join("mycat");
     fs::create_dir_all(&dir)?;
     Ok(dir)
 }

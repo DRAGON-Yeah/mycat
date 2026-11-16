@@ -1,4 +1,4 @@
-# 需求文档（Requirements）— My Navicat Phase 0 Desktop MVP
+# 需求文档（Requirements）— Mycat Phase 0 Desktop MVP
 
 > 状态：已批准 2026-11-16
 > 关联：[design.md](./design.md) · [tasks.md](./tasks.md)
@@ -7,7 +7,7 @@
 
 ## 1. 问题陈述（Problem Statement）
 
-开发者与 DBA 需要在桌面端统一管理多种关系型数据库，完成连接、浏览、查询与简单导入导出。仓库目前仅有产品 PRD、无代码实现。本迭代交付 **My Navicat Phase 0 骨架**：基于 Tauri 2 + React + TypeScript + Rust，打通 **MySQL / PostgreSQL / SQLite** 的「连上 → 看表 → 查数 → 改数 → 导出」闭环，凭证本地加密，支持 SSH Tunnel 与 SSL，并提供 Dark Mode。成功标准：三引擎均可完成上述主路径；UI 在万级行分页浏览下保持可交互。
+开发者与 DBA 需要在桌面端统一管理多种关系型数据库，完成连接、浏览、查询与简单导入导出。仓库目前仅有产品 PRD、无代码实现。本迭代交付 **Mycat Phase 0 骨架**：基于 Tauri 2 + React + TypeScript + Rust，打通 **MySQL / PostgreSQL / SQLite** 的「连上 → 看表 → 查数 → 改数 → 导出」闭环，凭证本地加密，支持 SSH Tunnel 与 SSL，并提供 Dark Mode。成功标准：三引擎均可完成上述主路径；UI 在万级行分页浏览下保持可交互。
 
 ## 2. 用户故事与验收标准（User Stories & EARS AC）
 

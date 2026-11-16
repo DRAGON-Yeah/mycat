@@ -1,4 +1,4 @@
-# 任务清单（Tasks）— My Navicat Phase 0 Desktop MVP
+# 任务清单（Tasks）— Mycat Phase 0 Desktop MVP
 
 > 状态：已批准 2026-11-16
 > 关联：[requirements.md](./requirements.md) · [design.md](./design.md)
@@ -184,7 +184,7 @@
 
 | 编号 | 任务 | 命令/操作 | 结果摘要 | 日期 |
 |---|---|---|---|---|
-| E-1 | T1 | `cargo check`；`npm run tauri dev` | cargo check 成功；tauri 编译 Finished + Running `target/debug/my-navicat`；计划文档曾被 create-tauri-app -f 误删，已从 transcript 恢复 | 2026-11-16 |
+| E-1 | T1 | `cargo check`；`npm run tauri dev` | cargo check 成功；tauri 编译 Finished + Running `target/debug/mycat`；计划文档曾被 create-tauri-app -f 误删，已从 transcript 恢复 | 2026-11-16 |
 | E-2 | T2 | `npm run build`；`cargo test persists_theme`；浏览器打开 `http://localhost:1420/`；`npm run tauri dev` | 前端构建成功；主题持久化单测通过；页面含连接导航/对象树/工作区三栏 + 主题按钮；桌面进程 Running | 2026-11-16 |
 | E-3 | T3 | `cargo test`（meta/vault） | 3 passed：主题持久化、secret 非明文写入 enc、connection 密码不进 meta.db | 2026-11-16 |
 | E-4 | T4 | `npm run build`；`cargo test rejects_empty` | 前端构建成功；空名/非法端口校验单测通过；连接导航 CRUD UI 已接入 | 2026-11-16 |

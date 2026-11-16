@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 
-const SERVICE: &str = "my-navicat";
+const SERVICE: &str = "mycat";
 const MASTER_ACCOUNT: &str = "master-key";
 
 #[derive(Default, Serialize, Deserialize)]
@@ -17,12 +17,12 @@ struct EncFile {
 }
 
 /// Dev/unsigned binaries repeatedly trigger macOS Keychain auth dialogs.
-/// Default to local AES file vault; set `MY_NAVICAT_USE_KEYRING=1` to opt in.
+/// Default to local AES file vault; set `MYCAT_USE_KEYRING=1` to opt in.
 fn keyring_enabled() -> bool {
     if cfg!(test) {
         return false;
     }
-    std::env::var("MY_NAVICAT_USE_KEYRING")
+    std::env::var("MYCAT_USE_KEYRING")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
 }

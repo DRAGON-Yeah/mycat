@@ -50,7 +50,7 @@ npm run tauri dev
    - [ ] 断开连接后本地转发端口释放（可再连）
 
 7. **安全底线**
-   - [ ] `~/Library/Application Support/my-navicat/meta.db` 无明文密码
+   - [ ] `~/Library/Application Support/mycat/meta.db` 无明文密码
    - [ ] `logs/app.log` 有错误日志（可故意触发一次失败）
    - [ ] 无远程上传逻辑（本地功能）
 

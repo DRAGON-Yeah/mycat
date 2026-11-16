@@ -7,7 +7,7 @@ function ensureTauriReady() {
     .__TAURI_INTERNALS__;
   if (!internals) {
     throw new Error(
-      "当前不在桌面窗口中（缺少 Tauri IPC）。请关闭浏览器里的 localhost:1420，改用 `npm run tauri dev` 弹出的「My Navicat」窗口操作。",
+      "当前不在桌面窗口中（缺少 Tauri IPC）。请关闭浏览器里的 localhost:1420，改用 `npm run tauri dev` 弹出的「Mycat」窗口操作。",
     );
   }
 }

@@ -1,7 +1,7 @@
 services:
   mysql:
     image: mysql:8.4
-    container_name: my-navicat-mysql
+    container_name: mycat-mysql
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: demo
@@ -17,7 +17,7 @@ services:
 
   postgres:
     image: postgres:16
-    container_name: my-navicat-postgres
+    container_name: mycat-postgres
     environment:
       POSTGRES_DB: demo
       POSTGRES_USER: navicat

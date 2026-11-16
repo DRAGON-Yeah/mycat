@@ -12,7 +12,7 @@ pub struct AppSettings {
 fn settings_path() -> Result<PathBuf, String> {
     let dir = dirs::data_dir()
         .ok_or_else(|| "无法定位应用数据目录".to_string())?
-        .join("my-navicat");
+        .join("mycat");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("settings.json"))
 }

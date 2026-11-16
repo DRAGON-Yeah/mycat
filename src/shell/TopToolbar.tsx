@@ -32,8 +32,8 @@ export function TopToolbar() {
   return (
     <header className="top-toolbar" aria-label="主工具栏">
       <div className="top-toolbar-brand">
-        <span className="brand-mark">N</span>
-        <span className="brand-text">My Navicat</span>
+        <span className="brand-mark">M</span>
+        <span className="brand-text">Mycat</span>
       </div>
       <nav className="top-toolbar-items">
         {ITEMS.map((item) => (

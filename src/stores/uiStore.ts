@@ -10,7 +10,7 @@ export type LayoutSizes = {
   queryEditorRatio: number;
 };
 
-const LAYOUT_KEY = "my-navicat.layout";
+const LAYOUT_KEY = "mycat.layout";
 
 const DEFAULT_LAYOUT: LayoutSizes = {
   treeWidth: 268,
