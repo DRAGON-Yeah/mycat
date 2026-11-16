@@ -346,18 +346,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       folder === "tables" ||
       folder === "views" ||
       folder === "functions" ||
-      folder === "events";
+      folder === "events" ||
+      folder === "backups";
     set({
       selectedDatabase: database,
       selectedFolder: folder,
       selectedTable: null,
       selectionKind: "folder",
       centerMode: listable ? "objectList" : "placeholder",
-      placeholderFeature: listable
-        ? null
-        : folder === "backups"
-          ? "backup"
-          : folder,
+      placeholderFeature: listable ? null : folder,
       toolbarAction:
         folder === "tables"
           ? "table"
@@ -434,7 +431,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       action === "table" ||
       action === "view" ||
       action === "function" ||
-      action === "automation"
+      action === "automation" ||
+      action === "backup"
     ) {
       const folder =
         action === "table"
@@ -443,7 +441,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             ? "views"
             : action === "function"
               ? "functions"
-              : "events";
+              : action === "automation"
+                ? "events"
+                : "backups";
       const db = get().selectedDatabase;
       if (db) {
         get().selectObjectFolder(db, folder);

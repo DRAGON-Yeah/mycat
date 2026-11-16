@@ -3793,6 +3793,12 @@ tr.is-inserted {
   letter-spacing: -0.02em;
 }
 
+.object-kind.is-backup {
+  background: #00838f;
+  font-size: 9px;
+  letter-spacing: -0.02em;
+}
+
 .inspector-badge.event {
   background: linear-gradient(160deg, #7986cb, #3949ab);
   font-size: 11px;
@@ -4377,6 +4383,384 @@ tr.is-inserted {
   background: #fff;
   border-color: #c9c9c9;
   color: #bbb;
+}
+
+/* —— Backup Wizard (Navicat-like) —— */
+.bak-wizard {
+  width: min(720px, 94vw);
+  height: min(560px, 88vh);
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #ddd;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.bak-wizard-header {
+  padding: 12px 16px 8px;
+  border-bottom: 1px solid #eee;
+}
+
+.bak-wizard-header h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  color: #222;
+}
+
+.bak-wizard-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+}
+
+.bak-wizard-tabs button {
+  border: none;
+  background: transparent;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #333;
+  cursor: pointer;
+}
+
+.bak-wizard-tabs button.is-active {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.bak-wizard-tabs button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.bak-wizard-body {
+  flex: 1;
+  min-height: 0;
+  padding: 16px 20px 8px;
+  overflow: auto;
+}
+
+.bak-wizard-pane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.bak-meta-row {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  margin-bottom: 6px;
+  color: #444;
+}
+
+.bak-meta-row strong {
+  font-weight: 500;
+  color: #222;
+}
+
+.bak-comment-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 13px;
+  flex: 1;
+  min-height: 0;
+}
+
+.bak-comment-label textarea {
+  flex: 1;
+  min-height: 160px;
+  resize: none;
+  border: 1px solid #c9c9c9;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.bak-objects-title {
+  margin: 0 0 8px;
+  color: #3b82f6;
+  font-size: 13px;
+}
+
+.bak-objects-tree {
+  flex: 1;
+  min-height: 180px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: auto;
+  padding: 6px 4px;
+  background: #fff;
+}
+
+.bak-obj-group {
+  margin-bottom: 2px;
+}
+
+.bak-obj-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  font-size: 13px;
+}
+
+.bak-obj-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.bak-obj-child {
+  padding-left: 28px;
+}
+
+.bak-twist {
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #666;
+  transform: rotate(0deg);
+  transition: transform 0.12s ease;
+  line-height: 1;
+  padding: 0;
+}
+
+.bak-twist.is-open {
+  transform: rotate(90deg);
+}
+
+.bak-obj-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 16px;
+  border-radius: 3px;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  background: #90a4ae;
+}
+
+.bak-obj-icon.is-table {
+  background: #42a5f5;
+}
+
+.bak-obj-icon.is-view {
+  background: #7e57c2;
+}
+
+.bak-obj-icon.is-function {
+  background: #00897b;
+}
+
+.bak-obj-icon.is-event {
+  background: #5c6bc0;
+}
+
+.bak-objects-tools {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bak-search {
+  height: 30px;
+  border: 1px solid #c9c9c9;
+  border-radius: 6px;
+  padding: 0 10px 0 28px;
+  font-size: 13px;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23999999' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3-3'/%3E%3C/svg%3E") 8px center no-repeat;
+}
+
+.bak-objects-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.bak-objects-actions button {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid #c9c9c9;
+  border-radius: 5px;
+  background: #f3f3f3;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.bak-wizard-advanced {
+  gap: 12px;
+  padding-top: 8px;
+}
+
+.bak-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  width: fit-content;
+}
+
+.bak-filename {
+  height: 30px;
+  max-width: 360px;
+  border: 1px solid #c9c9c9;
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 13px;
+  margin-left: 22px;
+}
+
+.bak-format-hint {
+  margin: 4px 0 0 22px;
+  font-size: 12px;
+  color: #777;
+  line-height: 1.5;
+}
+
+.bak-wizard-log {
+  gap: 0;
+}
+
+.bak-log-stats {
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  column-gap: 48px;
+  row-gap: 4px;
+  justify-content: center;
+  font-size: 13px;
+  padding: 4px 0 10px;
+  border-bottom: 1px solid #e5e5e5;
+  margin-bottom: 8px;
+}
+
+.bak-log-console {
+  flex: 1;
+  min-height: 180px;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  background: #fff;
+}
+
+.bak-progress {
+  height: 6px;
+  background: #e8e8e8;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.bak-progress-bar {
+  height: 100%;
+  background: #3b82f6;
+  transition: width 0.15s ease;
+}
+
+.bak-wizard-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px 14px;
+  border-top: 1px solid #eee;
+  background: #fafafa;
+}
+
+.bak-wizard-footer-left,
+.bak-wizard-footer-right {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.bak-wizard-footer button {
+  height: 28px;
+  min-width: 64px;
+  padding: 0 12px;
+  border: 1px solid #c9c9c9;
+  border-radius: 5px;
+  background: #f0f0f0;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.bak-wizard-footer button.is-primary:not(:disabled) {
+  background: #e8e8e8;
+}
+
+.bak-wizard-footer button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.bak-split-btn {
+  position: relative;
+  display: inline-flex;
+  border: 1px solid #c9c9c9;
+  border-radius: 5px;
+  overflow: visible;
+  background: #f0f0f0;
+}
+
+.bak-split-btn > button:first-child {
+  border: none;
+  border-radius: 5px 0 0 5px;
+  background: transparent;
+  min-width: 110px;
+}
+
+.bak-split-arrow {
+  border: none !important;
+  border-left: 1px solid #c9c9c9 !important;
+  border-radius: 0 5px 5px 0 !important;
+  min-width: 24px !important;
+  padding: 0 6px !important;
+  background: transparent !important;
+}
+
+.bak-split-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 4px);
+  min-width: 140px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 5;
+  overflow: hidden;
+}
+
+.bak-split-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none !important;
+  border-radius: 0 !important;
+  background: #fff !important;
+  height: 30px;
+}
+
+.bak-split-menu button:hover {
+  background: #f3f3f3 !important;
 }
 
 /* —— Function Designer (Navicat-like) —— */

@@ -58,6 +58,7 @@ import {
   type FunctionWizardResult,
 } from "../function-designer/FunctionWizard";
 import { buildRoutineTemplateSql } from "../function-designer/routineDdl";
+import { BackupObjectList } from "../backup/BackupObjectList";
 
 const TABLE_COLS = [
   { key: "name", label: "名称", defaultWidth: 180 },
@@ -178,6 +179,7 @@ export function ObjectListGrid() {
   const wantViews = folder === "views";
   const wantFunctions = folder === "functions";
   const wantEvents = folder === "events";
+  const wantBackups = folder === "backups";
   const title = wantEvents
     ? "事件"
     : wantFunctions
@@ -443,6 +445,10 @@ export function ObjectListGrid() {
       : wantViews
         ? VIEW_COLS
         : TABLE_COLS;
+
+  if (wantBackups) {
+    return <BackupObjectList />;
+  }
 
   if (!connection) {
     return <p className="pane-placeholder">请先打开一个连接。</p>;

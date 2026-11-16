@@ -18,7 +18,7 @@ const ITEMS: Item[] = [
   { id: "view", label: "视图", placeholder: "view" },
   { id: "function", label: "函数" },
   { id: "query", label: "查询" },
-  { id: "backup", label: "备份", placeholder: "backup" },
+  { id: "backup", label: "备份" },
   { id: "automation", label: "自动化" },
   { id: "model", label: "模型", placeholder: "model" },
   { id: "bi", label: "BI", placeholder: "bi" },

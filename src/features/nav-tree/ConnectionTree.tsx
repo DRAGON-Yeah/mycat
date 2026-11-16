@@ -64,6 +64,11 @@ import {
   EventContextMenu,
   type EventMenuTarget,
 } from "./EventContextMenu";
+import {
+  BackupsFolderContextMenu,
+  type BackupsFolderMenuTarget,
+} from "./BackupsFolderContextMenu";
+import { BackupWizard } from "../backup/BackupWizard";
 import { TreeObjectFolder } from "./TreeObjectFolder";
 import type { RoutineType } from "../object-list/routineMeta";
 import { emitTableDataChanged } from "../../lib/tableEvents";
@@ -180,6 +185,12 @@ export function ConnectionTree() {
   const [eventsFolderMenu, setEventsFolderMenu] =
     useState<EventsFolderMenuTarget | null>(null);
   const [eventMenu, setEventMenu] = useState<EventMenuTarget | null>(null);
+  const [backupsFolderMenu, setBackupsFolderMenu] =
+    useState<BackupsFolderMenuTarget | null>(null);
+  const [backupWizard, setBackupWizard] = useState<{
+    conn: ConnectionDto;
+    database: string;
+  } | null>(null);
 
   const activeConnectionId = useWorkspaceStore((s) => s.activeConnectionId);
   const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
@@ -243,6 +254,7 @@ export function ConnectionTree() {
       setRoutineMenu(null);
       setEventsFolderMenu(null);
       setEventMenu(null);
+      setBackupsFolderMenu(null);
       setSavedQueryMenu(null);
       setQueriesFolderMenu(null);
       setTableMenu(null);
@@ -1157,6 +1169,7 @@ export function ConnectionTree() {
                                             setConnMenu(null);
                                             setSavedQueryMenu(null);
                                             setTableMenu(null);
+                                            setBackupsFolderMenu(null);
                                             setQueriesFolderMenu({
                                               x: e.clientX,
                                               y: e.clientY,
@@ -1164,7 +1177,26 @@ export function ConnectionTree() {
                                               database: db,
                                             });
                                           }
-                                        : undefined
+                                        : folder.id === "backups"
+                                          ? (e) => {
+                                              e.preventDefault();
+                                              e.stopPropagation();
+                                              setDbMenu(null);
+                                              setConnMenu(null);
+                                              setSavedQueryMenu(null);
+                                              setQueriesFolderMenu(null);
+                                              setTableMenu(null);
+                                              setViewsFolderMenu(null);
+                                              setFunctionsFolderMenu(null);
+                                              setEventsFolderMenu(null);
+                                              setBackupsFolderMenu({
+                                                x: e.clientX,
+                                                y: e.clientY,
+                                                conn: n.conn,
+                                                database: db,
+                                              });
+                                            }
+                                          : undefined
                                     }
                                   >
                                     {folder.id === "queries" ? (
@@ -1452,6 +1484,41 @@ export function ConnectionTree() {
               database: functionsFolderMenu.database,
               table: "*",
             });
+            window.dispatchEvent(new Event("mycat:object-list-refresh"));
+          }}
+          onMessage={(msg) => {
+            setToast(msg);
+            window.setTimeout(() => setToast(null), 2500);
+          }}
+        />
+      )}
+
+      {backupsFolderMenu && (
+        <BackupsFolderContextMenu
+          target={backupsFolderMenu}
+          onClose={() => setBackupsFolderMenu(null)}
+          onRefresh={() => {
+            window.dispatchEvent(new Event("mycat:object-list-refresh"));
+          }}
+          onMessage={(msg) => {
+            setToast(msg);
+            window.setTimeout(() => setToast(null), 2500);
+          }}
+          onNewBackup={() => {
+            setBackupWizard({
+              conn: backupsFolderMenu.conn,
+              database: backupsFolderMenu.database,
+            });
+          }}
+        />
+      )}
+
+      {backupWizard && (
+        <BackupWizard
+          conn={backupWizard.conn}
+          database={backupWizard.database}
+          onClose={() => setBackupWizard(null)}
+          onCompleted={() => {
             window.dispatchEvent(new Event("mycat:object-list-refresh"));
           }}
           onMessage={(msg) => {
