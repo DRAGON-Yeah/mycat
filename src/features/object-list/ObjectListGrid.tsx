@@ -7,6 +7,7 @@ import {
   TableContextMenu,
   type TableMenuTarget,
 } from "../nav-tree/TableContextMenu";
+import { loadTableGroups } from "../nav-tree/tableGroups";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 
 function formatBytes(n?: number | null) {
@@ -44,6 +45,7 @@ export function ObjectListGrid() {
   const [tick, setTick] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [menu, setMenu] = useState<TableMenuTarget | null>(null);
+  const [groupMap, setGroupMap] = useState<Record<string, string>>({});
   const filterRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -157,6 +159,16 @@ export function ObjectListGrid() {
     };
   }, [connection, database, folder, wantViews, tick]);
 
+  useEffect(() => {
+    if (!connection || !database) {
+      setGroupMap({});
+      return;
+    }
+    void loadTableGroups(connection.id, database)
+      .then((s) => setGroupMap(s.membership))
+      .catch(() => setGroupMap({}));
+  }, [connection, database, tick]);
+
   if (!connection) {
     return <p className="pane-placeholder">请先打开一个连接。</p>;
   }
@@ -168,9 +180,15 @@ export function ObjectListGrid() {
     );
   }
 
-  const filtered = tables.filter((t) =>
-    t.name.toLowerCase().includes(filter.trim().toLowerCase()),
-  );
+  const filtered = tables
+    .filter((t) => t.name.toLowerCase().includes(filter.trim().toLowerCase()))
+    .slice()
+    .sort((a, b) => {
+      const ga = groupMap[a.name] || "";
+      const gb = groupMap[b.name] || "";
+      if (ga !== gb) return ga.localeCompare(gb, "zh");
+      return a.name.localeCompare(b.name, "zh");
+    });
 
   return (
     <div className="object-list-grid">
@@ -256,6 +274,7 @@ export function ObjectListGrid() {
             <thead>
               <tr>
                 <th>名称</th>
+                <th>组</th>
                 <th>行</th>
                 <th>数据长度</th>
                 <th>引擎</th>
@@ -294,6 +313,7 @@ export function ObjectListGrid() {
                     </span>
                     {t.name}
                   </td>
+                  <td>{groupMap[t.name] || "—"}</td>
                   <td>{formatRows(t.tableRows)}</td>
                   <td>{formatBytes(t.dataLength)}</td>
                   <td>{t.engine ?? "—"}</td>
@@ -305,7 +325,7 @@ export function ObjectListGrid() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="pane-placeholder">
+                  <td colSpan={9} className="pane-placeholder">
                     无匹配{title}
                   </td>
                 </tr>

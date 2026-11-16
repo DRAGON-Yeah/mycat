@@ -104,16 +104,27 @@ export function DataGrid({ tab }: Props) {
   const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
   const database = tab.database || selectedDatabase;
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(1000);
-  const [sortCol, setSortCol] = useState<string | undefined>();
-  const [sortDir, setSortDir] = useState<"ASC" | "DESC">("ASC");
-  const [filterCol, setFilterCol] = useState("");
-  const [filterValue, setFilterValue] = useState("");
-  const [showFilter, setShowFilter] = useState(false);
+  const [pageSize, setPageSize] = useState(tab.openOptions?.pageSize ?? 1000);
+  const [sortCol, setSortCol] = useState<string | undefined>(
+    tab.openOptions?.sortCol,
+  );
+  const [sortDir, setSortDir] = useState<"ASC" | "DESC">(
+    tab.openOptions?.sortDir ?? "ASC",
+  );
+  const [filterCol, setFilterCol] = useState(tab.openOptions?.filterCol ?? "");
+  const [filterValue, setFilterValue] = useState(
+    tab.openOptions?.filterValue ?? "",
+  );
+  const [showFilter, setShowFilter] = useState(
+    Boolean(tab.openOptions?.filterCol || tab.openOptions?.filterValue),
+  );
   const [appliedFilter, setAppliedFilter] = useState<{
     col?: string;
     value?: string;
-  }>({});
+  }>({
+    col: tab.openOptions?.filterCol,
+    value: tab.openOptions?.filterValue,
+  });
   const [data, setData] = useState<RowsPage | null>(null);
   const [rows, setRows] = useState<GridRow[]>([]);
   const [baseline, setBaseline] = useState<GridRow[]>([]);
@@ -252,6 +263,19 @@ ORDER BY ordinal_position`;
     appliedFilter.value,
     loadColumnExtras,
   ]);
+
+  useEffect(() => {
+    const opt = tab.openOptions;
+    if (!opt) return;
+    setPage(1);
+    if (opt.pageSize) setPageSize(opt.pageSize);
+    setSortCol(opt.sortCol);
+    setSortDir(opt.sortDir ?? "ASC");
+    setFilterCol(opt.filterCol ?? "");
+    setFilterValue(opt.filterValue ?? "");
+    setShowFilter(Boolean(opt.filterCol || opt.filterValue));
+    setAppliedFilter({ col: opt.filterCol, value: opt.filterValue });
+  }, [tab.id, tab.openOptions]);
 
   function editorKindForCol(colIndex: number): EditorKind {
     const col = data?.columns[colIndex];

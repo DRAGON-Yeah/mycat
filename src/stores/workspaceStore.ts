@@ -1,6 +1,14 @@
 import { create } from "zustand";
 import type { ConnectionDto } from "../features/connections/types";
 
+export type TableOpenOptions = {
+  sortCol?: string;
+  sortDir?: "ASC" | "DESC";
+  filterCol?: string;
+  filterValue?: string;
+  pageSize?: number;
+};
+
 export type TableTab = {
   id: string;
   connectionId: string;
@@ -10,6 +18,8 @@ export type TableTab = {
   database: string;
   table: string;
   dirty?: boolean;
+  /** Applied when opening via a saved table profile. */
+  openOptions?: TableOpenOptions | null;
 };
 
 export type DatabaseRelatedTabs = {
@@ -47,6 +57,12 @@ export type DesignerTab = {
   table: string;
   mode: "create" | "alter";
   dirty?: boolean;
+  seedColumns?: {
+    name: string;
+    rawType: string;
+    nullable: boolean;
+    isPk: boolean;
+  }[];
 };
 
 export type CenterMode =
@@ -114,12 +130,19 @@ type WorkspaceState = {
   setToolbarAction: (action: ToolbarAction, placeholder?: string | null) => void;
   setObjectListFilter: (filter: string, focus?: boolean) => void;
   consumeObjectListFilterFocus: () => void;
-  openTable: (table: string) => void;
+  openTable: (table: string, openOptions?: TableOpenOptions | null) => void;
   openTableDesigner: (opts: {
     connection?: ConnectionDto;
     database?: string;
     table: string;
     mode: "create" | "alter";
+    /** Seed columns for create mode (e.g. AI suggest). */
+    seedColumns?: {
+      name: string;
+      rawType: string;
+      nullable: boolean;
+      isPk: boolean;
+    }[];
   }) => string | null;
   setActiveDesigner: (id: string) => void;
   closeDesignerTab: (id: string, opts?: { force?: boolean }) => boolean;
@@ -398,7 +421,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       activeTabId: null,
     });
   },
-  openTable: (table) => {
+  openTable: (table, openOptions = null) => {
     const { activeConnectionId, activeConnection, tabs, selectedDatabase } =
       get();
     if (!activeConnectionId || !activeConnection) return;
@@ -411,6 +434,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const exists = tabs.find((t) => t.id === id);
     if (exists) {
       set({
+        tabs: tabs.map((t) =>
+          t.id === id ? { ...t, openOptions: openOptions ?? null } : t,
+        ),
         activeTabId: id,
         activeQueryId: null,
         activeDesignerId: null,
@@ -434,6 +460,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           database,
           table,
           dirty: false,
+          openOptions: openOptions ?? null,
         },
       ],
       activeTabId: id,
@@ -490,6 +517,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       table,
       mode: opts.mode,
       dirty: false,
+      seedColumns: opts.seedColumns,
     };
     set({
       activeConnectionId: conn.id,
