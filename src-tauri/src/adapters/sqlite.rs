@@ -3,7 +3,7 @@ use super::{
 };
 use crate::error::{AppError, AppResult};
 use rusqlite::types::Value as SqlValue;
-use rusqlite::{types::ValueRef, Connection, OptionalExtension};
+use rusqlite::{types::ValueRef, Connection, InterruptHandle, OptionalExtension};
 use serde_json::{Number, Value};
 use std::time::Instant;
 
@@ -192,6 +192,10 @@ impl DriverSession for SqliteSession {
             page,
             page_size,
         })
+    }
+
+    fn sqlite_interrupt_handle(&self) -> Option<InterruptHandle> {
+        Some(self.conn.get_interrupt_handle())
     }
 
     fn execute_sql(&self, sql: &str) -> AppResult<QueryOutcome> {

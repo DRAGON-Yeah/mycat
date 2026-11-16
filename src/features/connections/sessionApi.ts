@@ -61,6 +61,10 @@ export function executeSql(connectionId: string, sql: string) {
   }>("execute_sql", { connectionId, sql });
 }
 
+export function cancelQuery(connectionId: string) {
+  return invoke<void>("cancel_query", { connectionId });
+}
+
 export type RowChange = {
   op: "update" | "insert" | "delete" | string;
   pkColumns: string[];

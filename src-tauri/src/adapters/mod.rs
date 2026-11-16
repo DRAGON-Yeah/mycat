@@ -104,6 +104,14 @@ pub trait DriverSession: Send {
     ) -> AppResult<RowsPage>;
     fn execute_sql(&self, sql: &str) -> AppResult<QueryOutcome>;
     fn apply_row_changes(&self, table: &str, changes: &[RowChange]) -> AppResult<i64>;
+    /// Server-side backend/connection id used by cancel (MySQL CONNECTION_ID / PG pid).
+    fn backend_pid(&self) -> AppResult<Option<i64>> {
+        Ok(None)
+    }
+    /// SQLite InterruptHandle for cross-thread cancel (None for other engines).
+    fn sqlite_interrupt_handle(&self) -> Option<rusqlite::InterruptHandle> {
+        None
+    }
 }
 
 pub fn connect(opts: &ConnectOpts) -> AppResult<Box<dyn DriverSession>> {

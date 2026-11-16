@@ -1,3 +1,4 @@
+import catLogo from "../assets/cat-logo.svg";
 import { ThemeToggle } from "../features/settings/ThemeToggle";
 import {
   useWorkspaceStore,
@@ -33,7 +34,7 @@ export function TopToolbar() {
   return (
     <header className="top-toolbar" aria-label="主工具栏">
       <div className="top-toolbar-brand">
-        <span className="brand-mark">M</span>
+        <img className="brand-mark" src={catLogo} alt="" />
         <span className="brand-text">Mycat</span>
       </div>
       <nav className="top-toolbar-items">

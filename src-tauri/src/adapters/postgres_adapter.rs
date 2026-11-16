@@ -252,6 +252,16 @@ impl DriverSession for PostgresSession {
         })
     }
 
+    fn backend_pid(&self) -> AppResult<Option<i64>> {
+        let mut client = self
+            .client
+            .lock()
+            .map_err(|_| AppError::Message("postgres lock".into()))?;
+        let row = client.query_one("SELECT pg_backend_pid()", &[])?;
+        let pid: i32 = row.get(0);
+        Ok(Some(i64::from(pid)))
+    }
+
     fn execute_sql(&self, sql: &str) -> AppResult<QueryOutcome> {
         let started = Instant::now();
         let trimmed = sql.trim();

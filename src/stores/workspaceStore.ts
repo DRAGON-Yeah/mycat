@@ -83,6 +83,8 @@ type WorkspaceState = {
   activeTabId: string | null;
   queryTabs: QueryTab[];
   activeQueryId: string | null;
+  /** When set, QueryEditor should auto-run this tab once after mount. */
+  pendingQueryAutoRunId: string | null;
   openConnection: (conn: ConnectionDto) => void;
   clearConnection: () => void;
   clearDatabaseSelection: () => void;
@@ -105,7 +107,10 @@ type WorkspaceState = {
     title?: string;
     sql?: string;
     savedQueryId?: string;
-  }) => void;
+    /** Open then auto-run all statements (e.g. SQL file). */
+    autoRun?: boolean;
+  }) => string | null;
+  consumePendingQueryAutoRun: () => string | null;
   applyQueryContext: (connection: ConnectionDto, database: string) => void;
   closeTab: (id: string, opts?: { force?: boolean }) => boolean;
   closeQueryTab: (id: string, opts?: { force?: boolean }) => boolean;
@@ -161,6 +166,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   activeTabId: null,
   queryTabs: [],
   activeQueryId: null,
+  pendingQueryAutoRunId: null,
   openConnection: (conn) =>
     set({
       activeConnectionId: conn.id,
@@ -190,6 +196,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       activeTabId: null,
       queryTabs: [],
       activeQueryId: null,
+      pendingQueryAutoRunId: null,
     }),
   clearDatabaseSelection: () =>
     set({
@@ -409,7 +416,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
   openQuery: (opts) => {
     const conn = opts?.connection ?? get().activeConnection;
-    if (!conn) return;
+    if (!conn) return null;
     const database =
       opts?.database?.trim() ||
       get().selectedDatabase ||
@@ -433,8 +440,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           centerMode: "query",
           toolbarAction: "query",
           placeholderFeature: null,
+          pendingQueryAutoRunId: opts?.autoRun ? existing.id : null,
         });
-        return;
+        return existing.id;
       }
     }
     const id = `query-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -446,7 +454,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       connectionEngine: String(conn.engine),
       database,
       sql: opts?.sql ?? "",
-      dirty: false,
+      dirty: Boolean(opts?.sql && !opts?.savedQueryId),
       savedQueryId: opts?.savedQueryId ?? null,
     };
     set({
@@ -463,7 +471,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       centerMode: "query",
       toolbarAction: "query",
       placeholderFeature: null,
+      pendingQueryAutoRunId: opts?.autoRun ? id : null,
     });
+    return id;
+  },
+  consumePendingQueryAutoRun: () => {
+    const id = get().pendingQueryAutoRunId;
+    if (!id) return null;
+    set({ pendingQueryAutoRunId: null });
+    return id;
   },
   applyQueryContext: (connection, database) =>
     set({

@@ -91,8 +91,16 @@ pub fn execute_sql(
     connection_id: String,
     sql: String,
 ) -> Result<QueryOutcome, String> {
-    pool.with_session(&connection_id, |s| s.execute_sql(&sql))
-        .map_err(|e| e.to_string())
+    pool.begin_query(&connection_id)
+        .map_err(|e| e.to_string())?;
+    let result = pool.with_session(&connection_id, |s| s.execute_sql(&sql));
+    pool.end_query(&connection_id);
+    result.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn cancel_query(pool: State<'_, SessionPool>, connection_id: String) -> Result<(), String> {
+    pool.cancel_query(&connection_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

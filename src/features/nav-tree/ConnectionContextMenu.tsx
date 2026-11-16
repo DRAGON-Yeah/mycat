@@ -11,7 +11,7 @@ import {
 } from "../connections/connectionProfiles";
 import { upsertConnection } from "../connections/api";
 import type { ConnectionDto } from "../connections/types";
-import { executeSql, openConnection } from "../connections/sessionApi";
+import { openConnection } from "../connections/sessionApi";
 import { downloadTextFile } from "../import-export/csv";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 
@@ -303,15 +303,15 @@ export function ConnectionContextMenu({
           void run(async () => {
             await openConnection(conn.id);
             const text = await file.text();
-            if (conn.database && String(conn.engine) === "mysql") {
-              await executeSql(
-                conn.id,
-                `USE \`${conn.database.replace(/`/g, "``")}\``,
-              );
-            }
-            await executeSql(conn.id, text);
-            onMessage(`已执行 ${file.name}`);
-            await onRefreshDatabases(conn.id);
+            const title = file.name.replace(/\.sql$/i, "") || file.name;
+            openQuery({
+              connection: conn,
+              database: conn.database?.trim() || undefined,
+              title,
+              sql: text,
+              autoRun: true,
+            });
+            onMessage(`已打开并执行 SQL 文件：${file.name}`);
           });
         }}
       />

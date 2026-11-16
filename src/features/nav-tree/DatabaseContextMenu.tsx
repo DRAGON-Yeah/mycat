@@ -307,15 +307,15 @@ export function DatabaseContextMenu({
           void run(async () => {
             ensureContext();
             const text = await file.text();
-            if (String(conn.engine) === "mysql") {
-              await executeSql(
-                conn.id,
-                `USE \`${escapeIdent(database)}\``,
-              );
-            }
-            await executeSql(conn.id, text);
-            onMessage(`已执行 ${file.name}`);
-            await onRefresh(conn.id);
+            const title = file.name.replace(/\.sql$/i, "") || file.name;
+            openQuery({
+              connection: conn,
+              database,
+              title,
+              sql: text,
+              autoRun: true,
+            });
+            onMessage(`已打开并执行 SQL 文件：${file.name}`);
           });
         }}
       />

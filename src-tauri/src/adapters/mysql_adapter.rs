@@ -265,6 +265,15 @@ impl DriverSession for MysqlSession {
         })
     }
 
+    fn backend_pid(&self) -> AppResult<Option<i64>> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::Message("mysql lock".into()))?;
+        let id: Option<u32> = conn.query_first("SELECT CONNECTION_ID()")?;
+        Ok(id.map(|v| i64::from(v)))
+    }
+
     fn execute_sql(&self, sql: &str) -> AppResult<QueryOutcome> {
         let started = Instant::now();
         let trimmed = sql.trim();

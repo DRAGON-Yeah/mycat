@@ -9,6 +9,7 @@ import {
 } from "react";
 import { listConnections } from "../connections/api";
 import {
+  cancelQuery,
   executeSql,
   fetchTablePage,
   listDatabases,
@@ -53,6 +54,9 @@ export function QueryEditor() {
   const queryTabs = useWorkspaceStore((s) => s.queryTabs);
   const updateQueryTab = useWorkspaceStore((s) => s.updateQueryTab);
   const applyQueryContext = useWorkspaceStore((s) => s.applyQueryContext);
+  const consumePendingQueryAutoRun = useWorkspaceStore(
+    (s) => s.consumePendingQueryAutoRun,
+  );
   const tab = queryTabs.find((t) => t.id === activeQueryId) ?? null;
 
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
@@ -63,6 +67,8 @@ export function QueryEditor() {
     async () => undefined,
   );
   const saveRef = useRef<() => void>(() => undefined);
+  const cancelRequestedRef = useRef(false);
+  const runningConnRef = useRef<string | null>(null);
   const [connections, setConnections] = useState<ConnectionDto[]>([]);
   const [databases, setDatabases] = useState<string[]>([]);
   const [dbLoading, setDbLoading] = useState(false);
@@ -77,10 +83,12 @@ export function QueryEditor() {
   const [resultCollapsed, setResultCollapsed] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
+  const [replaceQuery, setReplaceQuery] = useState("");
   const [findMatchCase, setFindMatchCase] = useState(false);
   const [findIndex, setFindIndex] = useState(0);
   const [findCount, setFindCount] = useState(0);
   const findInputRef = useRef<HTMLInputElement>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveAsMode, setSaveAsMode] = useState(false);
   const [saveName, setSaveName] = useState("");
@@ -483,6 +491,74 @@ export function QueryEditor() {
     editor.revealRangeInCenter(match.range);
   }
 
+  function replaceOne() {
+    const editor = editorRef.current;
+    const model = editor?.getModel();
+    if (!editor || !model || !findQuery || !tab) return;
+    const sel = editor.getSelection();
+    if (sel && !sel.isEmpty()) {
+      const selected = model.getValueInRange(sel);
+      const hit = findMatchCase
+        ? selected === findQuery
+        : selected.toLowerCase() === findQuery.toLowerCase();
+      if (hit) {
+        editor.executeEdits("replace", [
+          { range: sel, text: replaceQuery, forceMoveMarkers: true },
+        ]);
+        patchSql(model.getValue());
+        runFind("next");
+        return;
+      }
+    }
+    runFind("fresh");
+    window.setTimeout(() => {
+      const ed = editorRef.current;
+      const md = ed?.getModel();
+      const s = ed?.getSelection();
+      if (!ed || !md || !s || s.isEmpty()) return;
+      const selected = md.getValueInRange(s);
+      const hit = findMatchCase
+        ? selected === findQuery
+        : selected.toLowerCase() === findQuery.toLowerCase();
+      if (!hit) return;
+      ed.executeEdits("replace", [
+        { range: s, text: replaceQuery, forceMoveMarkers: true },
+      ]);
+      patchSql(md.getValue());
+      runFind("next");
+    }, 0);
+  }
+
+  function replaceAll() {
+    const editor = editorRef.current;
+    const model = editor?.getModel();
+    if (!editor || !model || !findQuery || !tab) return;
+    const matches = model.findMatches(
+      findQuery,
+      true,
+      false,
+      findMatchCase,
+      null,
+      true,
+    );
+    if (matches.length === 0) {
+      showToast("没有可替换的匹配项");
+      return;
+    }
+    editor.executeEdits(
+      "replace-all",
+      matches.map((m) => ({
+        range: m.range,
+        text: replaceQuery,
+        forceMoveMarkers: true,
+      })),
+    );
+    patchSql(model.getValue());
+    setFindCount(0);
+    setFindIndex(0);
+    showToast(`已替换 ${matches.length} 处`);
+  }
+
   useEffect(() => {
     if (!findOpen) return;
     runFind("fresh");
@@ -568,16 +644,52 @@ export function QueryEditor() {
     }
   }
 
+  function isCancelError(msg: string) {
+    const m = msg.toLowerCase();
+    return (
+      m.includes("cancel") ||
+      m.includes("interrupt") ||
+      m.includes("killed") ||
+      m.includes("1317") || // MySQL Query execution was interrupted
+      m.includes("57014") || // PG query_canceled
+      msg.includes("已取消") ||
+      msg.includes("中断")
+    );
+  }
+
+  async function stopRunning() {
+    if (!running) return;
+    cancelRequestedRef.current = true;
+    const connId = runningConnRef.current || tab?.connectionId;
+    showToast("正在取消当前查询…");
+    if (connId) {
+      try {
+        await cancelQuery(connId);
+      } catch (err) {
+        showToast(
+          err instanceof Error ? err.message : "取消失败，请等待语句结束",
+        );
+      }
+    }
+  }
+
   async function run(mode: RunMode, explain = false) {
     if (!tab) return;
     setRunMenuOpen(false);
+    cancelRequestedRef.current = false;
+    runningConnRef.current = tab.connectionId;
     setRunning(true);
     setError(null);
     setStatus(null);
     setBatchItems([]);
     setBatchMessages([]);
+    let cancelled = false;
     try {
       await openConnection(tab.connectionId);
+      if (cancelRequestedRef.current) {
+        cancelled = true;
+        throw new Error("已取消");
+      }
       if (tab.database && String(tab.connectionEngine) === "mysql") {
         await executeSql(
           tab.connectionId,
@@ -622,6 +734,13 @@ export function QueryEditor() {
       ];
 
       for (let i = 0; i < statements.length; i++) {
+        if (cancelRequestedRef.current) {
+          cancelled = true;
+          messages.push(
+            `[${i + 1}/${statements.length}] 已取消，后续语句未执行`,
+          );
+          break;
+        }
         const original = statements[i]!;
         const id = `stmt-${Date.now()}-${i}`;
         const asExplain = doExplain || isExplainSql(original);
@@ -636,6 +755,10 @@ export function QueryEditor() {
 
             try {
               const jsonOut = await executeSql(tab.connectionId, jsonSql);
+              if (cancelRequestedRef.current) {
+                cancelled = true;
+                throw new Error("已取消");
+              }
               elapsed += jsonOut.elapsedMs;
               primary = jsonSql;
               const raw = jsonFromExplainResult(jsonOut.columns, jsonOut.rows);
@@ -644,13 +767,22 @@ export function QueryEditor() {
               if (!raw && jsonOut.columns.length > 0) {
                 explainGrid = jsonOut;
               }
-            } catch {
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              if (cancelRequestedRef.current || isCancelError(msg)) {
+                cancelled = true;
+                throw new Error("已取消");
+              }
               /* fall through to traditional */
             }
 
             if (gridSql !== jsonSql || !explainGrid) {
               try {
                 const gridOut = await executeSql(tab.connectionId, gridSql);
+                if (cancelRequestedRef.current) {
+                  cancelled = true;
+                  throw new Error("已取消");
+                }
                 elapsed += gridOut.elapsedMs;
                 if (!primary.startsWith("EXPLAIN")) primary = gridSql;
                 if (gridOut.columns.length > 0) explainGrid = gridOut;
@@ -662,6 +794,11 @@ export function QueryEditor() {
                   if (raw) explainJson = raw;
                 }
               } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                if (cancelRequestedRef.current || isCancelError(msg)) {
+                  cancelled = true;
+                  throw new Error("已取消");
+                }
                 if (!explainJson && !explainGrid) throw err;
               }
             }
@@ -680,6 +817,13 @@ export function QueryEditor() {
             );
           } else {
             const out = await executeSql(tab.connectionId, original);
+            if (cancelRequestedRef.current) {
+              cancelled = true;
+              messages.push(
+                `[${i + 1}/${statements.length}] 已取消`,
+              );
+              break;
+            }
             const hasGrid = out.columns.length > 0;
             items.push({
               id,
@@ -696,6 +840,17 @@ export function QueryEditor() {
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
+          if (cancelRequestedRef.current || isCancelError(msg)) {
+            cancelled = true;
+            items.push({
+              id,
+              sql: original,
+              kind: "message",
+              error: "已取消",
+            });
+            messages.push(`[${i + 1}/${statements.length}] 已取消`);
+            break;
+          }
           items.push({ id, sql: original, kind: "message", error: msg });
           messages.push(`[${i + 1}/${statements.length}] ERROR: ${msg}`);
         }
@@ -704,20 +859,31 @@ export function QueryEditor() {
       setBatchItems(items);
       setBatchMessages(messages);
       const ok = items.filter((x) => !x.error).length;
-      const fail = items.filter((x) => x.error).length;
+      const fail = items.filter((x) => x.error && x.error !== "已取消").length;
       const resultCount = items.filter(
         (x) => (x.kind === "result" || x.kind === "explain") && x.result,
       ).length;
       setStatus(
-        `完成：成功 ${ok} · 失败 ${fail} · 结果集 ${resultCount}`,
+        cancelled
+          ? `已取消：成功 ${ok} · 失败 ${fail} · 结果集 ${resultCount}`
+          : `完成：成功 ${ok} · 失败 ${fail} · 结果集 ${resultCount}`,
       );
+      if (cancelled) showToast("查询已取消");
       setResultCollapsed(false);
-      if (fail && ok === 0) {
+      if (fail && ok === 0 && !cancelled) {
         setError(items.find((x) => x.error)?.error ?? "执行失败");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      if (cancelRequestedRef.current || isCancelError(msg)) {
+        setStatus("已取消");
+        showToast("查询已取消");
+      } else {
+        setError(msg);
+      }
     } finally {
+      cancelRequestedRef.current = false;
+      runningConnRef.current = null;
       setRunning(false);
     }
   }
@@ -733,6 +899,17 @@ export function QueryEditor() {
   saveRef.current = () => {
     void save();
   };
+
+  // SQL 文件等场景：打开页签后自动执行全部语句
+  useEffect(() => {
+    const pendingId = consumePendingQueryAutoRun();
+    if (!pendingId || !tab || tab.id !== pendingId) return;
+    const timer = window.setTimeout(() => {
+      void run("all");
+    }, 80);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab?.id]);
 
   if (!tab) {
     return (
@@ -770,7 +947,7 @@ export function QueryEditor() {
           <IconBtn title="注释" onClick={commentSelection}>
             <IconComment />
           </IconBtn>
-          <IconBtn title="查找 (⌘/Ctrl+F)" onClick={findReplace}>
+          <IconBtn title="查找/替换 (⌘/Ctrl+F)" onClick={findReplace}>
             <IconSearch />
           </IconBtn>
         </div>
@@ -786,70 +963,109 @@ export function QueryEditor() {
 
       {findOpen && (
         <div className="query-find-bar" onClick={(e) => e.stopPropagation()}>
-          <input
-            ref={findInputRef}
-            className="query-find-input"
-            value={findQuery}
-            placeholder="Find"
-            onChange={(e) => setFindQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
+          <div className="query-find-row">
+            <input
+              ref={findInputRef}
+              className="query-find-input"
+              value={findQuery}
+              placeholder="查找"
+              onChange={(e) => setFindQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  closeFind();
+                } else if (e.key === "Enter") {
+                  e.preventDefault();
+                  runFind(e.shiftKey ? "prev" : "next");
+                } else if (e.key === "Tab") {
+                  e.preventDefault();
+                  replaceInputRef.current?.focus();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className={`query-find-opt ${findMatchCase ? "is-on" : ""}`}
+              title="区分大小写"
+              onClick={() => setFindMatchCase((v) => !v)}
+            >
+              Aa
+            </button>
+            <span className="query-find-status">
+              {findQuery
+                ? findCount === 0
+                  ? "无结果"
+                  : `${findIndex + 1} / ${findCount}`
+                : ""}
+            </span>
+            <button
+              type="button"
+              className="query-find-nav"
+              title="上一个"
+              onClick={() => runFind("prev")}
+            >
+              ▲
+            </button>
+            <button
+              type="button"
+              className="query-find-nav"
+              title="下一个"
+              onClick={() => runFind("next")}
+            >
+              ▼
+            </button>
+            <button
+              type="button"
+              className="query-find-close"
+              title="关闭查找 (Esc)"
+              aria-label="关闭查找"
+              onMouseDown={(e) => {
                 e.preventDefault();
+                e.stopPropagation();
+              }}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 closeFind();
-              } else if (e.key === "Enter") {
-                e.preventDefault();
-                runFind(e.shiftKey ? "prev" : "next");
-              }
-            }}
-          />
-          <button
-            type="button"
-            className={`query-find-opt ${findMatchCase ? "is-on" : ""}`}
-            title="区分大小写"
-            onClick={() => setFindMatchCase((v) => !v)}
-          >
-            Aa
-          </button>
-          <span className="query-find-status">
-            {findQuery
-              ? findCount === 0
-                ? "No results"
-                : `${findIndex + 1} of ${findCount}`
-              : ""}
-          </span>
-          <button
-            type="button"
-            className="query-find-nav"
-            title="上一个"
-            onClick={() => runFind("prev")}
-          >
-            ▲
-          </button>
-          <button
-            type="button"
-            className="query-find-nav"
-            title="下一个"
-            onClick={() => runFind("next")}
-          >
-            ▼
-          </button>
-          <button
-            type="button"
-            className="query-find-close"
-            title="关闭查找 (Esc)"
-            aria-label="关闭查找"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              closeFind();
-            }}
-          >
-            ×
-          </button>
+              }}
+            >
+              ×
+            </button>
+          </div>
+          <div className="query-find-row">
+            <input
+              ref={replaceInputRef}
+              className="query-find-input"
+              value={replaceQuery}
+              placeholder="替换为"
+              onChange={(e) => setReplaceQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  closeFind();
+                } else if (e.key === "Enter") {
+                  e.preventDefault();
+                  replaceOne();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="query-find-action"
+              disabled={!findQuery}
+              onClick={replaceOne}
+            >
+              替换
+            </button>
+            <button
+              type="button"
+              className="query-find-action"
+              disabled={!findQuery}
+              onClick={replaceAll}
+            >
+              全部替换
+            </button>
+          </div>
         </div>
       )}
 
@@ -993,12 +1209,8 @@ export function QueryEditor() {
           type="button"
           className="query-stop-btn"
           disabled={!running}
-          title="停止"
-          onClick={() =>
-            showToast(
-              "暂不支持中途取消：请等待当前语句执行结束（后端同步驱动）。",
-            )
-          }
+          title="停止并取消当前查询"
+          onClick={() => void stopRunning()}
         >
           <span className="query-stop-icon" aria-hidden />
         </button>
