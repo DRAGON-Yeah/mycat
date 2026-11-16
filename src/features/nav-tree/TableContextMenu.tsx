@@ -3,6 +3,7 @@ import type { ConnectionDto } from "../connections/types";
 import { executeSql, openConnection } from "../connections/sessionApi";
 import { downloadTextFile } from "../import-export/csv";
 import { TableIoWizard } from "../import-export/TableIoWizard";
+import { emitTableDataChanged } from "../../lib/tableEvents";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { identOk } from "./sqlIdent";
 import {
@@ -93,7 +94,6 @@ export function TableContextMenu({
   const selectDatabase = useWorkspaceStore((s) => s.selectDatabase);
   const selectTableMeta = useWorkspaceStore((s) => s.selectTableMeta);
   const openTableDesigner = useWorkspaceStore((s) => s.openTableDesigner);
-  const setToolbarAction = useWorkspaceStore((s) => s.setToolbarAction);
   const tabs = useWorkspaceStore((s) => s.tabs);
   const designerTabs = useWorkspaceStore((s) => s.designerTabs);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
@@ -349,6 +349,11 @@ export function TableContextMenu({
                 if (!window.confirm(`清空表「${table}」的所有数据？`)) return;
                 void run(async () => {
                   await emptyTable({ conn, database, table });
+                  emitTableDataChanged({
+                    connectionId: conn.id,
+                    database,
+                    table,
+                  });
                   onMessage(`已清空表 ${table}`);
                   onRefresh();
                 });
@@ -363,6 +368,11 @@ export function TableContextMenu({
                 if (!window.confirm(`截断表「${table}」？`)) return;
                 void run(async () => {
                   await truncateTable({ conn, database, table });
+                  emitTableDataChanged({
+                    connectionId: conn.id,
+                    database,
+                    table,
+                  });
                   onMessage(`已截断表 ${table}`);
                   onRefresh();
                 });
@@ -588,26 +598,22 @@ export function TableContextMenu({
         <button
           type="button"
           disabled={busy}
+          title="导出 Mermaid 模型文档（本地文件）"
           onClick={() =>
             void run(async () => {
               await reverseSingleTableModel({ conn, database, table });
-              setToolbarAction("model", "model");
-              onMessage("已生成逆向模型");
+              onMessage("已导出逆向模型（Mermaid .md）");
             })
           }
         >
-          逆向表到模型…
+          导出逆向模型…
         </button>
         <button
           type="button"
-          disabled={busy}
-          onClick={() => {
-            setToolbarAction("bi", "bi");
-            onMessage(`已打开 BI 工作区（关联 ${database}.${table}）`);
-            onClose();
-          }}
+          disabled
+          title="稍后：BI 工作区尚未实现"
         >
-          创建 BI 工作区…
+          创建 BI 工作区…（稍后）
         </button>
 
         <div className="dg-menu-sep" />
@@ -730,7 +736,7 @@ export function TableContextMenu({
             })
           }
         >
-          共享…
+          导出共享包…
         </button>
         <button
           type="button"
@@ -872,7 +878,13 @@ export function TableContextMenu({
                   table,
                   count: genCount,
                 });
+                emitTableDataChanged({
+                  connectionId: conn.id,
+                  database,
+                  table,
+                });
                 onMessage(`已生成 ${n} 行测试数据`);
+                onRefresh();
                 setGenOpen(false);
               });
             }}

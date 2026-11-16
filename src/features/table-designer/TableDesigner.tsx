@@ -16,6 +16,7 @@ import { useModSaveShortcut } from "../../hooks/useModSaveShortcut";
 import type { DesignerTab } from "../../stores/workspaceStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { engineKey, identOk, quoteIdent, quoteTable } from "../nav-tree/sqlIdent";
+import { DesignerSqlPreview } from "./DesignerSqlPreview";
 import {
   buildAlterTableSql,
   buildCreateTableSql,
@@ -106,6 +107,9 @@ function seedToColumn(s: {
 export function TableDesigner({ tab }: Props) {
   const markDirty = useWorkspaceStore((s) => s.markDesignerDirty);
   const updateTab = useWorkspaceStore((s) => s.updateDesignerTab);
+  const promoteDesignerToAlter = useWorkspaceStore(
+    (s) => s.promoteDesignerToAlter,
+  );
   const closeDesignerTab = useWorkspaceStore((s) => s.closeDesignerTab);
   const openTable = useWorkspaceStore((s) => s.openTable);
 
@@ -114,9 +118,15 @@ export function TableDesigner({ tab }: Props) {
   const [columns, setColumns] = useState<DesignerColumn[]>([]);
   const [baseline, setBaseline] = useState<DesignerColumn[]>([]);
   const [indexes, setIndexes] = useState<DesignerIndex[]>([]);
+  const [baselineIndexes, setBaselineIndexes] = useState<DesignerIndex[]>([]);
   const [fks, setFks] = useState<DesignerForeignKey[]>([]);
+  const [baselineFks, setBaselineFks] = useState<DesignerForeignKey[]>([]);
   const [triggers, setTriggers] = useState<DesignerTrigger[]>([]);
+  const [baselineTriggers, setBaselineTriggers] = useState<DesignerTrigger[]>(
+    [],
+  );
   const [checks, setChecks] = useState<DesignerCheck[]>([]);
+  const [baselineChecks, setBaselineChecks] = useState<DesignerCheck[]>([]);
   const [options, setOptions] = useState<TableOptions>(emptyOptions());
   const [baselineOptions, setBaselineOptions] = useState<TableOptions>(
     emptyOptions(),
@@ -185,9 +195,13 @@ export function TableDesigner({ tab }: Props) {
       setColumns(seed);
       setBaseline([]);
       setIndexes([]);
+      setBaselineIndexes([]);
       setFks([]);
+      setBaselineFks([]);
       setTriggers([]);
+      setBaselineTriggers([]);
       setChecks([]);
+      setBaselineChecks([]);
       setOptions(emptyOptions());
       setBaselineOptions(emptyOptions());
       setTableName(t.table || "new_table");
@@ -249,9 +263,13 @@ export function TableDesigner({ tab }: Props) {
           : Promise.resolve({ charsets: [], collationsByCharset: {} }),
       ]);
       setIndexes(ix);
+      setBaselineIndexes(ix.map((row) => ({ ...row })));
       setFks(fk);
+      setBaselineFks(fk.map((row) => ({ ...row })));
       setTriggers(tr);
+      setBaselineTriggers(tr.map((row) => ({ ...row })));
       setChecks(ck);
+      setBaselineChecks(ck.map((row) => ({ ...row })));
       setOptions(meta.options);
       setBaselineOptions({ ...meta.options });
       setStats(meta.stats);
@@ -394,21 +412,44 @@ export function TableDesigner({ tab }: Props) {
     touch();
   }
 
-  const previewSql = useMemo(() => {
+  const ddlSql = useMemo(() => {
+    try {
+      const name =
+        tab.mode === "create"
+          ? tableName.trim() || "new_table"
+          : tab.table;
+      return (
+        buildCreateTableSql({
+          engine: tab.connectionEngine,
+          database: tab.database,
+          table: name,
+          columns,
+          indexes: indexes.filter((i) => i.name.toUpperCase() !== "PRIMARY"),
+          foreignKeys: fks,
+          checks,
+          options,
+        }) + ";"
+      );
+    } catch (err) {
+      return `-- ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }, [
+    tab.mode,
+    tab.table,
+    tab.connectionEngine,
+    tab.database,
+    tableName,
+    columns,
+    indexes,
+    fks,
+    checks,
+    options,
+  ]);
+
+  const changesSql = useMemo(() => {
     try {
       if (tab.mode === "create") {
-        return (
-          buildCreateTableSql({
-            engine: tab.connectionEngine,
-            database: tab.database,
-            table: tableName.trim() || "new_table",
-            columns,
-            indexes,
-            foreignKeys: fks,
-            checks,
-            options,
-          }) + ";"
-        );
+        return ddlSql;
       }
       const stmts = buildAlterTableSql({
         engine: tab.connectionEngine,
@@ -419,20 +460,180 @@ export function TableDesigner({ tab }: Props) {
         options,
         baselineOptions,
       });
-      return stmts.length ? stmts.join(";\n") + ";" : "-- 无字段/选项变更";
+
+      if (engineKey(tab.connectionEngine) === "mysql") {
+        const qt = quoteTable(tab.connectionEngine, tab.database, tab.table);
+        const norm = (s: string) => s.replace(/\s+/g, "");
+        const baseIx = new Map(
+          baselineIndexes
+            .filter((i) => i.name.toUpperCase() !== "PRIMARY")
+            .map((i) => [i.name, i]),
+        );
+        const wantIx = indexes.filter((i) => i.name.toUpperCase() !== "PRIMARY");
+        const wantIxNames = new Set(wantIx.map((i) => i.name));
+        for (const b of baseIx.values()) {
+          if (!wantIxNames.has(b.name)) {
+            stmts.push(
+              `DROP INDEX ${quoteIdent("mysql", b.name)} ON ${qt}`,
+            );
+          }
+        }
+        for (const ix of wantIx) {
+          if (!identOk(ix.name) || !ix.columns.trim()) continue;
+          const cols = ix.columns
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((c) => quoteIdent("mysql", c))
+            .join(", ");
+          if (!cols) continue;
+          const old = baseIx.get(ix.name);
+          const changed =
+            !old ||
+            norm(old.columns) !== norm(ix.columns) ||
+            Boolean(old.unique) !== Boolean(ix.unique) ||
+            (old.indexType || "BTREE").toUpperCase() !==
+              (ix.indexType || "BTREE").toUpperCase();
+          if (!changed) continue;
+          if (old) {
+            stmts.push(
+              `DROP INDEX ${quoteIdent("mysql", ix.name)} ON ${qt}`,
+            );
+          }
+          const uniq = ix.unique ? "UNIQUE " : "";
+          stmts.push(
+            `CREATE ${uniq}INDEX ${quoteIdent("mysql", ix.name)} ON ${qt} (${cols})`,
+          );
+        }
+
+        const baseFkMap = new Map(baselineFks.map((f) => [f.name, f]));
+        const wantFkNames = new Set(fks.map((f) => f.name));
+        for (const b of baselineFks) {
+          if (!wantFkNames.has(b.name)) {
+            stmts.push(
+              `ALTER TABLE ${qt} DROP FOREIGN KEY ${quoteIdent("mysql", b.name)}`,
+            );
+          }
+        }
+        for (const fk of fks) {
+          if (!identOk(fk.name) || !fk.refTable.trim()) continue;
+          const cols = fk.columns
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((c) => quoteIdent("mysql", c))
+            .join(", ");
+          const refs = fk.refColumns
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((c) => quoteIdent("mysql", c))
+            .join(", ");
+          if (!cols || !refs) continue;
+          const old = baseFkMap.get(fk.name);
+          const changed =
+            !old ||
+            norm(old.columns) !== norm(fk.columns) ||
+            old.refTable !== fk.refTable ||
+            norm(old.refColumns) !== norm(fk.refColumns) ||
+            (old.onDelete || "RESTRICT") !== (fk.onDelete || "RESTRICT") ||
+            (old.onUpdate || "RESTRICT") !== (fk.onUpdate || "RESTRICT");
+          if (!changed) continue;
+          if (old) {
+            stmts.push(
+              `ALTER TABLE ${qt} DROP FOREIGN KEY ${quoteIdent("mysql", fk.name)}`,
+            );
+          }
+          const refTable = quoteTable("mysql", tab.database, fk.refTable);
+          stmts.push(
+            `ALTER TABLE ${qt} ADD CONSTRAINT ${quoteIdent("mysql", fk.name)} FOREIGN KEY (${cols}) REFERENCES ${refTable} (${refs}) ON DELETE ${fk.onDelete || "RESTRICT"} ON UPDATE ${fk.onUpdate || "RESTRICT"}`,
+          );
+        }
+
+        const baseCkMap = new Map(baselineChecks.map((c) => [c.name, c]));
+        const wantCkNames = new Set(checks.map((c) => c.name));
+        for (const b of baselineChecks) {
+          if (!wantCkNames.has(b.name)) {
+            stmts.push(
+              `ALTER TABLE ${qt} DROP CHECK ${quoteIdent("mysql", b.name)}`,
+            );
+          }
+        }
+        for (const ck of checks) {
+          if (!identOk(ck.name) || !ck.expression.trim()) continue;
+          const old = baseCkMap.get(ck.name);
+          if (old && old.expression.trim() === ck.expression.trim()) continue;
+          if (old) {
+            stmts.push(
+              `ALTER TABLE ${qt} DROP CHECK ${quoteIdent("mysql", ck.name)}`,
+            );
+          }
+          stmts.push(
+            `ALTER TABLE ${qt} ADD CONSTRAINT ${quoteIdent("mysql", ck.name)} CHECK (${ck.expression})`,
+          );
+        }
+
+        const baseTrMap = new Map(baselineTriggers.map((x) => [x.name, x]));
+        const wantTrNames = new Set(triggers.map((x) => x.name));
+        for (const b of baselineTriggers) {
+          if (!wantTrNames.has(b.name)) {
+            stmts.push(
+              `DROP TRIGGER IF EXISTS ${quoteTable("mysql", tab.database, b.name)}`,
+            );
+          }
+        }
+        for (const tr of triggers) {
+          if (!tr.name.trim() || !tr.statement.trim()) continue;
+          const old = baseTrMap.get(tr.name);
+          if (
+            old &&
+            old.timing === tr.timing &&
+            old.event === tr.event &&
+            old.statement === tr.statement
+          ) {
+            continue;
+          }
+          if (old) {
+            stmts.push(
+              `DROP TRIGGER IF EXISTS ${quoteTable("mysql", tab.database, tr.name)}`,
+            );
+          }
+          stmts.push(
+            buildTriggerSql({
+              engine: tab.connectionEngine,
+              database: tab.database,
+              table: tab.table,
+              trigger: tr,
+            }),
+          );
+        }
+      }
+
+      const filtered = stmts.filter(Boolean);
+      return filtered.length
+        ? filtered.join(";\n\n") + ";"
+        : "-- 无待保存更改";
     } catch (err) {
       return `-- ${err instanceof Error ? err.message : String(err)}`;
     }
   }, [
-    tab,
-    tableName,
-    columns,
-    indexes,
-    fks,
-    checks,
-    options,
+    tab.mode,
+    tab.table,
+    tab.connectionEngine,
+    tab.database,
+    ddlSql,
     baseline,
+    columns,
+    options,
     baselineOptions,
+    indexes,
+    baselineIndexes,
+    fks,
+    baselineFks,
+    checks,
+    baselineChecks,
+    triggers,
+    baselineTriggers,
   ]);
 
   async function onSave() {
@@ -473,11 +674,12 @@ export function TableDesigner({ tab }: Props) {
             }),
           );
         }
-        updateTab(tab.id, { table: name, dirty: false });
-        markDirty(tab.id, false);
+        const newId = promoteDesignerToAlter(tab.id, name);
+        markDirty(newId ?? tab.id, false);
         setDirty(false);
         setMessage(`已创建表 ${name}`);
         openTable(name);
+        window.dispatchEvent(new CustomEvent("mycat:object-list-refresh"));
         return;
       }
 
@@ -513,24 +715,38 @@ export function TableDesigner({ tab }: Props) {
             );
           }
         }
-        const have = new Set(
-          baseIx.map((i) => i.name).filter((n) => n.toUpperCase() !== "PRIMARY"),
+        const baseIxByName = new Map(
+          baseIx
+            .filter((i) => i.name.toUpperCase() !== "PRIMARY")
+            .map((i) => [i.name, i]),
         );
         for (const ix of want) {
-          if (!ix.originalName || !have.has(ix.name)) {
-            if (!identOk(ix.name)) continue;
-            const cols = ix.columns
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean)
-              .map((c) => quoteIdent("mysql", c))
-              .join(", ");
-            if (!cols) continue;
-            const uniq = ix.unique ? "UNIQUE " : "";
+          if (!identOk(ix.name)) continue;
+          const cols = ix.columns
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((c) => quoteIdent("mysql", c))
+            .join(", ");
+          if (!cols) continue;
+          const old = baseIxByName.get(ix.name);
+          const changed =
+            !old ||
+            old.columns.replace(/\s+/g, "") !==
+              ix.columns.replace(/\s+/g, "") ||
+            Boolean(old.unique) !== Boolean(ix.unique) ||
+            (old.indexType || "BTREE").toUpperCase() !==
+              (ix.indexType || "BTREE").toUpperCase();
+          if (!changed) continue;
+          if (old) {
             await runSql(
-              `CREATE ${uniq}INDEX ${quoteIdent("mysql", ix.name)} ON ${qt} (${cols})`,
+              `DROP INDEX ${quoteIdent("mysql", ix.name)} ON ${qt}`,
             );
           }
+          const uniq = ix.unique ? "UNIQUE " : "";
+          await runSql(
+            `CREATE ${uniq}INDEX ${quoteIdent("mysql", ix.name)} ON ${qt} (${cols})`,
+          );
         }
 
         // FK: drop removed / add new (simple)
@@ -548,9 +764,8 @@ export function TableDesigner({ tab }: Props) {
             );
           }
         }
-        const haveFk = new Set(baseFk.map((f) => f.name));
+        const baseFkByName = new Map(baseFk.map((f) => [f.name, f]));
         for (const fk of fks) {
-          if (fk.originalName && haveFk.has(fk.name)) continue;
           if (!identOk(fk.name) || !fk.refTable.trim()) continue;
           const cols = fk.columns
             .split(",")
@@ -565,6 +780,21 @@ export function TableDesigner({ tab }: Props) {
             .map((c) => quoteIdent("mysql", c))
             .join(", ");
           if (!cols || !refs) continue;
+          const old = baseFkByName.get(fk.name);
+          const norm = (s: string) => s.replace(/\s+/g, "");
+          const changed =
+            !old ||
+            norm(old.columns) !== norm(fk.columns) ||
+            old.refTable !== fk.refTable ||
+            norm(old.refColumns) !== norm(fk.refColumns) ||
+            (old.onDelete || "RESTRICT") !== (fk.onDelete || "RESTRICT") ||
+            (old.onUpdate || "RESTRICT") !== (fk.onUpdate || "RESTRICT");
+          if (!changed) continue;
+          if (old) {
+            await runSql(
+              `ALTER TABLE ${qt} DROP FOREIGN KEY ${quoteIdent("mysql", fk.name)}`,
+            );
+          }
           const refTable = quoteTable("mysql", db, fk.refTable);
           await runSql(
             `ALTER TABLE ${qt} ADD CONSTRAINT ${quoteIdent("mysql", fk.name)} FOREIGN KEY (${cols}) REFERENCES ${refTable} (${refs}) ON DELETE ${fk.onDelete} ON UPDATE ${fk.onUpdate}`,
@@ -940,9 +1170,8 @@ export function TableDesigner({ tab }: Props) {
                 {
                   key: "columns",
                   label: "字段",
-                  editor: "select",
+                  editor: "multi-check",
                   options: colNames,
-                  allowEmpty: true,
                 },
                 {
                   key: "indexType",
@@ -1007,9 +1236,8 @@ export function TableDesigner({ tab }: Props) {
                 {
                   key: "columns",
                   label: "字段",
-                  editor: "select",
+                  editor: "multi-check",
                   options: colNames,
-                  allowEmpty: true,
                 },
                 {
                   key: "refTable",
@@ -1021,9 +1249,8 @@ export function TableDesigner({ tab }: Props) {
                 {
                   key: "refColumns",
                   label: "引用字段",
-                  editor: "select",
+                  editor: "multi-check",
                   options: (row) => refColCache[row.refTable.trim()] ?? [],
-                  allowEmpty: true,
                 },
                 {
                   key: "onDelete",
@@ -1360,9 +1587,12 @@ export function TableDesigner({ tab }: Props) {
           )}
 
           {!loading && pane === "sql" && (
-            <div className="td-sql-pane">
-              <pre>{previewSql}</pre>
-            </div>
+            <DesignerSqlPreview
+              key={`${tab.id}-${tab.mode}`}
+              changesSql={changesSql}
+              ddlSql={ddlSql}
+              defaultMode={tab.mode === "create" ? "ddl" : "changes"}
+            />
           )}
         </div>
 

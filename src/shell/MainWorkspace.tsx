@@ -211,12 +211,13 @@ export function MainWorkspace() {
                   title="关闭"
                   aria-label={`关闭 ${label}`}
                   onPointerDown={(e) => {
-                    // Close immediately on pointerdown (works while a cell is focused).
-                    // Designer close discards unsaved edits — no native confirm.
+                    // Close on pointerdown so click isn't swallowed while a cell is focused.
+                    // Defer past this gesture — sync confirm during pointerdown auto-cancels.
                     e.preventDefault();
                     e.stopPropagation();
+                    const id = t.id;
                     (document.activeElement as HTMLElement | null)?.blur?.();
-                    closeDesignerTab(t.id, { force: true });
+                    window.setTimeout(() => closeDesignerTab(id), 0);
                   }}
                   onClick={(e) => {
                     e.preventDefault();

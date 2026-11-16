@@ -1,9 +1,14 @@
-import type { QueryTab, TableTab } from "../../stores/workspaceStore";
+import type {
+  DesignerTab,
+  QueryTab,
+  TableTab,
+} from "../../stores/workspaceStore";
 
 type Props = {
   title: string;
   dirtyTables: TableTab[];
   dirtyQueries: QueryTab[];
+  dirtyDesigners?: DesignerTab[];
   busy?: boolean;
   onSaveAndClose: () => void;
   onDiscardAndClose: () => void;
@@ -14,6 +19,7 @@ export function CloseWorkspaceDialog({
   title,
   dirtyTables,
   dirtyQueries,
+  dirtyDesigners = [],
   busy = false,
   onSaveAndClose,
   onDiscardAndClose,
@@ -30,7 +36,7 @@ export function CloseWorkspaceDialog({
       <div className="modal close-db-dialog" role="dialog" aria-modal="true">
         <h2>{title}</h2>
         <p className="save-query-hint">
-          以下内容尚未保存。查询可在此自动保存；表数据需在网格中保存，否则「保存并关闭」会先跳转到对应表。
+          以下内容尚未保存。查询可在此自动保存；表数据与表设计需在对应页签中保存，否则「保存并关闭」会先跳转到对应页。
         </p>
         <ul className="close-db-dirty-list">
           {dirtyQueries.map((q) => (
@@ -41,8 +47,14 @@ export function CloseWorkspaceDialog({
           ))}
           {dirtyTables.map((t) => (
             <li key={t.id}>
-              表 · {t.table}
+              表数据 · {t.table}
               {t.dirty ? "（未保存行编辑）" : ""}
+            </li>
+          ))}
+          {dirtyDesigners.map((t) => (
+            <li key={t.id}>
+              表设计 · {t.table}
+              {t.mode === "create" ? "（新建未保存）" : "（未保存结构）"}
             </li>
           ))}
         </ul>

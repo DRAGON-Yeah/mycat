@@ -1,10 +1,15 @@
-import type { QueryTab, TableTab } from "../../stores/workspaceStore";
+import type {
+  DesignerTab,
+  QueryTab,
+  TableTab,
+} from "../../stores/workspaceStore";
 import { CloseWorkspaceDialog } from "./CloseWorkspaceDialog";
 
 type Props = {
   database: string;
   dirtyTables: TableTab[];
   dirtyQueries: QueryTab[];
+  dirtyDesigners?: DesignerTab[];
   busy?: boolean;
   onSaveAndClose: () => void;
   onDiscardAndClose: () => void;
@@ -15,6 +20,7 @@ export function CloseDatabaseDialog({
   database,
   dirtyTables,
   dirtyQueries,
+  dirtyDesigners,
   busy,
   onSaveAndClose,
   onDiscardAndClose,
@@ -25,6 +31,7 @@ export function CloseDatabaseDialog({
       title={`关闭数据库「${database}」`}
       dirtyTables={dirtyTables}
       dirtyQueries={dirtyQueries}
+      dirtyDesigners={dirtyDesigners}
       busy={busy}
       onSaveAndClose={onSaveAndClose}
       onDiscardAndClose={onDiscardAndClose}

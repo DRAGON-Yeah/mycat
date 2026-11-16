@@ -103,7 +103,10 @@ export function buildCreateTableSql(args: {
         .join(", ");
       if (!cols) continue;
       const uniq = ix.unique ? "UNIQUE " : "";
-      defs.push(`${uniq}KEY ${quoteIdent("mysql", ix.name)} (${cols})`);
+      const using = (ix.indexType || "BTREE").toUpperCase();
+      defs.push(
+        `${uniq}INDEX ${quoteIdent("mysql", ix.name)}(${cols}) USING ${using}`,
+      );
     }
   }
 
@@ -141,14 +144,19 @@ export function buildCreateTableSql(args: {
 
   let sql = `CREATE TABLE ${qt} (\n  ${defs.join(",\n  ")}\n)`;
   if (e === "mysql" && options) {
+    // Navicat-style table options (spaced KEY = value).
     const parts: string[] = [];
-    if (options.engine) parts.push(`ENGINE=${options.engine}`);
-    if (options.autoIncrement) parts.push(`AUTO_INCREMENT=${options.autoIncrement}`);
-    if (options.charset) parts.push(`DEFAULT CHARSET=${options.charset}`);
-    if (options.collation) parts.push(`COLLATE=${options.collation}`);
-    if (options.rowFormat) parts.push(`ROW_FORMAT=${options.rowFormat}`);
-    if (options.comment) parts.push(`COMMENT=${sqlString(options.comment)}`);
-    if (parts.length) sql += ` ${parts.join(" ")}`;
+    if (options.engine) parts.push(`ENGINE = ${options.engine}`);
+    if (options.autoIncrement) {
+      parts.push(`AUTO_INCREMENT = ${options.autoIncrement}`);
+    }
+    if (options.charset) parts.push(`CHARACTER SET = ${options.charset}`);
+    if (options.collation) parts.push(`COLLATE = ${options.collation}`);
+    if (options.rowFormat) parts.push(`ROW_FORMAT = ${options.rowFormat}`);
+    if (options.comment) {
+      parts.push(`COMMENT = ${sqlString(options.comment)}`);
+    }
+    if (parts.length) sql += `\n${parts.join("\n")}`;
   }
   return sql;
 }

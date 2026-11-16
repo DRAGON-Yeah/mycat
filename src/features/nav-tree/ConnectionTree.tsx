@@ -165,6 +165,7 @@ export function ConnectionTree() {
     (s) => s.closeConnectionWorkspace,
   );
   const setActiveTab = useWorkspaceStore((s) => s.setActiveTab);
+  const setActiveDesigner = useWorkspaceStore((s) => s.setActiveDesigner);
   const updateQueryTab = useWorkspaceStore((s) => s.updateQueryTab);
   const activeSavedQueryId =
     queryTabs.find((t) => t.id === activeQueryId)?.savedQueryId ?? null;
@@ -407,7 +408,8 @@ export function ConnectionTree() {
     const related = listTabsForDatabase(connId, database);
     if (
       related.dirtyTables.length === 0 &&
-      related.dirtyQueries.length === 0
+      related.dirtyQueries.length === 0 &&
+      related.dirtyDesigners.length === 0
     ) {
       finalizeCloseDatabase(connId, database);
       if (after === "edit") {
@@ -450,7 +452,8 @@ export function ConnectionTree() {
     const related = listTabsForConnection(connId);
     if (
       related.dirtyTables.length === 0 &&
-      related.dirtyQueries.length === 0
+      related.dirtyQueries.length === 0 &&
+      related.dirtyDesigners.length === 0
     ) {
       void finalizeCloseConnection(connId).then(() => {
         if (after === "edit") {
@@ -469,6 +472,14 @@ export function ConnectionTree() {
       pendingClose.kind === "database"
         ? listTabsForDatabase(pendingClose.connId, pendingClose.database)
         : listTabsForConnection(pendingClose.connId);
+    if (related.dirtyDesigners.length > 0) {
+      const blocked = related.dirtyDesigners[0]!;
+      setPendingClose(null);
+      setActiveDesigner(blocked.id);
+      setToast(`请先保存表设计「${blocked.table}」`);
+      window.setTimeout(() => setToast(null), 2800);
+      return;
+    }
     if (related.dirtyTables.length > 0) {
       const blocked = related.dirtyTables[0]!;
       setPendingClose(null);
@@ -1129,6 +1140,7 @@ export function ConnectionTree() {
           }
           dirtyTables={pendingCloseRelated.dirtyTables}
           dirtyQueries={pendingCloseRelated.dirtyQueries}
+          dirtyDesigners={pendingCloseRelated.dirtyDesigners}
           busy={closeBusy}
           onCancel={() => setPendingClose(null)}
           onDiscardAndClose={handleDiscardAndClose}

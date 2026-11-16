@@ -25,8 +25,10 @@ export type TableTab = {
 export type DatabaseRelatedTabs = {
   tables: TableTab[];
   queries: QueryTab[];
+  designers: DesignerTab[];
   dirtyTables: TableTab[];
   dirtyQueries: QueryTab[];
+  dirtyDesigners: DesignerTab[];
 };
 
 export type CloseDatabaseWorkspaceResult = {
@@ -149,8 +151,10 @@ type WorkspaceState = {
   markDesignerDirty: (id: string, dirty: boolean) => void;
   updateDesignerTab: (
     id: string,
-    patch: Partial<Pick<DesignerTab, "table" | "dirty">>,
+    patch: Partial<Pick<DesignerTab, "table" | "dirty" | "mode">>,
   ) => void;
+  /** After CREATE TABLE succeeds: switch create tab → alter and retarget id. */
+  promoteDesignerToAlter: (id: string, tableName: string) => string | null;
   openQuery: (opts?: {
     connection?: ConnectionDto;
     database?: string;
@@ -424,12 +428,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   openTable: (table, openOptions = null) => {
     const { activeConnectionId, activeConnection, tabs, selectedDatabase } =
       get();
-    if (!activeConnectionId || !activeConnection) return;
+    if (!activeConnectionId || !activeConnection) {
+      window.alert("请先打开一个连接。");
+      return;
+    }
     const database =
       selectedDatabase?.trim() ||
       activeConnection.database?.trim() ||
       "";
-    if (!database) return;
+    if (!database) {
+      window.alert("请先选择数据库，再打开表。");
+      return;
+    }
     const id = `${activeConnectionId}:${database}:${table}`;
     const exists = tabs.find((t) => t.id === id);
     if (exists) {
@@ -476,13 +486,19 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
   openTableDesigner: (opts) => {
     const conn = opts.connection ?? get().activeConnection;
-    if (!conn) return null;
+    if (!conn) {
+      window.alert("请先打开一个连接。");
+      return null;
+    }
     const database =
       opts.database?.trim() ||
       get().selectedDatabase ||
       conn.database?.trim() ||
       "";
-    if (!database) return null;
+    if (!database) {
+      window.alert("请先选择数据库，再设计表。");
+      return null;
+    }
     const table = opts.table.trim() || "new_table";
     const id =
       opts.mode === "create"
@@ -550,11 +566,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       selectionKind: "table",
     });
   },
-  closeDesignerTab: (id, _opts) => {
+  closeDesignerTab: (id, opts) => {
     const tab = get().designerTabs.find((t) => t.id === id);
     if (!tab) return false;
-    // Always allow exit without saving — unsaved designer edits are discarded.
-    // Native confirm during cell editing is unreliable in the webview.
+    if (!opts?.force && tab.dirty) {
+      const ok = window.confirm(
+        tab.mode === "create"
+          ? `新建表「${tab.table}」尚未保存，确定关闭并丢弃？`
+          : `设计器「${tab.table}」有未保存更改，确定关闭？`,
+      );
+      if (!ok) return false;
+    }
     const designerTabs = get().designerTabs.filter((t) => t.id !== id);
     const closingActive = get().activeDesignerId === id;
     const activeDesignerId = closingActive
@@ -587,6 +609,30 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         t.id === id ? { ...t, ...patch } : t,
       ),
     }),
+  promoteDesignerToAlter: (id, tableName) => {
+    const tab = get().designerTabs.find((t) => t.id === id);
+    if (!tab) return null;
+    const name = tableName.trim() || tab.table;
+    const newId = `designer:${tab.connectionId}:${tab.database}:${name}`;
+    const others = get().designerTabs.filter(
+      (t) => t.id !== id && t.id !== newId,
+    );
+    const next: DesignerTab = {
+      ...tab,
+      id: newId,
+      table: name,
+      mode: "alter",
+      dirty: false,
+      seedColumns: undefined,
+    };
+    set({
+      designerTabs: [...others, next],
+      activeDesignerId: newId,
+      selectedTable: name,
+      centerMode: "table-designer",
+    });
+    return newId;
+  },
   openQuery: (opts) => {
     const conn = opts?.connection ?? get().activeConnection;
     if (!conn) return null;
@@ -785,11 +831,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const queries = get().queryTabs.filter(
       (t) => t.connectionId === connectionId && t.database === database,
     );
+    const designers = get().designerTabs.filter(
+      (t) => t.connectionId === connectionId && t.database === database,
+    );
     return {
       tables,
       queries,
+      designers,
       dirtyTables: tables.filter((t) => t.dirty),
       dirtyQueries: queries.filter((t) => t.dirty && t.sql.trim().length > 0),
+      dirtyDesigners: designers.filter((t) => t.dirty),
     };
   },
   listTabsForConnection: (connectionId) => {
@@ -797,19 +848,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const queries = get().queryTabs.filter(
       (t) => t.connectionId === connectionId,
     );
+    const designers = get().designerTabs.filter(
+      (t) => t.connectionId === connectionId,
+    );
     return {
       tables,
       queries,
+      designers,
       dirtyTables: tables.filter((t) => t.dirty),
       dirtyQueries: queries.filter((t) => t.dirty && t.sql.trim().length > 0),
+      dirtyDesigners: designers.filter((t) => t.dirty),
     };
   },
   closeDatabaseWorkspace: (connectionId, database, mode = "force") => {
     const related = get().listTabsForDatabase(connectionId, database);
-    if (mode === "save-queries" && related.dirtyTables.length > 0) {
+    if (
+      mode === "save-queries" &&
+      (related.dirtyTables.length > 0 || related.dirtyDesigners.length > 0)
+    ) {
       return {
         ok: false,
-        blockedByTableId: related.dirtyTables[0]!.id,
+        blockedByTableId:
+          related.dirtyTables[0]?.id ?? related.dirtyDesigners[0]?.id,
       };
     }
 
@@ -877,10 +937,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
   closeConnectionWorkspace: (connectionId, mode = "force") => {
     const related = get().listTabsForConnection(connectionId);
-    if (mode === "save-queries" && related.dirtyTables.length > 0) {
+    if (
+      mode === "save-queries" &&
+      (related.dirtyTables.length > 0 || related.dirtyDesigners.length > 0)
+    ) {
       return {
         ok: false,
-        blockedByTableId: related.dirtyTables[0]!.id,
+        blockedByTableId:
+          related.dirtyTables[0]?.id ?? related.dirtyDesigners[0]?.id,
       };
     }
 

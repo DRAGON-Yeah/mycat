@@ -1,14 +1,27 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   listTables,
   type DbObject,
 } from "../connections/sessionApi";
+import { useColumnResize } from "../data-grid/useColumnResize";
 import {
   TableContextMenu,
   type TableMenuTarget,
 } from "../nav-tree/TableContextMenu";
 import { loadTableGroups } from "../nav-tree/tableGroups";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+
+const OBJ_COLS = [
+  { key: "name", label: "名称", defaultWidth: 180 },
+  { key: "group", label: "组", defaultWidth: 80 },
+  { key: "rows", label: "行", defaultWidth: 72 },
+  { key: "dataLength", label: "数据长度", defaultWidth: 96 },
+  { key: "engine", label: "引擎", defaultWidth: 88 },
+  { key: "createTime", label: "创建日期", defaultWidth: 150 },
+  { key: "updateTime", label: "修改日期", defaultWidth: 150 },
+  { key: "collation", label: "排序规则", defaultWidth: 160 },
+  { key: "comment", label: "注释", defaultWidth: 180 },
+] as const;
 
 function formatBytes(n?: number | null) {
   if (n == null || Number.isNaN(n)) return "—";
@@ -47,6 +60,18 @@ export function ObjectListGrid() {
   const [menu, setMenu] = useState<TableMenuTarget | null>(null);
   const [groupMap, setGroupMap] = useState<Record<string, string>>({});
   const filterRef = useRef<HTMLInputElement>(null);
+  const listResetKey = useMemo(
+    () => `${connection?.id ?? ""}:${database ?? ""}:${folder ?? ""}`,
+    [connection?.id, database, folder],
+  );
+  const { widths: colWidths, startResize } = useColumnResize({
+    defaultWidth: 120,
+    minWidth: 48,
+    resetKey: listResetKey,
+  });
+  function colW(key: string, fallback: number) {
+    return colWidths[key] ?? fallback;
+  }
 
   useEffect(() => {
     setFilter(objectListFilter);
@@ -60,11 +85,22 @@ export function ObjectListGrid() {
   }, [focusObjectListFilter, consumeObjectListFilterFocus]);
 
   useEffect(() => {
-    function onDoc() {
+    function onDoc(e: MouseEvent) {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.(".dg-context-menu, .modal, .modal-backdrop")) return;
       setMenu(null);
     }
     document.addEventListener("click", onDoc);
     return () => document.removeEventListener("click", onDoc);
+  }, []);
+
+  useEffect(() => {
+    function onRefresh() {
+      setTick((x) => x + 1);
+    }
+    window.addEventListener("mycat:object-list-refresh", onRefresh);
+    return () =>
+      window.removeEventListener("mycat:object-list-refresh", onRefresh);
   }, []);
 
   useEffect(() => {
@@ -265,23 +301,32 @@ export function ObjectListGrid() {
           placeholder="搜索 / 在数据库中查找"
         />
       </div>
-      {toast && <p className="pane-placeholder">{toast}</p>}
-      {loading && <p className="pane-placeholder">加载中…</p>}
+      {toast && <p className="obj-toast">{toast}</p>}
       {error && <p className="pane-error">{error}</p>}
-      {!loading && !error && (
-        <div className="object-list-table-wrap">
+      {loading && tables.length === 0 && (
+        <p className="pane-placeholder">加载中…</p>
+      )}
+      {(tables.length > 0 || (!loading && !error)) && (
+        <div className={`object-list-table-wrap ${loading ? "is-loading" : ""}`}>
           <table className="object-list-table">
             <thead>
               <tr>
-                <th>名称</th>
-                <th>组</th>
-                <th>行</th>
-                <th>数据长度</th>
-                <th>引擎</th>
-                <th>创建日期</th>
-                <th>修改日期</th>
-                <th>排序规则</th>
-                <th>注释</th>
+                {OBJ_COLS.map((c) => {
+                  const w = colW(c.key, c.defaultWidth);
+                  return (
+                    <th
+                      key={c.key}
+                      style={{ width: w, minWidth: w, maxWidth: w }}
+                    >
+                      {c.label}
+                      <span
+                        className="col-resize-handle"
+                        onMouseDown={(e) => startResize(c.key, e)}
+                        title="拖拽调整列宽"
+                      />
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
@@ -307,7 +352,12 @@ export function ObjectListGrid() {
                     });
                   }}
                 >
-                  <td>
+                  <td
+                    style={{
+                      width: colW("name", 180),
+                      maxWidth: colW("name", 180),
+                    }}
+                  >
                     <span className="object-kind">
                       {t.kind === "view" ? "V" : "T"}
                     </span>
@@ -326,7 +376,7 @@ export function ObjectListGrid() {
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={9} className="pane-placeholder">
-                    无匹配{title}
+                    {loading ? "加载中…" : `无匹配${title}`}
                   </td>
                 </tr>
               )}

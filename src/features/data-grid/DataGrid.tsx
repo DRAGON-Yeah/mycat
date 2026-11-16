@@ -14,6 +14,11 @@ import { ImportCsvButton } from "../import-export/ImportCsvButton";
 import { downloadTextFile } from "../import-export/csv";
 import type { TableTab } from "../../stores/workspaceStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import {
+  TABLE_DATA_CHANGED,
+  type TableDataChangedDetail,
+} from "../../lib/tableEvents";
+import { quoteIdent, quoteTable } from "../nav-tree/sqlIdent";
 import { CellEditorHost, needsChooser } from "./CellEditorHost";
 import {
   classifyEditor,
@@ -76,19 +81,73 @@ function parseCellInput(raw: string, nullable: boolean): unknown {
   if (raw === "") return nullable ? null : "";
   if (raw === "true") return true;
   if (raw === "false") return false;
-  if (
-    raw.trim() !== "" &&
-    !Number.isNaN(Number(raw)) &&
-    /^-?\d+(\.\d+)?$/.test(raw.trim())
-  ) {
-    return Number(raw);
+  const t = raw.trim();
+  if (t !== "" && /^-?\d+(\.\d+)?$/.test(t)) {
+    // Keep bigint / oversized integers as strings to avoid precision loss.
+    if (!t.includes(".") && (t.length > 15 || !Number.isSafeInteger(Number(t)))) {
+      return t;
+    }
+    const n = Number(t);
+    if (!Number.isNaN(n)) return n;
   }
   return raw;
 }
 
-function pickPkColumn(columns: { name: string }[]): string {
-  const id = columns.find((c) => c.name.toLowerCase() === "id");
-  return id?.name ?? columns[0]?.name ?? "id";
+async function loadPrimaryKeyColumns(args: {
+  connectionId: string;
+  engine: string;
+  database: string;
+  table: string;
+}): Promise<string[]> {
+  const { connectionId, engine, database, table } = args;
+  await openConnection(connectionId);
+  const e = String(engine || "mysql").toLowerCase();
+  if (e === "sqlite") {
+    const out = await executeSql(
+      connectionId,
+      `PRAGMA table_info(${quoteIdent("sqlite", table)})`,
+      database,
+    );
+    return out.rows
+      .filter((row) => Number(row[5] ?? 0) > 0)
+      .sort((a, b) => Number(a[5] ?? 0) - Number(b[5] ?? 0))
+      .map((row) => String(row[1] ?? ""))
+      .filter(Boolean);
+  }
+  if (e === "postgres" || e === "postgresql") {
+    const sql = `SELECT a.attname
+FROM pg_index i
+JOIN pg_class c ON c.oid = i.indrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+WHERE c.relname = '${table.replace(/'/g, "''")}'
+  AND n.nspname = current_schema()
+  AND i.indisprimary
+ORDER BY a.attnum`;
+    try {
+      const out = await executeSql(connectionId, sql, database);
+      return out.rows.map((r) => String(r[0] ?? "")).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+  const qt = quoteTable("mysql", database, table);
+  const out = await executeSql(
+    connectionId,
+    `SHOW KEYS FROM ${qt} WHERE Key_name = 'PRIMARY'`,
+    database,
+  );
+  const cols = out.columns.map((c) => c.toLowerCase());
+  const nameIdx = cols.indexOf("column_name");
+  const seqIdx = cols.indexOf("seq_in_index");
+  return out.rows
+    .map((row, i) => ({
+      name: String(row[nameIdx >= 0 ? nameIdx : 4] ?? ""),
+      seq: Number(row[seqIdx >= 0 ? seqIdx : 3] ?? i + 1),
+    }))
+    .filter((r) => r.name)
+    .sort((a, b) => a.seq - b.seq)
+    .map((r) => r.name);
 }
 
 function typeHint(dataType: string): string {
@@ -149,6 +208,7 @@ export function DataGrid({ tab }: Props) {
   const [columnExtras, setColumnExtras] = useState<
     Record<string, ColumnExtra>
   >({});
+  const [pkColumns, setPkColumns] = useState<string[]>([]);
   const { widthOf, startResize } = useColumnResize({
     defaultWidth: 140,
     minWidth: 48,
@@ -248,10 +308,19 @@ ORDER BY ordinal_position`;
       setBaseline(mapped.map((r) => ({ ...r, values: [...r.values] })));
       setSelectedRow(0);
       void loadColumnExtras();
+      void loadPrimaryKeyColumns({
+        connectionId: tab.connectionId,
+        engine: String(tab.connectionEngine || "mysql"),
+        database: database || "",
+        table: tab.table,
+      })
+        .then(setPkColumns)
+        .catch(() => setPkColumns([]));
     } catch (err) {
       setData(null);
       setRows([]);
       setBaseline([]);
+      setPkColumns([]);
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
       void writeLog("ERROR", `fetch_table_page ${tab.table}: ${msg}`);
@@ -260,6 +329,7 @@ ORDER BY ordinal_position`;
     }
   }, [
     tab.connectionId,
+    tab.connectionEngine,
     tab.table,
     database,
     page,
@@ -270,6 +340,22 @@ ORDER BY ordinal_position`;
     appliedFilter.value,
     loadColumnExtras,
   ]);
+
+  useEffect(() => {
+    function onChanged(ev: Event) {
+      const detail = (ev as CustomEvent<TableDataChangedDetail>).detail;
+      if (!detail) return;
+      if (
+        detail.connectionId === tab.connectionId &&
+        detail.database === (database || "") &&
+        detail.table === tab.table
+      ) {
+        void load();
+      }
+    }
+    window.addEventListener(TABLE_DATA_CHANGED, onChanged);
+    return () => window.removeEventListener(TABLE_DATA_CHANGED, onChanged);
+  }, [tab.connectionId, tab.table, database, load]);
 
   useEffect(() => {
     const opt = tab.openOptions;
@@ -322,15 +408,31 @@ ORDER BY ordinal_position`;
     : 1;
 
   const sqlPreview = useMemo(() => {
-    const db = database ? `\`${database}\`.` : "";
+    const eng = String(tab.connectionEngine || "mysql");
+    const qt = quoteTable(eng, database, tab.table);
+    const qi = (name: string) => quoteIdent(eng, name);
     const where =
       appliedFilter.col && appliedFilter.value
-        ? ` WHERE \`${appliedFilter.col}\` LIKE '%${appliedFilter.value.replace(/'/g, "''")}%'`
+        ? ` WHERE ${qi(appliedFilter.col)} LIKE '%${appliedFilter.value.replace(/'/g, "''")}%'`
         : "";
-    const order = sortCol ? ` ORDER BY \`${sortCol}\` ${sortDir}` : "";
+    const order = sortCol ? ` ORDER BY ${qi(sortCol)} ${sortDir}` : "";
     const offset = (page - 1) * pageSize;
-    return `SELECT * FROM ${db}\`${tab.table}\`${where}${order} LIMIT ${offset},${pageSize}`;
-  }, [database, tab.table, appliedFilter, sortCol, sortDir, page, pageSize]);
+    const e = eng.toLowerCase();
+    const limit =
+      e === "postgres" || e === "postgresql" || e === "sqlite"
+        ? ` LIMIT ${pageSize} OFFSET ${offset}`
+        : ` LIMIT ${offset},${pageSize}`;
+    return `SELECT * FROM ${qt}${where}${order}${limit}`;
+  }, [
+    database,
+    tab.table,
+    tab.connectionEngine,
+    appliedFilter,
+    sortCol,
+    sortDir,
+    page,
+    pageSize,
+  ]);
 
   function toggleSort(col: string) {
     if (sortCol === col) {
@@ -423,10 +525,22 @@ ORDER BY ordinal_position`;
 
   async function commit() {
     if (!data || !dirty) return;
-    const pk = pickPkColumn(data.columns);
-    const pkIdx = data.columns.findIndex((c) => c.name === pk);
-    if (pkIdx < 0) {
-      setError("无法确定主键列（需要 id 或首列）");
+    const pkNames =
+      pkColumns.length > 0
+        ? pkColumns
+        : [];
+    const pkIdxs = pkNames
+      .map((name) => data.columns.findIndex((c) => c.name === name))
+      .filter((i) => i >= 0);
+    const needsPk = rows.some(
+      (r) =>
+        (r.deleted && !r.inserted) ||
+        (!r.inserted &&
+          !r.deleted &&
+          baseline.some((b) => b.key === r.key)),
+    );
+    if (needsPk && (pkNames.length === 0 || pkIdxs.length !== pkNames.length)) {
+      setError("该表没有主键，无法安全更新/删除行。请先在设计器中设置主键。");
       return;
     }
 
@@ -448,8 +562,8 @@ ORDER BY ordinal_position`;
       if (row.deleted && base && !base.inserted) {
         changes.push({
           op: "delete",
-          pkColumns: [pk],
-          pkValues: [base.values[pkIdx]],
+          pkColumns: pkNames,
+          pkValues: pkIdxs.map((i) => base.values[i]),
           columns: [],
           values: [],
         });
@@ -467,8 +581,8 @@ ORDER BY ordinal_position`;
       if (changedCols.length > 0) {
         changes.push({
           op: "update",
-          pkColumns: [pk],
-          pkValues: [base.values[pkIdx]],
+          pkColumns: pkNames,
+          pkValues: pkIdxs.map((i) => base.values[i]),
           columns: changedCols,
           values: changedVals,
         });
@@ -535,7 +649,7 @@ ORDER BY ordinal_position`;
     if (kind === "insert") {
       text = buildInsertSql(tab.table, cols, values);
     } else if (kind === "update") {
-      const pk = pickPkColumn(data.columns);
+      const pk = pkColumns[0] ?? cols[0] ?? "id";
       const pkIdx = cols.indexOf(pk);
       text = buildUpdateSql(tab.table, cols, values, pk, values[pkIdx]);
     } else if (kind === "tsv-data") text = buildTsvData(values);
