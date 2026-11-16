@@ -4061,196 +4061,322 @@ tr.is-inserted {
   color: #1565c0;
 }
 
-/* —— Function Wizard —— */
+/* —— Function Wizard (Navicat-like) —— */
 .fn-wizard {
-  width: min(520px, 92vw);
-  min-height: 320px;
+  width: min(480px, 92vw);
+  background: var(--bg, #fff);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border, #ddd);
+}
+
+.fn-wizard-header {
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--border, #e5e5e5);
+}
+
+.fn-wizard-header h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text, #222);
 }
 
 .fn-wizard-hint {
-  margin: 0 0 16px;
-  color: #2f80ed;
-  font-size: 14px;
+  margin: 0;
+  color: #3b82f6;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
-.fn-wizard-step {
-  min-height: 160px;
+.fn-wizard-body {
+  padding: 18px 22px 8px;
+  min-height: 168px;
 }
 
-.fn-wizard-row {
+.fn-wizard-step-type {
   display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 360px;
+}
+
+.fn-wz-field {
+  display: grid;
+  grid-template-columns: 76px 1fr;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
+  column-gap: 10px;
   font-size: 13px;
 }
 
-.fn-wizard-row > span:first-child {
-  min-width: 72px;
+.fn-wz-field > label,
+.fn-wz-field > .fn-wz-label {
   text-align: right;
-  color: var(--text-muted, #555);
+  color: var(--text, #333);
+  white-space: nowrap;
 }
 
-.fn-wizard-row input,
-.fn-wizard-row select {
-  flex: 1;
-  height: 30px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+.fn-wz-field > input,
+.fn-wz-field > select {
+  height: 28px;
+  border: 1px solid #c9c9c9;
+  border-radius: 5px;
   padding: 0 8px;
+  font-size: 13px;
+  background: #fff;
+  width: 100%;
+  box-sizing: border-box;
 }
 
-.fn-wizard-radios {
+.fn-wz-field > input:focus,
+.fn-wz-field > select:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.fn-wz-type-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding-left: 82px;
-  font-size: 13px;
+  /* Align radios under the input column */
+  margin-left: 86px;
 }
 
-.fn-wizard-radios label {
-  display: flex;
+.fn-wz-radio {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-}
-
-.fn-wizard-params-block {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-}
-
-.fn-wizard-side-label {
-  min-width: 72px;
-  text-align: right;
   font-size: 13px;
-  padding-top: 8px;
-  color: var(--text-muted, #555);
-}
-
-.fn-wizard-params {
-  flex: 1;
-}
-
-.fn-wizard-params table {
-  width: 100%;
-  border-collapse: collapse;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 12px;
-}
-
-.fn-wizard-params th,
-.fn-wizard-params td {
-  border: 1px solid var(--border);
-  padding: 2px 4px;
-}
-
-.fn-wizard-params tr.is-selected {
-  background: #e3f2fd;
-}
-
-.fn-wizard-params input,
-.fn-wizard-params select {
-  width: 100%;
-  border: none;
-  background: transparent;
-  height: 26px;
-  font-size: 12px;
-}
-
-.fn-wizard-param-tools {
-  display: flex;
-  gap: 4px;
-  margin-top: 6px;
-}
-
-.fn-wizard-param-tools button {
-  width: 28px;
-  height: 24px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: #f5f5f5;
   cursor: pointer;
+  width: fit-content;
+  margin: 0;
+  line-height: 1.2;
 }
 
-.fn-wizard-return {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 16px;
-  font-size: 13px;
+.fn-wz-radio input {
+  margin: 0;
+  width: 15px;
+  height: 15px;
+  accent-color: #3b82f6;
+  flex-shrink: 0;
 }
 
-.fn-wizard-return select {
-  height: 30px;
-  min-width: 120px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+.fn-wz-radio span {
+  line-height: 1.2;
 }
 
-.fn-wizard-len {
-  width: 64px;
-  height: 28px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0 6px;
-}
-
-.fn-wizard-options {
-  padding-left: 24px;
+.fn-wizard-step-params {
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
 
-.fn-wizard-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
+.fn-wz-field-top {
+  align-items: flex-start;
 }
 
-.fn-wizard-actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 20px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+.fn-wz-field-top > .fn-wz-label {
+  padding-top: 6px;
 }
 
-.fn-wizard-actions-right {
-  display: flex;
-  gap: 8px;
+.fn-wz-params-panel {
+  min-width: 0;
 }
 
-.fn-wizard-actions button {
-  height: 30px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: #f7f7f7;
+.fn-wz-params-table-wrap {
+  border: 1px solid #c9c9c9;
+  border-radius: 5px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.fn-wz-params-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.fn-wz-params-table-wrap th {
+  background: #f3f3f3;
+  font-weight: 500;
+  text-align: left;
+  padding: 5px 6px;
+  border-bottom: 1px solid #ddd;
+  color: #444;
+}
+
+.fn-wz-params-table-wrap td {
+  padding: 0;
+  border-bottom: 1px solid #eee;
+}
+
+.fn-wz-params-table-wrap tr.is-selected td {
+  background: #e8f1ff;
+}
+
+.fn-wz-params-table-wrap input,
+.fn-wz-params-table-wrap select {
+  width: 100%;
+  border: none;
+  background: transparent;
+  height: 28px;
+  padding: 0 6px;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.fn-wz-params-table-wrap input:focus,
+.fn-wz-params-table-wrap select:focus {
+  outline: none;
+  background: #fff;
+}
+
+.fn-wz-empty {
+  padding: 16px !important;
+  text-align: center;
+  color: #999;
+  font-size: 12px;
+}
+
+.fn-wz-param-tools {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.fn-wz-param-tools button {
+  width: 26px;
+  height: 22px;
+  border: 1px solid #c9c9c9;
+  border-radius: 4px;
+  background: #f6f6f6;
   cursor: pointer;
   font-size: 13px;
+  line-height: 1;
+  color: #333;
 }
 
-.fn-wizard-actions button:disabled {
-  opacity: 0.45;
+.fn-wz-param-tools button:disabled {
+  opacity: 0.4;
   cursor: default;
 }
 
-.fn-wizard-actions button.is-primary {
-  background: #2f80ed;
-  border-color: #2f80ed;
+.fn-wz-return-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fn-wz-return-controls select {
+  height: 28px;
+  min-width: 110px;
+  border: 1px solid #c9c9c9;
+  border-radius: 5px;
+  padding: 0 6px;
+  font-size: 13px;
+  background: #fff;
+}
+
+.fn-wz-len {
+  width: 56px;
+  height: 28px;
+  border: 1px solid #c9c9c9;
+  border-radius: 5px;
+  padding: 0 6px;
+  font-size: 13px;
+}
+
+.fn-wz-paren {
+  color: #666;
+}
+
+.fn-wizard-step-options {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 360px;
+  padding-top: 4px;
+}
+
+.fn-wz-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  margin-left: 86px;
+  cursor: pointer;
+  width: fit-content;
+}
+
+.fn-wz-check input {
+  margin: 0;
+  width: 15px;
+  height: 15px;
+  accent-color: #3b82f6;
+}
+
+.fn-wizard-step-options .fn-wz-field > select {
+  max-width: 200px;
+}
+
+.fn-wizard-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--border, #e5e5e5);
+  background: #fafafa;
+}
+
+.fn-wizard-footer-left,
+.fn-wizard-footer-right {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.fn-wizard-footer button {
+  height: 28px;
+  min-width: 64px;
+  padding: 0 12px;
+  border: 1px solid #c9c9c9;
+  border-radius: 5px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  color: #222;
+}
+
+.fn-wizard-footer button:hover:not(:disabled) {
+  background: #f3f3f3;
+}
+
+.fn-wizard-footer button:disabled {
+  color: #bbb;
+  background: #f7f7f7;
+  cursor: default;
+}
+
+.fn-wizard-footer button.is-primary:not(:disabled) {
+  background: #3b82f6;
+  border-color: #3b82f6;
   color: #fff;
 }
 
-.fn-wizard-actions button.is-primary:disabled {
-  background: #90caf9;
-  border-color: #90caf9;
-  color: #fff;
-  opacity: 1;
+.fn-wizard-footer button.is-primary:not(:disabled):hover {
+  background: #2563eb;
+}
+
+.fn-wizard-footer button.is-primary:disabled {
+  background: #fff;
+  border-color: #c9c9c9;
+  color: #bbb;
 }
 
 /* —— Function Designer (Navicat-like) —— */
