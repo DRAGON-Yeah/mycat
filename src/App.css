@@ -2246,6 +2246,14 @@ tr.is-inserted {
   padding-left: 12px;
 }
 
+.tree-query-list {
+  padding-left: 18px;
+}
+
+.tree-query-list .tree-row {
+  padding-left: 0;
+}
+
 .tree-row {
   display: flex;
   align-items: center;
@@ -2282,7 +2290,8 @@ tr.is-inserted {
 }
 
 .tree-query-empty {
-  margin: 2px 8px 6px 28px !important;
+  margin: 2px 4px 6px 16px !important;
+  padding-left: 14px !important;
   font-size: 11px !important;
 }
 

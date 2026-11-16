@@ -583,16 +583,17 @@ export function ConnectionTree() {
                                     </button>
                                   </div>
                                   {folder.id === "queries" && queriesOpen && (
-                                    <ul className="tree-children">
+                                    <ul className="tree-children tree-query-list">
                                       {saved.map((q) => (
                                         <li key={q.id}>
                                           <div
-                                            className={`tree-row tree-folder ${
+                                            className={`tree-row ${
                                               activeSavedQueryId === q.id
                                                 ? "is-active"
                                                 : ""
                                             }`}
                                           >
+                                            <span className="tree-twist-spacer" />
                                             <button
                                               type="button"
                                               className="tree-label"
