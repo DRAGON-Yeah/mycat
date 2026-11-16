@@ -129,6 +129,8 @@ type RenameSavedQueryState = {
 type ConnNode = {
   conn: ConnectionDto;
   expanded: boolean;
+  /** session opened (connected) — drives the highlighted icon */
+  connected: boolean;
   loading: boolean;
   error: string | null;
   databases: string[];
@@ -316,6 +318,7 @@ export function ConnectionTree() {
             : {
                 conn,
                 expanded: false,
+                connected: false,
                 loading: false,
                 error: null,
                 databases: [],
@@ -373,7 +376,14 @@ export function ConnectionTree() {
       setNodes((prev) =>
         prev.map((n) =>
           n.conn.id === id
-            ? { ...n, loading: false, databases, error: null, expanded: true }
+            ? {
+                ...n,
+                loading: false,
+                databases,
+                error: null,
+                expanded: true,
+                connected: true,
+              }
             : n,
         ),
       );
@@ -406,7 +416,14 @@ export function ConnectionTree() {
     setNodes((prev) =>
       prev.map((n) =>
         n.conn.id === connId
-          ? { ...n, databases, expanded: true, error: null, loading: false }
+          ? {
+              ...n,
+              databases,
+              expanded: true,
+              connected: true,
+              error: null,
+              loading: false,
+            }
           : n,
       ),
     );
@@ -492,6 +509,7 @@ export function ConnectionTree() {
           ? {
               ...n,
               expanded: false,
+              connected: false,
               openDbs: {},
               openQueryFolders: {},
             }
@@ -718,6 +736,7 @@ export function ConnectionTree() {
               ? {
                   ...n,
                   expanded: true,
+                  connected: true,
                   databases,
                   openDbs: { ...n.openDbs, [db]: true },
                   error: null,
@@ -867,7 +886,7 @@ export function ConnectionTree() {
                 className="tree-label"
                 onClick={() => void toggleConnection(n.conn.id)}
               >
-                <IconEngine engine={n.conn.engine} active={n.expanded} />
+                <IconEngine engine={n.conn.engine} active={n.connected} />
                 <span className="tree-text">
                   {n.conn.starred ? "★ " : ""}
                   {n.conn.name}
@@ -927,7 +946,7 @@ export function ConnectionTree() {
                             className="tree-label"
                             onClick={() => void onSelectDatabase(n, db)}
                           >
-                            <IconDatabase />
+                            <IconDatabase active={dbOpen} />
                             <span className="tree-text">{db}</span>
                           </button>
                         </div>
@@ -1371,6 +1390,7 @@ export function ConnectionTree() {
                     ? {
                         ...n,
                         expanded: false,
+                        connected: false,
                         databases: [],
                         openDbs: {},
                         openQueryFolders: {},

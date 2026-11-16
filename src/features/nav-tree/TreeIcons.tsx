@@ -16,9 +16,13 @@ export {
   IconEngineSqlite,
 } from "./EngineIcons";
 
-export function IconDatabase() {
+export function IconDatabase({ active = false }: { active?: boolean }) {
   return (
-    <svg className="tree-svg" viewBox="0 0 16 16" aria-hidden>
+    <svg
+      className={`tree-svg ${active ? "is-on" : "is-off"}`}
+      viewBox="0 0 16 16"
+      aria-hidden
+    >
       <ellipse cx="8" cy="4" rx="5.5" ry="2.2" fill="#66BB6A" />
       <path d="M2.5 4v8c0 1.2 2.5 2.2 5.5 2.2s5.5-1 5.5-2.2V4" fill="#43A047" />
       <ellipse cx="8" cy="4" rx="5.5" ry="2.2" fill="#81C784" />

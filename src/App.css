@@ -3591,6 +3591,12 @@ tr.is-inserted {
   display: block;
 }
 
+/* Closed database: muted gray; opened: full color */
+.tree-svg.is-off {
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+
 .tree-engine-badge {
   width: 18px;
   height: 18px;
@@ -3607,6 +3613,21 @@ tr.is-inserted {
 .tree-engine-badge.is-active {
   background: #c8e6c9;
   outline: 1px solid #66bb6a;
+}
+
+/* Disconnected connection: muted gray; connected: full color badge */
+.connection-tree .tree-engine-badge:not(.is-active) {
+  background: transparent;
+}
+
+.connection-tree .tree-engine-badge:not(.is-active) .tree-engine-mark {
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+
+[data-theme="dark"] .tree-engine-badge.is-active {
+  background: #1f3d2b;
+  outline-color: #3f9d5c;
 }
 
 .tree-engine-badge.is-large {
