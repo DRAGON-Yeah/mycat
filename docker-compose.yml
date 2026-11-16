@@ -1,0 +1,31 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: my-navicat-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: demo
+      MYSQL_USER: navicat
+      MYSQL_PASSWORD: navicat
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  postgres:
+    image: postgres:16
+    container_name: my-navicat-postgres
+    environment:
+      POSTGRES_DB: demo
+      POSTGRES_USER: navicat
+      POSTGRES_PASSWORD: navicat
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U navicat -d demo"]
+      interval: 5s
+      timeout: 5s
+      retries: 20

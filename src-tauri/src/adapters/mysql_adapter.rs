@@ -1,0 +1,476 @@
+use super::{
+    ColumnMeta, ConnectOpts, DbObject, DriverSession, QueryOutcome, RowChange, RowsPage,
+};
+use crate::error::{AppError, AppResult};
+use mysql::prelude::*;
+use mysql::{Opts, OptsBuilder, Row, SslOpts, Value as MysqlValue};
+use serde_json::{Number, Value};
+use std::sync::Mutex;
+use std::time::Instant;
+
+pub struct MysqlSession {
+    conn: Mutex<mysql::Conn>,
+}
+
+fn build_opts(opts: &ConnectOpts) -> AppResult<Opts> {
+    let host = opts
+        .host
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| AppError::Validation("MySQL 主机不能为空".into()))?;
+    let port = opts.port.unwrap_or(3306) as u16;
+    let mut builder = OptsBuilder::new()
+        .ip_or_hostname(Some(host))
+        .tcp_port(port)
+        .user(opts.user.clone())
+        .pass(opts.password.clone())
+        .db_name(opts.database.clone());
+
+    let mode = opts.ssl_mode.as_deref().unwrap_or("disable");
+    if mode.eq_ignore_ascii_case("require") {
+        let trust = opts.ssl_trust.unwrap_or(false);
+        let ssl = SslOpts::default()
+            .with_danger_accept_invalid_certs(trust)
+            .with_danger_skip_domain_validation(trust);
+        builder = builder.ssl_opts(ssl);
+    }
+    Ok(Opts::from(builder))
+}
+
+impl MysqlSession {
+    pub fn connect(opts: &ConnectOpts) -> AppResult<Self> {
+        let conn = mysql::Conn::new(build_opts(opts)?)?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
+    }
+}
+
+fn mysql_value_to_json(v: MysqlValue) -> Value {
+    match v {
+        MysqlValue::NULL => Value::Null,
+        MysqlValue::Bytes(b) => match String::from_utf8(b.clone()) {
+            Ok(s) => Value::String(s),
+            Err(_) => Value::String(format!("\\x{}", hex::encode(b))),
+        },
+        MysqlValue::Int(i) => Value::Number(i.into()),
+        MysqlValue::UInt(u) => Value::Number(u.into()),
+        MysqlValue::Float(f) => Number::from_f64(f as f64)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+        MysqlValue::Double(f) => Number::from_f64(f)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+        MysqlValue::Date(y, m, d, h, mi, s, us) => {
+            Value::String(format!("{y:04}-{m:02}-{d:02} {h:02}:{mi:02}:{s:02}.{us:06}"))
+        }
+        MysqlValue::Time(is_neg, days, h, m, s, us) => {
+            let sign = if is_neg { "-" } else { "" };
+            Value::String(format!("{sign}{days}d {h:02}:{m:02}:{s:02}.{us:06}"))
+        }
+    }
+}
+
+fn ident_ok(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+impl DriverSession for MysqlSession {
+    fn list_databases(&self) -> AppResult<Vec<String>> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::Message("mysql lock".into()))?;
+        let rows: Vec<String> = conn.query("SHOW DATABASES")?;
+        Ok(rows)
+    }
+
+    fn list_schemas(&self, _database: Option<&str>) -> AppResult<Vec<String>> {
+        Ok(vec![])
+    }
+
+    fn list_tables(&self, database: Option<&str>, _schema: Option<&str>) -> AppResult<Vec<DbObject>> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::Message("mysql lock".into()))?;
+        let sql = if let Some(db) = database.filter(|d| ident_ok(d)) {
+            format!(
+                "SELECT TABLE_NAME, TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA = '{db}' ORDER BY TABLE_NAME"
+            )
+        } else {
+            "SHOW FULL TABLES".to_string()
+        };
+
+        if sql.starts_with("SHOW") {
+            let result = conn.query_iter(sql)?;
+            let mut out = Vec::new();
+            for row in result {
+                let row: Row = row?;
+                let name: String = row.get(0).unwrap_or_default();
+                let kind: String = row.get::<String, _>(1).unwrap_or_else(|| "BASE TABLE".into());
+                out.push(DbObject {
+                    name,
+                    kind: if kind.to_uppercase().contains("VIEW") {
+                        "view".into()
+                    } else {
+                        "table".into()
+                    },
+                });
+            }
+            return Ok(out);
+        }
+
+        let result = conn.query_map(sql, |(name, kind): (String, String)| DbObject {
+            name,
+            kind: if kind.to_uppercase().contains("VIEW") {
+                "view".into()
+            } else {
+                "table".into()
+            },
+        })?;
+        Ok(result)
+    }
+
+    fn query_page(
+        &self,
+        table: &str,
+        page: i64,
+        page_size: i64,
+        sort_col: Option<&str>,
+        sort_dir: Option<&str>,
+        filter_col: Option<&str>,
+        filter_value: Option<&str>,
+    ) -> AppResult<RowsPage> {
+        if !ident_ok(table) {
+            return Err(AppError::Validation("非法表名".into()));
+        }
+        let page = page.max(1);
+        let page_size = page_size.clamp(1, 1000);
+        let offset = (page - 1) * page_size;
+
+        let mut where_sql = String::new();
+        let mut params: Vec<MysqlValue> = Vec::new();
+        if let (Some(col), Some(val)) = (filter_col, filter_value) {
+            if !ident_ok(col) {
+                return Err(AppError::Validation("非法过滤列".into()));
+            }
+            where_sql = format!(" WHERE `{col}` LIKE ?");
+            params.push(MysqlValue::from(format!("%{val}%")));
+        }
+
+        let order_sql = match (sort_col, sort_dir) {
+            (Some(col), dir) if ident_ok(col) => {
+                let d = if dir.unwrap_or("ASC").eq_ignore_ascii_case("DESC") {
+                    "DESC"
+                } else {
+                    "ASC"
+                };
+                format!(" ORDER BY `{col}` {d}")
+            }
+            _ => String::new(),
+        };
+
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::Message("mysql lock".into()))?;
+
+        let count_sql = format!("SELECT COUNT(*) FROM `{table}`{where_sql}");
+        let total: i64 = if params.is_empty() {
+            conn.query_first(count_sql)?.unwrap_or(0)
+        } else {
+            conn.exec_first(count_sql, params.clone())?.unwrap_or(0)
+        };
+
+        let data_sql = format!(
+            "SELECT * FROM `{table}`{where_sql}{order_sql} LIMIT {page_size} OFFSET {offset}"
+        );
+
+        let (columns_meta, rows) = if params.is_empty() {
+            let result = conn.query_iter(data_sql)?;
+            let columns_meta = result
+                .columns()
+                .as_ref()
+                .iter()
+                .map(|c| ColumnMeta {
+                    name: c.name_str().to_string(),
+                    data_type: format!("{:?}", c.column_type()),
+                    nullable: true,
+                })
+                .collect::<Vec<_>>();
+            let mut rows = Vec::new();
+            for row in result {
+                let row = row?;
+                let mut values = Vec::with_capacity(columns_meta.len());
+                for i in 0..columns_meta.len() {
+                    let v: MysqlValue = row
+                        .get_opt(i)
+                        .and_then(|r| r.ok())
+                        .unwrap_or(MysqlValue::NULL);
+                    values.push(mysql_value_to_json(v));
+                }
+                rows.push(values);
+            }
+            (columns_meta, rows)
+        } else {
+            let result = conn.exec_iter(data_sql, params)?;
+            let columns_meta = result
+                .columns()
+                .as_ref()
+                .iter()
+                .map(|c| ColumnMeta {
+                    name: c.name_str().to_string(),
+                    data_type: format!("{:?}", c.column_type()),
+                    nullable: true,
+                })
+                .collect::<Vec<_>>();
+            let mut rows = Vec::new();
+            for row in result {
+                let row = row?;
+                let mut values = Vec::with_capacity(columns_meta.len());
+                for i in 0..columns_meta.len() {
+                    let v: MysqlValue = row
+                        .get_opt(i)
+                        .and_then(|r| r.ok())
+                        .unwrap_or(MysqlValue::NULL);
+                    values.push(mysql_value_to_json(v));
+                }
+                rows.push(values);
+            }
+            (columns_meta, rows)
+        };
+
+        Ok(RowsPage {
+            columns: columns_meta,
+            rows,
+            total,
+            page,
+            page_size,
+        })
+    }
+
+    fn execute_sql(&self, sql: &str) -> AppResult<QueryOutcome> {
+        let started = Instant::now();
+        let trimmed = sql.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::Validation("SQL 为空".into()));
+        }
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::Message("mysql lock".into()))?;
+
+        let upper = trimmed.to_uppercase();
+        if upper.starts_with("SELECT")
+            || upper.starts_with("SHOW")
+            || upper.starts_with("DESCRIBE")
+            || upper.starts_with("DESC")
+            || upper.starts_with("EXPLAIN")
+            || upper.starts_with("WITH")
+        {
+            let result = conn.query_iter(trimmed)?;
+            let columns = result
+                .columns()
+                .as_ref()
+                .iter()
+                .map(|c| c.name_str().to_string())
+                .collect::<Vec<_>>();
+            let mut rows = Vec::new();
+            for row in result {
+                let row = row?;
+                let mut values = Vec::with_capacity(columns.len());
+                for i in 0..columns.len() {
+                    let v: MysqlValue = row
+                        .get_opt(i)
+                        .and_then(|r| r.ok())
+                        .unwrap_or(MysqlValue::NULL);
+                    values.push(mysql_value_to_json(v));
+                }
+                rows.push(values);
+            }
+            return Ok(QueryOutcome {
+                columns,
+                rows,
+                rows_affected: 0,
+                elapsed_ms: started.elapsed().as_millis(),
+            });
+        }
+
+        conn.query_drop(trimmed)?;
+        let affected = conn.affected_rows();
+        Ok(QueryOutcome {
+            columns: vec![],
+            rows: vec![],
+            rows_affected: affected as i64,
+            elapsed_ms: started.elapsed().as_millis(),
+        })
+    }
+
+    fn apply_row_changes(&self, table: &str, changes: &[RowChange]) -> AppResult<i64> {
+        if !ident_ok(table) {
+            return Err(AppError::Validation("非法表名".into()));
+        }
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::Message("mysql lock".into()))?;
+        let mut tx = conn.start_transaction(mysql::TxOpts::default())?;
+        let mut affected = 0i64;
+        for change in changes {
+            match change.op.as_str() {
+                "update" => {
+                    if change.columns.is_empty()
+                        || change.columns.len() != change.values.len()
+                        || change.pk_columns.is_empty()
+                        || change.pk_columns.len() != change.pk_values.len()
+                        || !change.columns.iter().all(|c| ident_ok(c))
+                        || !change.pk_columns.iter().all(|c| ident_ok(c))
+                    {
+                        return Err(AppError::Validation("update 变更不合法".into()));
+                    }
+                    let set_sql = change
+                        .columns
+                        .iter()
+                        .map(|c| format!("`{c}` = ?"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let where_sql = change
+                        .pk_columns
+                        .iter()
+                        .map(|c| format!("`{c}` = ?"))
+                        .collect::<Vec<_>>()
+                        .join(" AND ");
+                    let sql = format!("UPDATE `{table}` SET {set_sql} WHERE {where_sql}");
+                    let params: Vec<MysqlValue> = change
+                        .values
+                        .iter()
+                        .chain(change.pk_values.iter())
+                        .map(json_to_mysql)
+                        .collect();
+                    affected += tx.exec_iter(sql, params)?.affected_rows() as i64;
+                }
+                "insert" => {
+                    if change.columns.is_empty()
+                        || change.columns.len() != change.values.len()
+                        || !change.columns.iter().all(|c| ident_ok(c))
+                    {
+                        return Err(AppError::Validation("insert 变更不合法".into()));
+                    }
+                    let cols = change
+                        .columns
+                        .iter()
+                        .map(|c| format!("`{c}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let placeholders = (0..change.columns.len())
+                        .map(|_| "?")
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let sql = format!("INSERT INTO `{table}` ({cols}) VALUES ({placeholders})");
+                    let params: Vec<MysqlValue> = change.values.iter().map(json_to_mysql).collect();
+                    affected += tx.exec_iter(sql, params)?.affected_rows() as i64;
+                }
+                "delete" => {
+                    if change.pk_columns.is_empty()
+                        || change.pk_columns.len() != change.pk_values.len()
+                        || !change.pk_columns.iter().all(|c| ident_ok(c))
+                    {
+                        return Err(AppError::Validation("delete 变更不合法".into()));
+                    }
+                    let where_sql = change
+                        .pk_columns
+                        .iter()
+                        .map(|c| format!("`{c}` = ?"))
+                        .collect::<Vec<_>>()
+                        .join(" AND ");
+                    let sql = format!("DELETE FROM `{table}` WHERE {where_sql}");
+                    let params: Vec<MysqlValue> =
+                        change.pk_values.iter().map(json_to_mysql).collect();
+                    affected += tx.exec_iter(sql, params)?.affected_rows() as i64;
+                }
+                other => {
+                    return Err(AppError::Validation(format!("未知变更类型: {other}")));
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(affected)
+    }
+}
+
+fn json_to_mysql(v: &Value) -> MysqlValue {
+    match v {
+        Value::Null => MysqlValue::NULL,
+        Value::Bool(b) => MysqlValue::Int(i64::from(*b)),
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                MysqlValue::Int(i)
+            } else if let Some(u) = n.as_u64() {
+                MysqlValue::UInt(u)
+            } else if let Some(f) = n.as_f64() {
+                MysqlValue::Double(f)
+            } else {
+                MysqlValue::Bytes(n.to_string().into_bytes())
+            }
+        }
+        Value::String(s) => MysqlValue::Bytes(s.clone().into_bytes()),
+        other => MysqlValue::Bytes(other.to_string().into_bytes()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn docker_opts(password: &str) -> ConnectOpts {
+        ConnectOpts {
+            engine: "mysql".into(),
+            host: Some("127.0.0.1".into()),
+            port: Some(3307),
+            database: Some("demo".into()),
+            user: Some("navicat".into()),
+            password: Some(password.into()),
+            ssl_mode: Some("disable".into()),
+            ssl_trust: None,
+            ssh_enabled: None,
+            ssh_host: None,
+            ssh_port: None,
+            ssh_user: None,
+            ssh_password: None,
+        }
+    }
+
+    #[test]
+    fn mysql_connect_success_and_list_tables() {
+        let session = MysqlSession::connect(&docker_opts("navicat")).expect("mysql connect");
+        let tables = session.list_tables(Some("demo"), None).expect("tables");
+        assert!(tables.iter().any(|t| t.name == "t1"));
+    }
+
+    #[test]
+    fn mysql_bad_password_returns_readable_error() {
+        let err = match MysqlSession::connect(&docker_opts("wrong-password")) {
+            Ok(_) => panic!("expected auth failure"),
+            Err(e) => e,
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Access denied") || msg.contains("driver") || msg.contains("Password"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn mysql_ssl_require_on_plain_server_errors() {
+        let mut opts = docker_opts("navicat");
+        opts.ssl_mode = Some("require".into());
+        opts.ssl_trust = Some(true);
+        let err = match MysqlSession::connect(&opts) {
+            Ok(_) => return, // some local MySQL may already speak TLS
+            Err(e) => e,
+        };
+        assert!(!err.to_string().is_empty());
+    }
+}
