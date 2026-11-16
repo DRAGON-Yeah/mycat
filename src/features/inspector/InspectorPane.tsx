@@ -13,6 +13,13 @@ import {
   listRoutineMeta,
   type RoutineMeta,
 } from "../object-list/routineMeta";
+import {
+  formatEventSchedule,
+  formatEventStatus,
+  formatEventType,
+  listEventMeta,
+  type EventMeta,
+} from "../object-list/eventMeta";
 
 export function InspectorPane() {
   const connection = useWorkspaceStore((s) => s.activeConnection);
@@ -27,6 +34,7 @@ export function InspectorPane() {
 
   const [viewMeta, setViewMeta] = useState<ViewMeta | null>(null);
   const [routineMeta, setRoutineMeta] = useState<RoutineMeta | null>(null);
+  const [eventMeta, setEventMeta] = useState<EventMeta | null>(null);
   const [rowCount, setRowCount] = useState<number | null>(null);
   const [rowBusy, setRowBusy] = useState(false);
 
@@ -78,6 +86,29 @@ export function InspectorPane() {
     };
   }, [connection, database, table, folder]);
 
+  useEffect(() => {
+    if (!connection || !database || !table || folder !== "events") {
+      setEventMeta(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const map = await listEventMeta({
+          connectionId: connection.id,
+          engine: String(connection.engine),
+          database,
+        });
+        if (!cancelled) setEventMeta(map[table] ?? null);
+      } catch {
+        if (!cancelled) setEventMeta(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [connection, database, table, folder]);
+
   async function fetchRowCount() {
     if (!connection || !database || !table) return;
     setRowBusy(true);
@@ -102,6 +133,64 @@ export function InspectorPane() {
       <aside className="pane inspector-pane" aria-label="信息">
         <div className="pane-title">信息</div>
         <p className="pane-placeholder">选中连接、数据库或表以查看详情。</p>
+      </aside>
+    );
+  }
+
+  if (kind === "table" && table && folder === "events") {
+    return (
+      <aside className="pane inspector-pane" aria-label="信息">
+        <div className="pane-title">信息</div>
+        <div className="inspector-hero">
+          <div className="inspector-badge event">Ev</div>
+          <div>
+            <h3>{table}</h3>
+            <p className="inspector-sub">事件</p>
+          </div>
+        </div>
+        <p className="inspector-conn-line">
+          {connection.name}
+          <span> · </span>
+          {database}
+        </p>
+        <dl className="inspector-meta">
+          <div>
+            <dt>状态</dt>
+            <dd>{formatEventStatus(eventMeta?.status)}</dd>
+          </div>
+          <div>
+            <dt>类型</dt>
+            <dd>{formatEventType(eventMeta?.eventType)}</dd>
+          </div>
+          <div>
+            <dt>执行计划</dt>
+            <dd>{formatEventSchedule(eventMeta)}</dd>
+          </div>
+          <div>
+            <dt>定义者</dt>
+            <dd>{eventMeta?.definer || "—"}</dd>
+          </div>
+          <div>
+            <dt>ON COMPLETION</dt>
+            <dd>{eventMeta?.onCompletion || "—"}</dd>
+          </div>
+          <div>
+            <dt>上次执行</dt>
+            <dd>{eventMeta?.lastExecuted || "—"}</dd>
+          </div>
+          <div>
+            <dt>创建日期</dt>
+            <dd>{eventMeta?.created || "—"}</dd>
+          </div>
+          <div>
+            <dt>修改日期</dt>
+            <dd>{eventMeta?.lastAltered || "—"}</dd>
+          </div>
+          <div>
+            <dt>注释</dt>
+            <dd>{eventMeta?.comment || "—"}</dd>
+          </div>
+        </dl>
       </aside>
     );
   }

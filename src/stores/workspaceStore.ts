@@ -58,8 +58,8 @@ export type DesignerTab = {
   database: string;
   table: string;
   mode: "create" | "alter";
-  /** table (default), view, or function/procedure designer */
-  kind?: "table" | "view" | "function";
+  /** table (default), view, function/procedure, or event designer */
+  kind?: "table" | "view" | "function" | "event";
   /** Only for kind === "function" */
   routineType?: "FUNCTION" | "PROCEDURE";
   dirty?: boolean;
@@ -162,6 +162,12 @@ type WorkspaceState = {
     routine: string;
     mode: "create" | "alter";
     routineType?: "FUNCTION" | "PROCEDURE";
+  }) => string | null;
+  openEventDesigner: (opts: {
+    connection?: ConnectionDto;
+    database?: string;
+    event: string;
+    mode: "create" | "alter";
   }) => string | null;
   setActiveDesigner: (id: string) => void;
   closeDesignerTab: (id: string, opts?: { force?: boolean }) => boolean;
@@ -334,7 +340,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return;
     }
     const listable =
-      folder === "tables" || folder === "views" || folder === "functions";
+      folder === "tables" ||
+      folder === "views" ||
+      folder === "functions" ||
+      folder === "events";
     set({
       selectedDatabase: database,
       selectedFolder: folder,
@@ -345,9 +354,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         ? null
         : folder === "backups"
           ? "backup"
-          : folder === "events"
-            ? "automation"
-            : folder,
+          : folder,
       toolbarAction:
         folder === "tables"
           ? "table"
@@ -355,9 +362,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             ? "view"
             : folder === "functions"
               ? "function"
-              : folder === "backups"
-                ? "backup"
-                : "table",
+              : folder === "events"
+                ? "automation"
+                : folder === "backups"
+                  ? "backup"
+                  : "table",
       activeTabId: null,
     });
   },
@@ -418,13 +427,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       get().openQuery();
       return;
     }
-    if (action === "table" || action === "view" || action === "function") {
+    if (
+      action === "table" ||
+      action === "view" ||
+      action === "function" ||
+      action === "automation"
+    ) {
       const folder =
         action === "table"
           ? "tables"
           : action === "view"
             ? "views"
-            : "functions";
+            : action === "function"
+              ? "functions"
+              : "events";
       const db = get().selectedDatabase;
       if (db) {
         get().selectObjectFolder(db, folder);
@@ -723,24 +739,102 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
     return id;
   },
+  openEventDesigner: (opts) => {
+    const conn = opts.connection ?? get().activeConnection;
+    if (!conn) {
+      window.alert("请先打开一个连接。");
+      return null;
+    }
+    const database =
+      opts.database?.trim() ||
+      get().selectedDatabase ||
+      conn.database?.trim() ||
+      "";
+    if (!database) {
+      window.alert("请先选择数据库，再设计事件。");
+      return null;
+    }
+    const event = opts.event.trim() || "Untitled";
+    const id =
+      opts.mode === "create"
+        ? `ev-designer-create-${conn.id}:${database}:${Date.now()}`
+        : `ev-designer:${conn.id}:${database}:${event}`;
+    const existing =
+      opts.mode === "alter"
+        ? get().designerTabs.find((t) => t.id === id)
+        : undefined;
+    if (existing) {
+      set({
+        activeConnectionId: conn.id,
+        activeConnection: conn,
+        selectedDatabase: database,
+        selectedTable: event,
+        selectedFolder: "events",
+        selectionKind: "table",
+        activeDesignerId: existing.id,
+        activeTabId: null,
+        activeQueryId: null,
+        centerMode: "table-designer",
+        toolbarAction: "automation",
+        placeholderFeature: null,
+      });
+      return existing.id;
+    }
+    const tab: DesignerTab = {
+      id,
+      connectionId: conn.id,
+      connectionName: conn.name,
+      connectionEngine: String(conn.engine),
+      database,
+      table: event,
+      mode: opts.mode,
+      kind: "event",
+      dirty: false,
+    };
+    set({
+      activeConnectionId: conn.id,
+      activeConnection: conn,
+      selectedDatabase: database,
+      selectedTable: opts.mode === "alter" ? event : null,
+      selectedFolder: "events",
+      selectionKind: "table",
+      designerTabs: [...get().designerTabs, tab],
+      activeDesignerId: id,
+      activeTabId: null,
+      activeQueryId: null,
+      centerMode: "table-designer",
+      toolbarAction: "automation",
+      placeholderFeature: null,
+    });
+    return id;
+  },
   setActiveDesigner: (id) => {
     const tab = get().designerTabs.find((t) => t.id === id);
     if (!tab) return;
     const isView = tab.kind === "view";
     const isFn = tab.kind === "function";
+    const isEv = tab.kind === "event";
     set({
       activeDesignerId: id,
       activeTabId: null,
       activeQueryId: null,
       centerMode: "table-designer",
-      toolbarAction: isFn ? "function" : isView ? "view" : "table",
+      toolbarAction: isEv
+        ? "automation"
+        : isFn
+          ? "function"
+          : isView
+            ? "view"
+            : "table",
       placeholderFeature: null,
       selectedDatabase: tab.database,
-      selectedFolder: isFn
-        ? "functions"
-        : isView
-          ? "views"
-          : get().selectedFolder,
+      selectedFolder: isEv
+        ? "events"
+        : isFn
+          ? "functions"
+          : isView
+            ? "views"
+            : get().selectedFolder,
       selectedTable: tab.mode === "alter" ? tab.table : null,
       selectionKind: "table",
     });
@@ -795,11 +889,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const name = tableName.trim() || tab.table;
     const isView = tab.kind === "view";
     const isFn = tab.kind === "function";
-    const newId = isFn
-      ? `fn-designer:${tab.connectionId}:${tab.database}:${name}`
-      : isView
-        ? `view-designer:${tab.connectionId}:${tab.database}:${name}`
-        : `designer:${tab.connectionId}:${tab.database}:${name}`;
+    const isEv = tab.kind === "event";
+    const newId = isEv
+      ? `ev-designer:${tab.connectionId}:${tab.database}:${name}`
+      : isFn
+        ? `fn-designer:${tab.connectionId}:${tab.database}:${name}`
+        : isView
+          ? `view-designer:${tab.connectionId}:${tab.database}:${name}`
+          : `designer:${tab.connectionId}:${tab.database}:${name}`;
     const others = get().designerTabs.filter(
       (t) => t.id !== id && t.id !== newId,
     );
@@ -815,13 +912,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       designerTabs: [...others, next],
       activeDesignerId: newId,
       selectedTable: name,
-      selectedFolder: isFn
-        ? "functions"
-        : isView
-          ? "views"
-          : get().selectedFolder,
+      selectedFolder: isEv
+        ? "events"
+        : isFn
+          ? "functions"
+          : isView
+            ? "views"
+            : get().selectedFolder,
       centerMode: "table-designer",
-      toolbarAction: isFn ? "function" : isView ? "view" : "table",
+      toolbarAction: isEv
+        ? "automation"
+        : isFn
+          ? "function"
+          : isView
+            ? "view"
+            : "table",
     });
     return newId;
   },

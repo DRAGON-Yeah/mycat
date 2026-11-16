@@ -12,10 +12,20 @@ import {
   loadDesignerTriggers,
 } from "../table-designer/loadColumns";
 import { TABLE_DATA_CHANGED } from "../../lib/tableEvents";
+import { listEvents } from "../object-list/eventMeta";
 import { listRoutines } from "../object-list/routineMeta";
-import { IconFunctions, IconTables, IconViews } from "./TreeIcons";
+import {
+  IconEvents,
+  IconFunctions,
+  IconTables,
+  IconViews,
+} from "./TreeIcons";
 
-export type TreeObjectFolderId = "tables" | "views" | "functions";
+export type TreeObjectFolderId =
+  | "tables"
+  | "views"
+  | "functions"
+  | "events";
 
 type TableDetail = {
   loading: boolean;
@@ -55,10 +65,12 @@ type PartId = (typeof PARTS)[number]["id"];
 
 function folderIcon(folder: TreeObjectFolderId) {
   if (folder === "functions") return <IconFunctions />;
+  if (folder === "events") return <IconEvents />;
   return folder === "tables" ? <IconTables /> : <IconViews />;
 }
 
 function itemKindBadge(folder: TreeObjectFolderId, kind: string) {
+  if (folder === "events") return "Ev";
   if (folder === "functions") {
     return kind === "FUNCTION" || kind === "function" ? "fx" : "Px";
   }
@@ -102,6 +114,18 @@ export function TreeObjectFolder({
           routines.map((r) => ({
             name: r.name,
             kind: r.routineType,
+          })),
+        );
+      } else if (folder === "events") {
+        const events = await listEvents({
+          connectionId: conn.id,
+          engine: String(conn.engine),
+          database,
+        });
+        setItems(
+          events.map((ev) => ({
+            name: ev.name,
+            kind: "event",
           })),
         );
       } else {
@@ -238,8 +262,15 @@ export function TreeObjectFolder({
   }
 
   const label =
-    folder === "functions" ? "函数" : folder === "tables" ? "表" : "视图";
-  const isRoutineFolder = folder === "functions";
+    folder === "events"
+      ? "事件"
+      : folder === "functions"
+        ? "函数"
+        : folder === "tables"
+          ? "表"
+          : "视图";
+  const isLeafObjectFolder =
+    folder === "functions" || folder === "events";
 
   return (
     <li>
@@ -298,7 +329,7 @@ export function TreeObjectFolder({
             return (
               <li key={`${obj.kind}-${obj.name}`}>
                 <div className={`tree-row ${active ? "is-active" : ""}`}>
-                  {isRoutineFolder ? (
+                  {isLeafObjectFolder ? (
                     <span className="tree-twist-spacer" />
                   ) : (
                     <button
@@ -327,13 +358,16 @@ export function TreeObjectFolder({
                   >
                     <span
                       className={`object-kind tree-obj-badge ${
-                        obj.kind === "FUNCTION" || obj.kind === "function"
-                          ? "is-function"
-                          : obj.kind === "PROCEDURE" || obj.kind === "procedure"
-                            ? "is-procedure"
-                            : folder === "views"
-                              ? "is-view"
-                              : ""
+                        folder === "events"
+                          ? "is-event"
+                          : obj.kind === "FUNCTION" || obj.kind === "function"
+                            ? "is-function"
+                            : obj.kind === "PROCEDURE" ||
+                                obj.kind === "procedure"
+                              ? "is-procedure"
+                              : folder === "views"
+                                ? "is-view"
+                                : ""
                       }`}
                     >
                       {itemKindBadge(folder, obj.kind)}
@@ -342,7 +376,7 @@ export function TreeObjectFolder({
                   </button>
                 </div>
 
-                {!isRoutineFolder && tableOpen && (
+                {!isLeafObjectFolder && tableOpen && (
                   <ul className="tree-children tree-object-meta">
                     {detail?.loading && (
                       <li className="pane-placeholder tree-query-empty">

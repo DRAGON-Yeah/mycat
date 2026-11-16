@@ -20,6 +20,14 @@ import {
   RoutineContextMenu,
   type RoutineMenuTarget,
 } from "../nav-tree/RoutineContextMenu";
+import {
+  EventsFolderContextMenu,
+  type EventsFolderMenuTarget,
+} from "../nav-tree/EventsFolderContextMenu";
+import {
+  EventContextMenu,
+  type EventMenuTarget,
+} from "../nav-tree/EventContextMenu";
 import { loadTableGroups } from "../nav-tree/tableGroups";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import {
@@ -33,8 +41,16 @@ import {
   listRoutineMeta,
   type RoutineMeta,
 } from "./routineMeta";
+import {
+  formatEventSchedule,
+  formatEventStatus,
+  formatEventType,
+  listEventMeta,
+  type EventMeta,
+} from "./eventMeta";
 import { dropTableOrView } from "../nav-tree/tableMenuActions";
 import { dropRoutine } from "../nav-tree/routineMenuActions";
+import { dropEvent } from "../nav-tree/eventMenuActions";
 import { emitTableDataChanged } from "../../lib/tableEvents";
 import { RunRoutineDialog } from "../function-designer/RunRoutineDialog";
 
@@ -69,6 +85,18 @@ const FUNCTION_COLS = [
   { key: "comment", label: "注释", defaultWidth: 160 },
 ] as const;
 
+const EVENT_COLS = [
+  { key: "name", label: "名称", defaultWidth: 160 },
+  { key: "status", label: "状态", defaultWidth: 88 },
+  { key: "eventType", label: "类型", defaultWidth: 88 },
+  { key: "schedule", label: "执行计划", defaultWidth: 220 },
+  { key: "definer", label: "定义者", defaultWidth: 140 },
+  { key: "created", label: "创建日期", defaultWidth: 140 },
+  { key: "lastAltered", label: "修改日期", defaultWidth: 140 },
+  { key: "lastExecuted", label: "上次执行", defaultWidth: 140 },
+  { key: "comment", label: "注释", defaultWidth: 140 },
+] as const;
+
 function formatBytes(n?: number | null) {
   if (n == null || Number.isNaN(n)) return "—";
   if (n < 1024) return `${n} B`;
@@ -89,6 +117,7 @@ export function ObjectListGrid() {
   const openTableDesigner = useWorkspaceStore((s) => s.openTableDesigner);
   const openViewDesigner = useWorkspaceStore((s) => s.openViewDesigner);
   const openFunctionDesigner = useWorkspaceStore((s) => s.openFunctionDesigner);
+  const openEventDesigner = useWorkspaceStore((s) => s.openEventDesigner);
   const selectTableMeta = useWorkspaceStore((s) => s.selectTableMeta);
   const selectedTable = useWorkspaceStore((s) => s.selectedTable);
   const objectListFilter = useWorkspaceStore((s) => s.objectListFilter);
@@ -101,6 +130,7 @@ export function ObjectListGrid() {
   );
   const [tables, setTables] = useState<DbObject[]>([]);
   const [routines, setRoutines] = useState<RoutineMeta[]>([]);
+  const [events, setEvents] = useState<EventMeta[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("");
@@ -110,10 +140,13 @@ export function ObjectListGrid() {
   const [routineMenu, setRoutineMenu] = useState<RoutineMenuTarget | null>(
     null,
   );
+  const [eventMenu, setEventMenu] = useState<EventMenuTarget | null>(null);
   const [viewsFolderMenu, setViewsFolderMenu] =
     useState<ViewsFolderMenuTarget | null>(null);
   const [functionsFolderMenu, setFunctionsFolderMenu] =
     useState<FunctionsFolderMenuTarget | null>(null);
+  const [eventsFolderMenu, setEventsFolderMenu] =
+    useState<EventsFolderMenuTarget | null>(null);
   const [groupMap, setGroupMap] = useState<Record<string, string>>({});
   const [viewMetaMap, setViewMetaMap] = useState<Record<string, ViewMeta>>({});
   const [routineMetaMap, setRoutineMetaMap] = useState<
@@ -138,7 +171,14 @@ export function ObjectListGrid() {
 
   const wantViews = folder === "views";
   const wantFunctions = folder === "functions";
-  const title = wantFunctions ? "函数" : wantViews ? "视图" : "表";
+  const wantEvents = folder === "events";
+  const title = wantEvents
+    ? "事件"
+    : wantFunctions
+      ? "函数"
+      : wantViews
+        ? "视图"
+        : "表";
 
   useEffect(() => {
     setFilter(objectListFilter);
@@ -158,7 +198,9 @@ export function ObjectListGrid() {
       setMenu(null);
       setViewsFolderMenu(null);
       setFunctionsFolderMenu(null);
+      setEventsFolderMenu(null);
       setRoutineMenu(null);
+      setEventMenu(null);
     }
     document.addEventListener("click", onDoc);
     return () => document.removeEventListener("click", onDoc);
@@ -193,14 +235,21 @@ export function ObjectListGrid() {
         e.preventDefault();
         if (wantFunctions) {
           setRunOpen(true);
-        } else {
+        } else if (!wantEvents) {
           openTable(selectedTable);
         }
         return;
       }
       if (key === "d" && selectedTable) {
         e.preventDefault();
-        if (wantFunctions) {
+        if (wantEvents) {
+          openEventDesigner({
+            connection,
+            database,
+            event: selectedTable,
+            mode: "alter",
+          });
+        } else if (wantFunctions) {
           const rt = routineMetaMap[selectedTable]?.routineType ?? "PROCEDURE";
           openFunctionDesigner({
             connection,
@@ -228,7 +277,14 @@ export function ObjectListGrid() {
       }
       if (key === "n") {
         e.preventDefault();
-        if (wantFunctions) {
+        if (wantEvents) {
+          openEventDesigner({
+            connection,
+            database,
+            event: "Untitled",
+            mode: "create",
+          });
+        } else if (wantFunctions) {
           openFunctionDesigner({
             connection,
             database,
@@ -262,11 +318,13 @@ export function ObjectListGrid() {
     folder,
     wantViews,
     wantFunctions,
+    wantEvents,
     routineMetaMap,
     openTable,
     openTableDesigner,
     openViewDesigner,
     openFunctionDesigner,
+    openEventDesigner,
   ]);
 
   useEffect(() => {
@@ -275,6 +333,7 @@ export function ObjectListGrid() {
       if (!connection || !database) {
         setTables([]);
         setRoutines([]);
+        setEvents([]);
         setViewMetaMap({});
         setRoutineMetaMap({});
         return;
@@ -283,16 +342,33 @@ export function ObjectListGrid() {
         folder &&
         folder !== "tables" &&
         folder !== "views" &&
-        folder !== "functions"
+        folder !== "functions" &&
+        folder !== "events"
       ) {
         setTables([]);
         setRoutines([]);
+        setEvents([]);
         return;
       }
       setLoading(true);
       setError(null);
       try {
-        if (wantFunctions) {
+        if (wantEvents) {
+          const map = await listEventMeta({
+            connectionId: connection.id,
+            engine: String(connection.engine),
+            database,
+          });
+          if (cancelled) return;
+          const list = Object.values(map).sort((a, b) =>
+            a.name.localeCompare(b.name, "zh"),
+          );
+          setEvents(list);
+          setTables([]);
+          setRoutines([]);
+          setRoutineMetaMap({});
+          setViewMetaMap({});
+        } else if (wantFunctions) {
           const map = await listRoutineMeta({
             connectionId: connection.id,
             engine: String(connection.engine),
@@ -305,13 +381,8 @@ export function ObjectListGrid() {
           setRoutineMetaMap(map);
           setRoutines(list);
           setTables([]);
+          setEvents([]);
           setViewMetaMap({});
-          if (
-            String(connection.engine).toLowerCase().includes("sqlite") &&
-            list.length === 0
-          ) {
-            setError(null);
-          }
         } else {
           const items = await listTables(connection.id, database);
           const filtered = items.filter((t) =>
@@ -320,6 +391,7 @@ export function ObjectListGrid() {
           if (!cancelled) setTables(filtered);
           setRoutines([]);
           setRoutineMetaMap({});
+          setEvents([]);
           if (wantViews && !cancelled) {
             try {
               const meta = await listViewMeta({
@@ -339,6 +411,7 @@ export function ObjectListGrid() {
         if (!cancelled) {
           setTables([]);
           setRoutines([]);
+          setEvents([]);
           setViewMetaMap({});
           setRoutineMetaMap({});
           setError(err instanceof Error ? err.message : String(err));
@@ -351,23 +424,25 @@ export function ObjectListGrid() {
     return () => {
       cancelled = true;
     };
-  }, [connection, database, folder, wantViews, wantFunctions, tick]);
+  }, [connection, database, folder, wantViews, wantFunctions, wantEvents, tick]);
 
   useEffect(() => {
-    if (!connection || !database || wantViews || wantFunctions) {
-      if (wantViews || wantFunctions) setGroupMap({});
+    if (!connection || !database || wantViews || wantFunctions || wantEvents) {
+      if (wantViews || wantFunctions || wantEvents) setGroupMap({});
       return;
     }
     void loadTableGroups(connection.id, database)
       .then((s) => setGroupMap(s.membership))
       .catch(() => setGroupMap({}));
-  }, [connection, database, tick, wantViews, wantFunctions]);
+  }, [connection, database, tick, wantViews, wantFunctions, wantEvents]);
 
-  const cols = wantFunctions
-    ? FUNCTION_COLS
-    : wantViews
-      ? VIEW_COLS
-      : TABLE_COLS;
+  const cols = wantEvents
+    ? EVENT_COLS
+    : wantFunctions
+      ? FUNCTION_COLS
+      : wantViews
+        ? VIEW_COLS
+        : TABLE_COLS;
 
   if (!connection) {
     return <p className="pane-placeholder">请先打开一个连接。</p>;
@@ -394,7 +469,15 @@ export function ObjectListGrid() {
     r.name.toLowerCase().includes(filter.trim().toLowerCase()),
   );
 
-  const count = wantFunctions ? filteredRoutines.length : filteredTables.length;
+  const filteredEvents = events.filter((ev) =>
+    ev.name.toLowerCase().includes(filter.trim().toLowerCase()),
+  );
+
+  const count = wantEvents
+    ? filteredEvents.length
+    : wantFunctions
+      ? filteredRoutines.length
+      : filteredTables.length;
   const selectedRoutine = selectedTable
     ? routineMetaMap[selectedTable]
     : undefined;
@@ -414,8 +497,10 @@ export function ObjectListGrid() {
         e.preventDefault();
         setMenu(null);
         setRoutineMenu(null);
+        setEventMenu(null);
         if (wantViews) {
           setFunctionsFolderMenu(null);
+          setEventsFolderMenu(null);
           setViewsFolderMenu({
             x: e.clientX,
             y: e.clientY,
@@ -424,7 +509,17 @@ export function ObjectListGrid() {
           });
         } else if (wantFunctions) {
           setViewsFolderMenu(null);
+          setEventsFolderMenu(null);
           setFunctionsFolderMenu({
+            x: e.clientX,
+            y: e.clientY,
+            conn: connection,
+            database,
+          });
+        } else if (wantEvents) {
+          setViewsFolderMenu(null);
+          setFunctionsFolderMenu(null);
+          setEventsFolderMenu({
             x: e.clientX,
             y: e.clientY,
             conn: connection,
@@ -453,7 +548,7 @@ export function ObjectListGrid() {
             >
               ▶ 运行
             </button>
-          ) : (
+          ) : wantEvents ? null : (
             <button
               type="button"
               className="obj-tool-btn"
@@ -468,16 +563,25 @@ export function ObjectListGrid() {
             type="button"
             className="obj-tool-btn"
             title={
-              wantFunctions
-                ? "设计函数 (⌘D)"
-                : wantViews
-                  ? "设计视图 (⌘D)"
-                  : "设计表 (⌘D)"
+              wantEvents
+                ? "设计事件 (⌘D)"
+                : wantFunctions
+                  ? "设计函数 (⌘D)"
+                  : wantViews
+                    ? "设计视图 (⌘D)"
+                    : "设计表 (⌘D)"
             }
             disabled={!selectedTable}
             onClick={() => {
               if (!selectedTable || !connection || !database) return;
-              if (wantFunctions) {
+              if (wantEvents) {
+                openEventDesigner({
+                  connection,
+                  database,
+                  event: selectedTable,
+                  mode: "alter",
+                });
+              } else if (wantFunctions) {
                 openFunctionDesigner({
                   connection,
                   database,
@@ -508,16 +612,25 @@ export function ObjectListGrid() {
             type="button"
             className="obj-tool-btn"
             title={
-              wantFunctions
-                ? "新建函数 (⌘N)"
-                : wantViews
-                  ? "新建视图 (⌘N)"
-                  : "新建表 (⌘N)"
+              wantEvents
+                ? "新建事件 (⌘N)"
+                : wantFunctions
+                  ? "新建函数 (⌘N)"
+                  : wantViews
+                    ? "新建视图 (⌘N)"
+                    : "新建表 (⌘N)"
             }
             disabled={!connection || !database}
             onClick={() => {
               if (!connection || !database) return;
-              if (wantFunctions) {
+              if (wantEvents) {
+                openEventDesigner({
+                  connection,
+                  database,
+                  event: "Untitled",
+                  mode: "create",
+                });
+              } else if (wantFunctions) {
                 openFunctionDesigner({
                   connection,
                   database,
@@ -544,11 +657,17 @@ export function ObjectListGrid() {
           >
             新建
           </button>
-          {(wantViews || wantFunctions) && (
+          {(wantViews || wantFunctions || wantEvents) && (
             <button
               type="button"
               className="obj-tool-btn is-danger-text"
-              title={wantFunctions ? "删除函数" : "删除视图"}
+              title={
+                wantEvents
+                  ? "删除事件"
+                  : wantFunctions
+                    ? "删除函数"
+                    : "删除视图"
+              }
               disabled={!selectedTable || deleteBusy}
               onClick={() => {
                 if (!selectedTable) return;
@@ -573,7 +692,9 @@ export function ObjectListGrid() {
             setObjectListFilter(e.target.value);
           }}
           placeholder={
-            wantFunctions || wantViews ? "搜索" : "搜索 / 在数据库中查找"
+            wantFunctions || wantViews || wantEvents
+              ? "搜索"
+              : "搜索 / 在数据库中查找"
           }
         />
       </div>
@@ -586,11 +707,28 @@ export function ObjectListGrid() {
         /sqlite/i.test(String(connection.engine)) && (
           <p className="pane-placeholder">SQLite 不支持存储函数/过程。</p>
         )}
+      {wantEvents &&
+        !loading &&
+        !error &&
+        events.length === 0 &&
+        !/mysql|mariadb/i.test(String(connection.engine)) && (
+          <p className="pane-placeholder">
+            当前引擎不支持 MySQL Event Scheduler。
+          </p>
+        )}
       {loading &&
-        (wantFunctions ? routines.length === 0 : tables.length === 0) && (
+        (wantEvents
+          ? events.length === 0
+          : wantFunctions
+            ? routines.length === 0
+            : tables.length === 0) && (
           <p className="pane-placeholder">加载中…</p>
         )}
-      {((wantFunctions ? routines.length > 0 : tables.length > 0) ||
+      {((wantEvents
+        ? events.length > 0
+        : wantFunctions
+          ? routines.length > 0
+          : tables.length > 0) ||
         (!loading && !error)) && (
         <div className={`object-list-table-wrap ${loading ? "is-loading" : ""}`}>
           <table className="object-list-table">
@@ -615,7 +753,62 @@ export function ObjectListGrid() {
               </tr>
             </thead>
             <tbody>
-              {wantFunctions
+              {wantEvents
+                ? filteredEvents.map((ev) => (
+                    <tr
+                      key={`event-${ev.name}`}
+                      className={
+                        selectedTable === ev.name ? "is-selected" : undefined
+                      }
+                      onClick={() => selectTableMeta(ev.name)}
+                      onDoubleClick={() =>
+                        openEventDesigner({
+                          connection,
+                          database,
+                          event: ev.name,
+                          mode: "alter",
+                        })
+                      }
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        selectTableMeta(ev.name);
+                        setMenu(null);
+                        setRoutineMenu(null);
+                        setViewsFolderMenu(null);
+                        setFunctionsFolderMenu(null);
+                        setEventsFolderMenu(null);
+                        setEventMenu({
+                          x: e.clientX,
+                          y: e.clientY,
+                          conn: connection,
+                          database,
+                          name: ev.name,
+                        });
+                      }}
+                    >
+                      <td
+                        style={{
+                          width: colW("name", 160),
+                          maxWidth: colW("name", 160),
+                        }}
+                      >
+                        <span className="object-kind is-event">Ev</span>
+                        {ev.name}
+                      </td>
+                      <td>{formatEventStatus(ev.status)}</td>
+                      <td>{formatEventType(ev.eventType)}</td>
+                      <td className="comment-cell">
+                        {formatEventSchedule(ev)}
+                      </td>
+                      <td className="comment-cell">{ev.definer || "—"}</td>
+                      <td>{ev.created || "—"}</td>
+                      <td>{ev.lastAltered || "—"}</td>
+                      <td>{ev.lastExecuted || "—"}</td>
+                      <td className="comment-cell">{ev.comment || "—"}</td>
+                    </tr>
+                  ))
+                : wantFunctions
                 ? filteredRoutines.map((r) => (
                     <tr
                       key={`${r.routineType}-${r.name}`}
@@ -637,8 +830,10 @@ export function ObjectListGrid() {
                         e.stopPropagation();
                         selectTableMeta(r.name);
                         setMenu(null);
+                        setEventMenu(null);
                         setViewsFolderMenu(null);
                         setFunctionsFolderMenu(null);
+                        setEventsFolderMenu(null);
                         setRoutineMenu({
                           x: e.clientX,
                           y: e.clientY,
@@ -783,6 +978,22 @@ export function ObjectListGrid() {
           onMessage={showToast}
         />
       )}
+      {eventsFolderMenu && (
+        <EventsFolderContextMenu
+          target={eventsFolderMenu}
+          onClose={() => setEventsFolderMenu(null)}
+          onRefresh={() => setTick((x) => x + 1)}
+          onMessage={showToast}
+        />
+      )}
+      {eventMenu && (
+        <EventContextMenu
+          target={eventMenu}
+          onClose={() => setEventMenu(null)}
+          onRefresh={() => setTick((x) => x + 1)}
+          onMessage={showToast}
+        />
+      )}
 
       {runOpen && connection && database && selectedTable && selectedRoutine && (
         <RunRoutineDialog
@@ -809,9 +1020,20 @@ export function ObjectListGrid() {
             className="modal danger-confirm-modal"
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <h2>{wantFunctions ? "删除函数" : "删除视图"}</h2>
+            <h2>
+              {wantEvents
+                ? "删除事件"
+                : wantFunctions
+                  ? "删除函数"
+                  : "删除视图"}
+            </h2>
             <p className="danger-confirm-text">
-              确定删除{wantFunctions ? "函数/过程" : "视图"}{" "}
+              确定删除
+              {wantEvents
+                ? "事件"
+                : wantFunctions
+                  ? "函数/过程"
+                  : "视图"}{" "}
               <strong>
                 {database}.{deleteConfirm}
               </strong>{" "}
@@ -835,7 +1057,13 @@ export function ObjectListGrid() {
                   void (async () => {
                     setDeleteBusy(true);
                     try {
-                      if (wantFunctions) {
+                      if (wantEvents) {
+                        await dropEvent({
+                          conn: connection,
+                          database,
+                          name,
+                        });
+                      } else if (wantFunctions) {
                         const rt =
                           routineMetaMap[name]?.routineType ?? "PROCEDURE";
                         await dropRoutine({
@@ -861,7 +1089,13 @@ export function ObjectListGrid() {
                       setDeleteConfirm(null);
                       setTick((x) => x + 1);
                       showToast(
-                        `已删除${wantFunctions ? "函数" : "视图"} ${name}`,
+                        `已删除${
+                          wantEvents
+                            ? "事件"
+                            : wantFunctions
+                              ? "函数"
+                              : "视图"
+                        } ${name}`,
                       );
                     } catch (err) {
                       showToast(
