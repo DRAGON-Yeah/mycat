@@ -20,7 +20,12 @@ type Props = {
   target: DbMenuTarget;
   onClose: () => void;
   onRefresh: (connId: string) => Promise<void>;
-  onCloseDatabase: (connId: string, database: string) => void;
+  /** Close DB (+ related tabs) with dirty confirmation. */
+  onRequestCloseDatabase: (connId: string, database: string) => void;
+  /** Close DB first, then open edit dialog. */
+  onRequestEditDatabase: (connId: string, database: string) => void;
+  /** Force-close after DROP (no dirty prompt). */
+  onForceCloseDatabase: (connId: string, database: string) => void;
   onMessage: (msg: string) => void;
 };
 
@@ -32,7 +37,9 @@ export function DatabaseContextMenu({
   target,
   onClose,
   onRefresh,
-  onCloseDatabase,
+  onRequestCloseDatabase,
+  onRequestEditDatabase,
+  onForceCloseDatabase,
   onMessage,
 }: Props) {
   const [dumpOpen, setDumpOpen] = useState(false);
@@ -187,7 +194,7 @@ export function DatabaseContextMenu({
         type="button"
         disabled={busy}
         onClick={() => {
-          onCloseDatabase(conn.id, database);
+          onRequestCloseDatabase(conn.id, database);
           onClose();
         }}
       >
@@ -198,26 +205,10 @@ export function DatabaseContextMenu({
       <button
         type="button"
         disabled={busy}
-        onClick={() =>
-          void run(async () => {
-            const charset =
-              window.prompt("字符集（例如 utf8mb4）", "utf8mb4")?.trim() || "";
-            if (!charset) return;
-            const collate =
-              window
-                .prompt(
-                  "排序规则（例如 utf8mb4_general_ci）",
-                  "utf8mb4_general_ci",
-                )
-                ?.trim() || "";
-            ensureContext();
-            let sql = `ALTER DATABASE \`${escapeIdent(database)}\` CHARACTER SET ${charset}`;
-            if (collate) sql += ` COLLATE ${collate}`;
-            await executeSql(conn.id, sql);
-            onMessage("数据库属性已更新");
-            await onRefresh(conn.id);
-          })
-        }
+        onClick={() => {
+          onRequestEditDatabase(conn.id, database);
+          onClose();
+        }}
       >
         编辑数据库…
       </button>
@@ -265,7 +256,7 @@ export function DatabaseContextMenu({
               conn.id,
               `DROP DATABASE \`${escapeIdent(database)}\``,
             );
-            onCloseDatabase(conn.id, database);
+            onForceCloseDatabase(conn.id, database);
             onMessage(`已删除数据库 ${database}`);
             await onRefresh(conn.id);
           })

@@ -6,8 +6,23 @@ export type TableTab = {
   connectionId: string;
   connectionName: string;
   connectionEngine: string;
+  /** Database this table tab was opened from. */
+  database: string;
   table: string;
   dirty?: boolean;
+};
+
+export type DatabaseRelatedTabs = {
+  tables: TableTab[];
+  queries: QueryTab[];
+  dirtyTables: TableTab[];
+  dirtyQueries: QueryTab[];
+};
+
+export type CloseDatabaseWorkspaceResult = {
+  ok: boolean;
+  /** When save was requested but a dirty table tab blocks close. */
+  blockedByTableId?: string;
 };
 
 export type QueryTab = {
@@ -88,8 +103,8 @@ type WorkspaceState = {
     savedQueryId?: string;
   }) => void;
   applyQueryContext: (connection: ConnectionDto, database: string) => void;
-  closeTab: (id: string) => boolean;
-  closeQueryTab: (id: string) => boolean;
+  closeTab: (id: string, opts?: { force?: boolean }) => boolean;
+  closeQueryTab: (id: string, opts?: { force?: boolean }) => boolean;
   setActiveTab: (id: string) => void;
   setActiveQuery: (id: string) => void;
   updateQueryTab: (
@@ -109,6 +124,16 @@ type WorkspaceState = {
     >,
   ) => void;
   markTabDirty: (id: string, dirty: boolean) => void;
+  listTabsForDatabase: (
+    connectionId: string,
+    database: string,
+  ) => DatabaseRelatedTabs;
+  /** Force-close related tabs. mode save-queries assumes queries already saved & cleaned. */
+  closeDatabaseWorkspace: (
+    connectionId: string,
+    database: string,
+    mode?: "force" | "save-queries",
+  ) => CloseDatabaseWorkspaceResult;
 };
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
@@ -306,15 +331,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
   },
   openTable: (table) => {
-    const { activeConnectionId, activeConnection, tabs } = get();
+    const { activeConnectionId, activeConnection, tabs, selectedDatabase } =
+      get();
     if (!activeConnectionId || !activeConnection) return;
-    const id = `${activeConnectionId}:${table}`;
+    const database =
+      selectedDatabase?.trim() ||
+      activeConnection.database?.trim() ||
+      "";
+    if (!database) return;
+    const id = `${activeConnectionId}:${database}:${table}`;
     const exists = tabs.find((t) => t.id === id);
     if (exists) {
       set({
         activeTabId: id,
         activeQueryId: null,
         centerMode: "table",
+        selectedDatabase: database,
         selectedTable: table,
         selectionKind: "table",
         toolbarAction: "table",
@@ -330,6 +362,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           connectionId: activeConnectionId,
           connectionName: activeConnection.name,
           connectionEngine: String(activeConnection.engine),
+          database,
           table,
           dirty: false,
         },
@@ -337,6 +370,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       activeTabId: id,
       activeQueryId: null,
       centerMode: "table",
+      selectedDatabase: database,
       selectedTable: table,
       selectionKind: "table",
       toolbarAction: "table",
@@ -414,9 +448,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       placeholderFeature: null,
       activeTabId: null,
     }),
-  closeTab: (id) => {
+  closeTab: (id, opts) => {
     const tab = get().tabs.find((t) => t.id === id);
-    if (tab?.dirty) {
+    if (!tab) return false;
+    if (!opts?.force && tab.dirty) {
       const ok = window.confirm(`「${tab.table}」有未保存更改，确定关闭？`);
       if (!ok) return false;
     }
@@ -439,11 +474,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
     return true;
   },
-  closeQueryTab: (id) => {
+  closeQueryTab: (id, opts) => {
     const tab = get().queryTabs.find((t) => t.id === id);
     if (!tab) return false;
-    // Only prompt when named/saved query has edits — avoid stuck confirms in Tauri.
-    if (tab.dirty && tab.sql.trim() && tab.title !== "无标题") {
+    if (
+      !opts?.force &&
+      tab.dirty &&
+      tab.sql.trim() &&
+      tab.title !== "无标题"
+    ) {
       const ok = window.confirm(`「${tab.title}」有未保存更改，确定关闭？`);
       if (!ok) return false;
     }
@@ -466,16 +505,19 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
     return true;
   },
-  setActiveTab: (id) =>
+  setActiveTab: (id) => {
+    const tab = get().tabs.find((t) => t.id === id);
     set({
       activeTabId: id,
       activeQueryId: null,
       centerMode: "table",
       toolbarAction: "table",
       placeholderFeature: null,
-      selectedTable: get().tabs.find((t) => t.id === id)?.table ?? null,
+      selectedDatabase: tab?.database || get().selectedDatabase,
+      selectedTable: tab?.table ?? null,
       selectionKind: "table",
-    }),
+    });
+  },
   setActiveQuery: (id) => {
     const tab = get().queryTabs.find((t) => t.id === id);
     if (!tab) return;
@@ -517,4 +559,77 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({
       tabs: get().tabs.map((t) => (t.id === id ? { ...t, dirty } : t)),
     }),
+  listTabsForDatabase: (connectionId, database) => {
+    const tables = get().tabs.filter(
+      (t) => t.connectionId === connectionId && t.database === database,
+    );
+    const queries = get().queryTabs.filter(
+      (t) => t.connectionId === connectionId && t.database === database,
+    );
+    return {
+      tables,
+      queries,
+      dirtyTables: tables.filter((t) => t.dirty),
+      dirtyQueries: queries.filter((t) => t.dirty && t.sql.trim().length > 0),
+    };
+  },
+  closeDatabaseWorkspace: (connectionId, database, mode = "force") => {
+    const related = get().listTabsForDatabase(connectionId, database);
+    if (mode === "save-queries" && related.dirtyTables.length > 0) {
+      return {
+        ok: false,
+        blockedByTableId: related.dirtyTables[0]!.id,
+      };
+    }
+
+    const tabs = get().tabs.filter(
+      (t) => !(t.connectionId === connectionId && t.database === database),
+    );
+    const queryTabs = get().queryTabs.filter(
+      (t) => !(t.connectionId === connectionId && t.database === database),
+    );
+    const activeTabId = tabs.some((t) => t.id === get().activeTabId)
+      ? get().activeTabId
+      : (tabs[tabs.length - 1]?.id ?? null);
+    const activeQueryId = queryTabs.some((t) => t.id === get().activeQueryId)
+      ? get().activeQueryId
+      : (queryTabs[queryTabs.length - 1]?.id ?? null);
+
+    const clearingSelection =
+      get().activeConnectionId === connectionId &&
+      get().selectedDatabase === database;
+
+    set({
+      tabs,
+      queryTabs,
+      activeTabId,
+      activeQueryId,
+      ...(clearingSelection
+        ? {
+            selectedDatabase: null,
+            selectedTable: null,
+            selectedFolder: null,
+            selectionKind: get().activeConnectionId ? "connection" : "none",
+            objectListFilter: "",
+            focusObjectListFilter: false,
+          }
+        : {}),
+      centerMode: activeQueryId
+        ? "query"
+        : activeTabId
+          ? "table"
+          : clearingSelection
+            ? "welcome"
+            : get().selectedDatabase
+              ? "objectList"
+              : "welcome",
+      toolbarAction: activeQueryId
+        ? "query"
+        : activeTabId
+          ? "table"
+          : "connection",
+      placeholderFeature: null,
+    });
+    return { ok: true };
+  },
 }));

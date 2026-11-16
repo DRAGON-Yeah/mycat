@@ -75,7 +75,8 @@ function typeHint(dataType: string): string {
 
 export function DataGrid({ tab }: Props) {
   const markDirty = useWorkspaceStore((s) => s.markTabDirty);
-  const database = useWorkspaceStore((s) => s.selectedDatabase);
+  const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
+  const database = tab.database || selectedDatabase;
   const [page, setPage] = useState(1);
   const [pageSize] = useState(1000);
   const [sortCol, setSortCol] = useState<string | undefined>();

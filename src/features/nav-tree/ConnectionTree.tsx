@@ -16,6 +16,7 @@ import { ConnectionForm } from "../connections/ConnectionForm";
 import type { ConnectionDto, UpsertConnectionInput } from "../connections/types";
 import {
   closeConnection,
+  executeSql,
   listDatabases,
   openConnection,
 } from "../connections/sessionApi";
@@ -26,12 +27,15 @@ import {
 import {
   deleteSavedQuery,
   listSavedQueries,
+  upsertSavedQuery,
   type SavedQueryDto,
 } from "../query/savedQueriesApi";
 import {
   DatabaseContextMenu,
   type DbMenuTarget,
 } from "./DatabaseContextMenu";
+import { CloseDatabaseDialog } from "./CloseDatabaseDialog";
+import { EditDatabaseDialog } from "./EditDatabaseDialog";
 import {
   IconBackups,
   IconDatabase,
@@ -42,6 +46,17 @@ import {
   IconTables,
   IconViews,
 } from "./TreeIcons";
+
+type PendingClose = {
+  connId: string;
+  database: string;
+  after: "none" | "edit";
+};
+
+type PendingEdit = {
+  connId: string;
+  database: string;
+};
 
 type ConnNode = {
   conn: ConnectionDto;
@@ -74,6 +89,10 @@ export function ConnectionTree() {
   const [filter, setFilter] = useState("");
   const [dbMenu, setDbMenu] = useState<DbMenuTarget | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [pendingClose, setPendingClose] = useState<PendingClose | null>(null);
+  const [pendingEdit, setPendingEdit] = useState<PendingEdit | null>(null);
+  const [closeBusy, setCloseBusy] = useState(false);
+  const [editBusy, setEditBusy] = useState(false);
 
   const activeConnectionId = useWorkspaceStore((s) => s.activeConnectionId);
   const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
@@ -82,15 +101,22 @@ export function ConnectionTree() {
   const clearConnection = useWorkspaceStore((s) => s.clearConnection);
   const selectDatabase = useWorkspaceStore((s) => s.selectDatabase);
   const selectObjectFolder = useWorkspaceStore((s) => s.selectObjectFolder);
-  const clearDatabaseSelection = useWorkspaceStore(
-    (s) => s.clearDatabaseSelection,
-  );
   const openQuery = useWorkspaceStore((s) => s.openQuery);
   const activeConnection = useWorkspaceStore((s) => s.activeConnection);
   const activeQueryId = useWorkspaceStore((s) => s.activeQueryId);
   const queryTabs = useWorkspaceStore((s) => s.queryTabs);
+  const listTabsForDatabase = useWorkspaceStore((s) => s.listTabsForDatabase);
+  const closeDatabaseWorkspace = useWorkspaceStore(
+    (s) => s.closeDatabaseWorkspace,
+  );
+  const setActiveTab = useWorkspaceStore((s) => s.setActiveTab);
+  const updateQueryTab = useWorkspaceStore((s) => s.updateQueryTab);
   const activeSavedQueryId =
     queryTabs.find((t) => t.id === activeQueryId)?.savedQueryId ?? null;
+
+  const pendingCloseRelated = pendingClose
+    ? listTabsForDatabase(pendingClose.connId, pendingClose.database)
+    : null;
 
   useEffect(() => {
     function onDocClick() {
@@ -108,7 +134,7 @@ export function ConnectionTree() {
       // ⇧⌘. close database
       if (e.shiftKey && (e.key === "." || e.code === "Period")) {
         e.preventDefault();
-        closeDatabase(activeConnectionId, selectedDatabase);
+        requestCloseDatabase(activeConnectionId, selectedDatabase, "none");
         return;
       }
       // ⌘Y new query
@@ -133,7 +159,7 @@ export function ConnectionTree() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // closeDatabase / refresh are stable enough via closure over latest state
+    // requestCloseDatabase / refresh via latest closure
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDatabase, activeConnectionId, activeConnection, openQuery]);
 
@@ -277,16 +303,131 @@ export function ConnectionTree() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeConnectionId, selectedDatabase]);
 
-  function closeDatabase(connId: string, database: string) {
+  function collapseDatabaseNode(connId: string, database: string) {
     setNodes((prev) =>
       prev.map((n) =>
         n.conn.id === connId
-          ? { ...n, openDbs: { ...n.openDbs, [database]: false } }
+          ? {
+              ...n,
+              openDbs: { ...n.openDbs, [database]: false },
+              openQueryFolders: { ...n.openQueryFolders, [database]: false },
+            }
           : n,
       ),
     );
-    if (activeConnectionId === connId && selectedDatabase === database) {
-      clearDatabaseSelection();
+  }
+
+  function finalizeCloseDatabase(connId: string, database: string) {
+    closeDatabaseWorkspace(connId, database, "force");
+    collapseDatabaseNode(connId, database);
+  }
+
+  function requestCloseDatabase(
+    connId: string,
+    database: string,
+    after: "none" | "edit" = "none",
+  ) {
+    const related = listTabsForDatabase(connId, database);
+    if (
+      related.dirtyTables.length === 0 &&
+      related.dirtyQueries.length === 0
+    ) {
+      finalizeCloseDatabase(connId, database);
+      if (after === "edit") {
+        setPendingEdit({ connId, database });
+      }
+      return;
+    }
+    setPendingClose({ connId, database, after });
+  }
+
+  async function handleSaveAndClose() {
+    if (!pendingClose) return;
+    const { connId, database, after } = pendingClose;
+    const related = listTabsForDatabase(connId, database);
+    if (related.dirtyTables.length > 0) {
+      const blocked = related.dirtyTables[0]!;
+      setPendingClose(null);
+      setActiveTab(blocked.id);
+      setToast(`请先保存表「${blocked.table}」的未保存更改`);
+      window.setTimeout(() => setToast(null), 2800);
+      return;
+    }
+    setCloseBusy(true);
+    try {
+      for (const q of related.dirtyQueries) {
+        const name =
+          q.title && q.title !== "无标题"
+            ? q.title
+            : `未命名查询-${new Date().toISOString().slice(11, 19)}`;
+        const saved = await upsertSavedQuery({
+          id: q.savedQueryId || undefined,
+          connectionId: q.connectionId,
+          database: q.database || null,
+          name,
+          sql: q.sql || "",
+        });
+        updateQueryTab(q.id, {
+          title: saved.name,
+          savedQueryId: saved.id,
+          dirty: false,
+        });
+      }
+      if (related.dirtyQueries.length > 0) {
+        window.dispatchEvent(
+          new CustomEvent("saved-queries-changed", {
+            detail: { connectionId: connId, database },
+          }),
+        );
+      }
+      const result = closeDatabaseWorkspace(connId, database, "save-queries");
+      if (!result.ok && result.blockedByTableId) {
+        setActiveTab(result.blockedByTableId);
+        setToast("请先保存表的未保存更改");
+        window.setTimeout(() => setToast(null), 2800);
+        return;
+      }
+      collapseDatabaseNode(connId, database);
+      setPendingClose(null);
+      if (after === "edit") {
+        setPendingEdit({ connId, database });
+      }
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : String(err));
+      window.setTimeout(() => setToast(null), 2800);
+    } finally {
+      setCloseBusy(false);
+    }
+  }
+
+  function handleDiscardAndClose() {
+    if (!pendingClose) return;
+    const { connId, database, after } = pendingClose;
+    finalizeCloseDatabase(connId, database);
+    setPendingClose(null);
+    if (after === "edit") {
+      setPendingEdit({ connId, database });
+    }
+  }
+
+  async function handleEditDatabaseSubmit(charset: string, collate: string) {
+    if (!pendingEdit) return;
+    const { connId, database } = pendingEdit;
+    setEditBusy(true);
+    try {
+      await openConnection(connId);
+      let sql = `ALTER DATABASE \`${database.replace(/`/g, "``")}\` CHARACTER SET ${charset}`;
+      if (collate) sql += ` COLLATE ${collate}`;
+      await executeSql(connId, sql);
+      setPendingEdit(null);
+      setToast("数据库属性已更新");
+      window.setTimeout(() => setToast(null), 2500);
+      await refreshConnectionDatabases(connId);
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : String(err));
+      window.setTimeout(() => setToast(null), 2800);
+    } finally {
+      setEditBusy(false);
     }
   }
 
@@ -719,11 +860,42 @@ export function ConnectionTree() {
           target={dbMenu}
           onClose={() => setDbMenu(null)}
           onRefresh={refreshConnectionDatabases}
-          onCloseDatabase={closeDatabase}
+          onRequestCloseDatabase={(connId, database) =>
+            requestCloseDatabase(connId, database, "none")
+          }
+          onRequestEditDatabase={(connId, database) =>
+            requestCloseDatabase(connId, database, "edit")
+          }
+          onForceCloseDatabase={(connId, database) =>
+            finalizeCloseDatabase(connId, database)
+          }
           onMessage={(msg) => {
             setToast(msg);
             window.setTimeout(() => setToast(null), 2500);
           }}
+        />
+      )}
+
+      {pendingClose && pendingCloseRelated && (
+        <CloseDatabaseDialog
+          database={pendingClose.database}
+          dirtyTables={pendingCloseRelated.dirtyTables}
+          dirtyQueries={pendingCloseRelated.dirtyQueries}
+          busy={closeBusy}
+          onCancel={() => setPendingClose(null)}
+          onDiscardAndClose={handleDiscardAndClose}
+          onSaveAndClose={() => void handleSaveAndClose()}
+        />
+      )}
+
+      {pendingEdit && (
+        <EditDatabaseDialog
+          database={pendingEdit.database}
+          busy={editBusy}
+          onCancel={() => setPendingEdit(null)}
+          onSubmit={(charset, collate) =>
+            void handleEditDatabaseSubmit(charset, collate)
+          }
         />
       )}
 

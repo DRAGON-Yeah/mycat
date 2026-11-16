@@ -2413,6 +2413,27 @@ tr.is-inserted {
   line-height: 1.4;
 }
 
+.close-db-dirty-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--text);
+  display: grid;
+  gap: 4px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.close-db-actions {
+  flex-wrap: wrap;
+}
+
+.close-db-actions .close-db-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 /* —— Navicat shell —— */
 .connection-tree {
   position: relative;
