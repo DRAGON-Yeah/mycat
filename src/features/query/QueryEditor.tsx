@@ -198,6 +198,7 @@ export function QueryEditor() {
                 table: t.name,
                 page: 1,
                 pageSize: 1,
+                database: tab!.database || undefined,
               });
               columnsByTable[t.name] = page.columns.map((c) => c.name);
             } catch {

@@ -94,6 +94,7 @@ pub trait DriverSession: Send {
     fn list_tables(&self, database: Option<&str>, schema: Option<&str>) -> AppResult<Vec<DbObject>>;
     fn query_page(
         &self,
+        database: Option<&str>,
         table: &str,
         page: i64,
         page_size: i64,
@@ -103,7 +104,12 @@ pub trait DriverSession: Send {
         filter_value: Option<&str>,
     ) -> AppResult<RowsPage>;
     fn execute_sql(&self, sql: &str) -> AppResult<QueryOutcome>;
-    fn apply_row_changes(&self, table: &str, changes: &[RowChange]) -> AppResult<i64>;
+    fn apply_row_changes(
+        &self,
+        database: Option<&str>,
+        table: &str,
+        changes: &[RowChange],
+    ) -> AppResult<i64>;
     /// Server-side backend/connection id used by cancel (MySQL CONNECTION_ID / PG pid).
     fn backend_pid(&self) -> AppResult<Option<i64>> {
         Ok(None)

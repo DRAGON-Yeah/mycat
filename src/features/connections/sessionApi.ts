@@ -48,6 +48,7 @@ export function fetchTablePage(args: {
   sortDir?: string;
   filterCol?: string;
   filterValue?: string;
+  database?: string;
 }) {
   return invoke<RowsPage>("fetch_table_page", args);
 }
@@ -77,6 +78,7 @@ export function applyRowChanges(args: {
   connectionId: string;
   table: string;
   changes: RowChange[];
+  database?: string;
 }) {
   return invoke<number>("apply_row_changes", args);
 }
@@ -86,6 +88,7 @@ export function dumpTableSql(args: {
   table: string;
   includeData: boolean;
   engine: string;
+  database?: string;
 }) {
   return invoke<string>("dump_table_sql", args);
 }

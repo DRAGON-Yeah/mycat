@@ -1,4 +1,4 @@
-import catLogo from "../assets/cat-logo.svg";
+import catLogo from "../assets/cat-logo.png";
 import { ThemeToggle } from "../features/settings/ThemeToggle";
 import {
   useWorkspaceStore,

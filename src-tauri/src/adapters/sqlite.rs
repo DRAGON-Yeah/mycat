@@ -94,6 +94,7 @@ impl DriverSession for SqliteSession {
 
     fn query_page(
         &self,
+        _database: Option<&str>,
         table: &str,
         page: i64,
         page_size: i64,
@@ -240,7 +241,12 @@ impl DriverSession for SqliteSession {
         })
     }
 
-    fn apply_row_changes(&self, table: &str, changes: &[RowChange]) -> AppResult<i64> {
+    fn apply_row_changes(
+        &self,
+        _database: Option<&str>,
+        table: &str,
+        changes: &[RowChange],
+    ) -> AppResult<i64> {
         if !ident_ok(table) {
             return Err(AppError::Validation("非法表名".into()));
         }
@@ -375,7 +381,7 @@ mod tests {
         assert!(tables.iter().any(|t| t.name == "demo"));
 
         let page = session
-            .query_page("demo", 1, 10, Some("id"), Some("ASC"), None, None)
+            .query_page(None, "demo", 1, 10, Some("id"), Some("ASC"), None, None)
             .unwrap();
         assert_eq!(page.total, 3);
         assert_eq!(page.rows.len(), 3);
@@ -387,14 +393,14 @@ mod tests {
             )
             .unwrap();
         let page2 = session
-            .query_page("demo", 2, 5, Some("id"), Some("ASC"), None, None)
+            .query_page(None, "demo", 2, 5, Some("id"), Some("ASC"), None, None)
             .unwrap();
         assert_eq!(page2.total, 11);
         assert_eq!(page2.rows.len(), 5);
         assert_eq!(page2.page, 2);
 
         let filtered = session
-            .query_page("demo", 1, 50, None, None, Some("name"), Some("a"))
+            .query_page(None, "demo", 1, 50, None, None, Some("name"), Some("a"))
             .unwrap();
         assert!(filtered.total >= 1);
         assert!(filtered.rows.iter().all(|r| {
@@ -405,6 +411,7 @@ mod tests {
 
         session
             .apply_row_changes(
+                None,
                 "demo",
                 &[RowChange {
                     op: "update".into(),
@@ -416,7 +423,16 @@ mod tests {
             )
             .unwrap();
         let after = session
-            .query_page("demo", 1, 10, Some("id"), Some("ASC"), Some("name"), Some("updated"))
+            .query_page(
+                None,
+                "demo",
+                1,
+                10,
+                Some("id"),
+                Some("ASC"),
+                Some("name"),
+                Some("updated"),
+            )
             .unwrap();
         assert_eq!(after.total, 1);
 

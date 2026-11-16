@@ -76,6 +76,20 @@ fn ident_ok(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// Qualify as `db`.`table` when database is set so ops work without session USE.
+fn table_ref(database: Option<&str>, table: &str) -> AppResult<String> {
+    if !ident_ok(table) {
+        return Err(AppError::Validation("非法表名".into()));
+    }
+    if let Some(db) = database.map(str::trim).filter(|d| !d.is_empty()) {
+        if !ident_ok(db) {
+            return Err(AppError::Validation("非法库名".into()));
+        }
+        return Ok(format!("`{db}`.`{table}`"));
+    }
+    Ok(format!("`{table}`"))
+}
+
 impl DriverSession for MysqlSession {
     fn list_databases(&self) -> AppResult<Vec<String>> {
         let mut conn = self
@@ -149,6 +163,7 @@ impl DriverSession for MysqlSession {
 
     fn query_page(
         &self,
+        database: Option<&str>,
         table: &str,
         page: i64,
         page_size: i64,
@@ -157,9 +172,7 @@ impl DriverSession for MysqlSession {
         filter_col: Option<&str>,
         filter_value: Option<&str>,
     ) -> AppResult<RowsPage> {
-        if !ident_ok(table) {
-            return Err(AppError::Validation("非法表名".into()));
-        }
+        let table_sql = table_ref(database, table)?;
         let page = page.max(1);
         let page_size = page_size.clamp(1, 1000);
         let offset = (page - 1) * page_size;
@@ -191,7 +204,12 @@ impl DriverSession for MysqlSession {
             .lock()
             .map_err(|_| AppError::Message("mysql lock".into()))?;
 
-        let count_sql = format!("SELECT COUNT(*) FROM `{table}`{where_sql}");
+        // Keep session default DB in sync when provided (helps other unqualified ops).
+        if let Some(db) = database.map(str::trim).filter(|d| !d.is_empty() && ident_ok(d)) {
+            conn.query_drop(format!("USE `{db}`"))?;
+        }
+
+        let count_sql = format!("SELECT COUNT(*) FROM {table_sql}{where_sql}");
         let total: i64 = if params.is_empty() {
             conn.query_first(count_sql)?.unwrap_or(0)
         } else {
@@ -199,7 +217,7 @@ impl DriverSession for MysqlSession {
         };
 
         let data_sql = format!(
-            "SELECT * FROM `{table}`{where_sql}{order_sql} LIMIT {page_size} OFFSET {offset}"
+            "SELECT * FROM {table_sql}{where_sql}{order_sql} LIMIT {page_size} OFFSET {offset}"
         );
 
         let (columns_meta, rows) = if params.is_empty() {
@@ -331,14 +349,20 @@ impl DriverSession for MysqlSession {
         })
     }
 
-    fn apply_row_changes(&self, table: &str, changes: &[RowChange]) -> AppResult<i64> {
-        if !ident_ok(table) {
-            return Err(AppError::Validation("非法表名".into()));
-        }
+    fn apply_row_changes(
+        &self,
+        database: Option<&str>,
+        table: &str,
+        changes: &[RowChange],
+    ) -> AppResult<i64> {
+        let table_sql = table_ref(database, table)?;
         let mut conn = self
             .conn
             .lock()
             .map_err(|_| AppError::Message("mysql lock".into()))?;
+        if let Some(db) = database.map(str::trim).filter(|d| !d.is_empty() && ident_ok(d)) {
+            conn.query_drop(format!("USE `{db}`"))?;
+        }
         let mut tx = conn.start_transaction(mysql::TxOpts::default())?;
         let mut affected = 0i64;
         for change in changes {
@@ -365,7 +389,7 @@ impl DriverSession for MysqlSession {
                         .map(|c| format!("`{c}` = ?"))
                         .collect::<Vec<_>>()
                         .join(" AND ");
-                    let sql = format!("UPDATE `{table}` SET {set_sql} WHERE {where_sql}");
+                    let sql = format!("UPDATE {table_sql} SET {set_sql} WHERE {where_sql}");
                     let params: Vec<MysqlValue> = change
                         .values
                         .iter()
@@ -391,7 +415,8 @@ impl DriverSession for MysqlSession {
                         .map(|_| "?")
                         .collect::<Vec<_>>()
                         .join(", ");
-                    let sql = format!("INSERT INTO `{table}` ({cols}) VALUES ({placeholders})");
+                    let sql =
+                        format!("INSERT INTO {table_sql} ({cols}) VALUES ({placeholders})");
                     let params: Vec<MysqlValue> = change.values.iter().map(json_to_mysql).collect();
                     affected += tx.exec_iter(sql, params)?.affected_rows() as i64;
                 }
@@ -408,7 +433,7 @@ impl DriverSession for MysqlSession {
                         .map(|c| format!("`{c}` = ?"))
                         .collect::<Vec<_>>()
                         .join(" AND ");
-                    let sql = format!("DELETE FROM `{table}` WHERE {where_sql}");
+                    let sql = format!("DELETE FROM {table_sql} WHERE {where_sql}");
                     let params: Vec<MysqlValue> =
                         change.pk_values.iter().map(json_to_mysql).collect();
                     affected += tx.exec_iter(sql, params)?.affected_rows() as i64;

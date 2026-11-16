@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyRowChanges,
   dumpTableSql,
+  executeSql,
   fetchTablePage,
+  openConnection,
   writeLog,
   type RowChange,
   type RowsPage,
@@ -12,6 +14,15 @@ import { ImportCsvButton } from "../import-export/ImportCsvButton";
 import { downloadTextFile } from "../import-export/csv";
 import type { TableTab } from "../../stores/workspaceStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { CellEditorHost, needsChooser } from "./CellEditorHost";
+import {
+  classifyEditor,
+  extrasFromShowColumns,
+  formatDateOnly,
+  formatDateTime,
+  type ColumnExtra,
+  type EditorKind,
+} from "./columnEditors";
 import {
   buildCsvData,
   buildCsvHeaders,
@@ -122,6 +133,14 @@ export function DataGrid({ tab }: Props) {
   } | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [editSnapshot, setEditSnapshot] = useState<unknown>(null);
+  const [columnExtras, setColumnExtras] = useState<
+    Record<string, ColumnExtra>
+  >({});
+  const [chooser, setChooser] = useState<{
+    row: number;
+    col: number;
+    kind: EditorKind;
+  } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const dirty = useMemo(() => {
@@ -148,6 +167,45 @@ export function DataGrid({ tab }: Props) {
     return () => document.removeEventListener("click", onDocClick);
   }, []);
 
+  const loadColumnExtras = useCallback(async () => {
+    try {
+      await openConnection(tab.connectionId);
+      const engine = String(tab.connectionEngine || "mysql").toLowerCase();
+      const db = (database || "").replace(/`/g, "``");
+      const table = tab.table.replace(/`/g, "``");
+      let sql = "";
+      if (engine === "postgres" || engine === "postgresql") {
+        sql = `SELECT column_name AS "Field", udt_name AS "Type", is_nullable AS "Null"
+FROM information_schema.columns
+WHERE table_name = '${tab.table.replace(/'/g, "''")}'
+ORDER BY ordinal_position`;
+      } else if (engine === "sqlite") {
+        sql = `PRAGMA table_info(\`${table}\`)`;
+      } else {
+        sql = db
+          ? `SHOW FULL COLUMNS FROM \`${db}\`.\`${table}\``
+          : `SHOW FULL COLUMNS FROM \`${table}\``;
+      }
+      const out = await executeSql(tab.connectionId, sql);
+      if (engine === "sqlite") {
+        // PRAGMA: cid, name, type, notnull, dflt_value, pk
+        const map: Record<string, ColumnExtra> = {};
+        for (const row of out.rows) {
+          const name = String(row[1] ?? "");
+          const rawType = String(row[2] ?? "");
+          const notnull = Number(row[3] ?? 0) === 1;
+          if (!name) continue;
+          map[name] = { rawType, nullable: !notnull, enumValues: [] };
+        }
+        setColumnExtras(map);
+        return;
+      }
+      setColumnExtras(extrasFromShowColumns(out.columns, out.rows));
+    } catch {
+      setColumnExtras({});
+    }
+  }, [tab.connectionId, tab.connectionEngine, tab.table, database]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -161,6 +219,7 @@ export function DataGrid({ tab }: Props) {
         sortDir,
         filterCol: appliedFilter.col,
         filterValue: appliedFilter.value,
+        database: database || undefined,
       });
       setData(result);
       const mapped: GridRow[] = result.rows.map((values, idx) => ({
@@ -170,6 +229,7 @@ export function DataGrid({ tab }: Props) {
       setRows(mapped);
       setBaseline(mapped.map((r) => ({ ...r, values: [...r.values] })));
       setSelectedRow(0);
+      void loadColumnExtras();
     } catch (err) {
       setData(null);
       setRows([]);
@@ -183,13 +243,34 @@ export function DataGrid({ tab }: Props) {
   }, [
     tab.connectionId,
     tab.table,
+    database,
     page,
     pageSize,
     sortCol,
     sortDir,
     appliedFilter.col,
     appliedFilter.value,
+    loadColumnExtras,
   ]);
+
+  function editorKindForCol(colIndex: number): EditorKind {
+    const col = data?.columns[colIndex];
+    if (!col) return "text";
+    return classifyEditor(col.dataType, columnExtras[col.name]);
+  }
+
+  function openCellEditor(rowIndex: number, colIndex: number, cell: unknown) {
+    setSelectedRow(rowIndex);
+    const col = data?.columns[colIndex];
+    const extra = col ? columnExtras[col.name] : undefined;
+    const kind = editorKindForCol(colIndex);
+    if (needsChooser(kind, extra)) {
+      setChooser({ row: rowIndex, col: colIndex, kind });
+      setEditing(null);
+      return;
+    }
+    beginEdit(rowIndex, colIndex, cell);
+  }
 
   useEffect(() => {
     void load();
@@ -242,7 +323,9 @@ export function DataGrid({ tab }: Props) {
   }
 
   function updateCell(rowIndex: number, colIndex: number, raw: string) {
-    const nullable = data?.columns[colIndex]?.nullable ?? true;
+    const col = data?.columns[colIndex];
+    const extra = col ? columnExtras[col.name] : undefined;
+    const nullable = extra?.nullable ?? col?.nullable ?? true;
     updateCellValue(rowIndex, colIndex, parseCellInput(raw, nullable));
   }
 
@@ -272,7 +355,20 @@ export function DataGrid({ tab }: Props) {
 
   function addRow() {
     if (!data) return;
-    const empty = data.columns.map(() => null);
+    const empty = data.columns.map((c) => {
+      const extra = columnExtras[c.name];
+      const kind = classifyEditor(c.dataType, extra);
+      const nullable = extra?.nullable ?? c.nullable ?? true;
+      if (!nullable) {
+        if (kind === "datetime") return formatDateTime(new Date());
+        if (kind === "date") return formatDateOnly(new Date());
+        if (kind === "bool") return 0;
+        if (kind === "number") return 0;
+        if (kind === "enum" && extra?.enumValues?.[0]) return extra.enumValues[0];
+        return "";
+      }
+      return null;
+    });
     setRows((prev) => [
       ...prev,
       { key: `new-${Date.now()}`, values: empty, inserted: true },
@@ -360,6 +456,7 @@ export function DataGrid({ tab }: Props) {
         connectionId: tab.connectionId,
         table: tab.table,
         changes,
+        database: database || undefined,
       });
       await load();
     } catch (err) {
@@ -437,12 +534,17 @@ export function DataGrid({ tab }: Props) {
   return (
     <div className="data-grid navicat-grid" ref={rootRef}>
       <div className="dg-toolbar">
-        <ExportCsvButton connectionId={tab.connectionId} table={tab.table} />
+        <ExportCsvButton
+          connectionId={tab.connectionId}
+          table={tab.table}
+          database={database || undefined}
+        />
         {data && (
           <ImportCsvButton
             connectionId={tab.connectionId}
             table={tab.table}
             tableColumns={data.columns.map((c) => c.name)}
+            database={database || undefined}
           />
         )}
         <button
@@ -455,6 +557,7 @@ export function DataGrid({ tab }: Props) {
                 table: tab.table,
                 includeData: true,
                 engine: tab.connectionEngine,
+                database: database || undefined,
               });
               downloadTextFile(`${tab.table}.sql`, sql, "application/sql");
             } catch (err) {
@@ -569,12 +672,21 @@ export function DataGrid({ tab }: Props) {
                   const isEditing =
                     editing?.row === ri && editing?.col === ci;
                   const nullCell = isNullish(cell);
+                  const colMeta = data?.columns[ci];
+                  const extra = colMeta
+                    ? columnExtras[colMeta.name]
+                    : undefined;
+                  const kind = editorKindForCol(ci);
+                  const chooserCol = needsChooser(kind, extra);
                   return (
                     <td
                       key={ci}
-                      className={
-                        nullCell && !isEditing ? "is-null" : undefined
-                      }
+                      className={[
+                        nullCell && !isEditing ? "is-null" : "",
+                        chooserCol ? "is-chooser" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ") || undefined}
                       onContextMenu={(e) => {
                         e.preventDefault();
                         setSelectedRow(ri);
@@ -586,37 +698,61 @@ export function DataGrid({ tab }: Props) {
                         });
                       }}
                     >
-                      <input
-                        className={`cell-input ${
-                          nullCell && !isEditing ? "is-null-ph" : ""
-                        }`}
-                        disabled={!!row.deleted}
-                        value={
-                          isEditing
-                            ? editDraft
-                            : nullCell
-                              ? ""
-                              : cellDisplayText(cell)
-                        }
-                        placeholder={
-                          nullCell && !isEditing ? "NULL" : undefined
-                        }
-                        onChange={(e) => {
-                          setEditDraft(e.target.value);
-                          updateCell(ri, ci, e.target.value);
-                        }}
-                        onFocus={() => beginEdit(ri, ci, cell)}
-                        onBlur={() => commitEdit()}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            (e.target as HTMLInputElement).blur();
-                          } else if (e.key === "Escape") {
-                            e.preventDefault();
-                            cancelEdit();
+                      {chooserCol ? (
+                        <button
+                          type="button"
+                          className={`cell-input cell-chooser-btn ${
+                            nullCell ? "is-null-ph" : ""
+                          }`}
+                          disabled={!!row.deleted}
+                          title={
+                            kind === "datetime" || kind === "date" || kind === "time"
+                              ? "点击选择日期/时间"
+                              : kind === "enum"
+                                ? "点击选择枚举值"
+                                : "点击选择"
                           }
-                        }}
-                      />
+                          onClick={() => openCellEditor(ri, ci, cell)}
+                        >
+                          {nullCell ? (
+                            <span className="cell-null-label">NULL</span>
+                          ) : (
+                            cellDisplayText(cell)
+                          )}
+                        </button>
+                      ) : (
+                        <input
+                          className={`cell-input ${
+                            nullCell && !isEditing ? "is-null-ph" : ""
+                          }`}
+                          disabled={!!row.deleted}
+                          value={
+                            isEditing
+                              ? editDraft
+                              : nullCell
+                                ? ""
+                                : cellDisplayText(cell)
+                          }
+                          placeholder={
+                            nullCell && !isEditing ? "NULL" : undefined
+                          }
+                          onChange={(e) => {
+                            setEditDraft(e.target.value);
+                            updateCell(ri, ci, e.target.value);
+                          }}
+                          onFocus={() => beginEdit(ri, ci, cell)}
+                          onBlur={() => commitEdit()}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              (e.target as HTMLInputElement).blur();
+                            } else if (e.key === "Escape") {
+                              e.preventDefault();
+                              cancelEdit();
+                            }
+                          }}
+                        />
+                      )}
                     </td>
                   );
                 })}
@@ -752,6 +888,26 @@ export function DataGrid({ tab }: Props) {
           </span>
         </div>
       </div>
+
+      {chooser && data && (
+        <CellEditorHost
+          kind={chooser.kind}
+          value={rows[chooser.row]?.values[chooser.col]}
+          nullable={
+            columnExtras[data.columns[chooser.col]?.name ?? ""]?.nullable ??
+            data.columns[chooser.col]?.nullable ??
+            true
+          }
+          enumValues={
+            columnExtras[data.columns[chooser.col]?.name ?? ""]?.enumValues
+          }
+          onCommit={(v) => {
+            updateCellValue(chooser.row, chooser.col, v);
+            setChooser(null);
+          }}
+          onCancel={() => setChooser(null)}
+        />
+      )}
 
       {menu && data && (
         <div

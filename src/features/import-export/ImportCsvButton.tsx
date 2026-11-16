@@ -6,9 +6,15 @@ type Props = {
   connectionId: string;
   table: string;
   tableColumns: string[];
+  database?: string;
 };
 
-export function ImportCsvButton({ connectionId, table, tableColumns }: Props) {
+export function ImportCsvButton({
+  connectionId,
+  table,
+  tableColumns,
+  database,
+}: Props) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -55,6 +61,7 @@ export function ImportCsvButton({ connectionId, table, tableColumns }: Props) {
           await applyRowChanges({
             connectionId,
             table,
+            database,
             changes: slice.map((item) => ({
               op: "insert",
               pkColumns: [],
@@ -71,6 +78,7 @@ export function ImportCsvButton({ connectionId, table, tableColumns }: Props) {
               await applyRowChanges({
                 connectionId,
                 table,
+                database,
                 changes: [
                   {
                     op: "insert",

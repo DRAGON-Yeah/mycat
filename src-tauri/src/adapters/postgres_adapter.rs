@@ -161,6 +161,7 @@ impl DriverSession for PostgresSession {
 
     fn query_page(
         &self,
+        _database: Option<&str>,
         table: &str,
         page: i64,
         page_size: i64,
@@ -314,7 +315,12 @@ impl DriverSession for PostgresSession {
         })
     }
 
-    fn apply_row_changes(&self, table: &str, changes: &[RowChange]) -> AppResult<i64> {
+    fn apply_row_changes(
+        &self,
+        _database: Option<&str>,
+        table: &str,
+        changes: &[RowChange],
+    ) -> AppResult<i64> {
         if !ident_ok(table) {
             return Err(AppError::Validation("非法表名".into()));
         }

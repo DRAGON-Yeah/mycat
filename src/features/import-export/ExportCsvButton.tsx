@@ -5,9 +5,10 @@ import { downloadTextFile, rowsToCsv } from "./csv";
 type Props = {
   connectionId: string;
   table: string;
+  database?: string;
 };
 
-export function ExportCsvButton({ connectionId, table }: Props) {
+export function ExportCsvButton({ connectionId, table, database }: Props) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const cancelRef = useRef(false);
@@ -33,6 +34,7 @@ export function ExportCsvButton({ connectionId, table }: Props) {
           table,
           page,
           pageSize,
+          database,
         });
         if (page === 1) {
           columns = chunk.columns.map((c) => c.name);

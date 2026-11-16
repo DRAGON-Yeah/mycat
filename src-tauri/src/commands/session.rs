@@ -70,9 +70,11 @@ pub fn fetch_table_page(
     sort_dir: Option<String>,
     filter_col: Option<String>,
     filter_value: Option<String>,
+    database: Option<String>,
 ) -> Result<RowsPage, String> {
     pool.with_session(&connection_id, |s| {
         s.query_page(
+            database.as_deref(),
             &table,
             page,
             page_size,
@@ -109,7 +111,10 @@ pub fn apply_row_changes(
     connection_id: String,
     table: String,
     changes: Vec<RowChange>,
+    database: Option<String>,
 ) -> Result<i64, String> {
-    pool.with_session(&connection_id, |s| s.apply_row_changes(&table, &changes))
-        .map_err(|e| e.to_string())
+    pool.with_session(&connection_id, |s| {
+        s.apply_row_changes(database.as_deref(), &table, &changes)
+    })
+    .map_err(|e| e.to_string())
 }

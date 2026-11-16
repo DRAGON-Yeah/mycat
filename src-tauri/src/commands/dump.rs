@@ -38,7 +38,12 @@ fn dump_inserts(table: &str, page: &RowsPage) -> String {
     out
 }
 
-fn dump_structure(session: &dyn DriverSession, engine_hint: &str, table: &str) -> AppResult<String> {
+fn dump_structure(
+    session: &dyn DriverSession,
+    engine_hint: &str,
+    database: Option<&str>,
+    table: &str,
+) -> AppResult<String> {
     if engine_hint == "sqlite" || engine_hint.is_empty() {
         if let Ok(out) = session.execute_sql(&format!(
             "SELECT sql FROM sqlite_master WHERE type IN ('table','view') AND name = '{table}'"
@@ -51,7 +56,11 @@ fn dump_structure(session: &dyn DriverSession, engine_hint: &str, table: &str) -
         }
     }
     if engine_hint == "mysql" {
-        if let Ok(out) = session.execute_sql(&format!("SHOW CREATE TABLE `{table}`")) {
+        let table_sql = match database.map(str::trim).filter(|d| !d.is_empty()) {
+            Some(db) if ident_ok(db) => format!("`{db}`.`{table}`"),
+            _ => format!("`{table}`"),
+        };
+        if let Ok(out) = session.execute_sql(&format!("SHOW CREATE TABLE {table_sql}")) {
             if let Some(row) = out.rows.first() {
                 if let Some(Value::String(sql)) = row.get(1).or_else(|| row.first()) {
                     return Ok(format!("{sql};\n\n"));
@@ -60,7 +69,7 @@ fn dump_structure(session: &dyn DriverSession, engine_hint: &str, table: &str) -
         }
     }
     // Postgres / fallback: emit a comment + column list from one page
-    let page = session.query_page(table, 1, 1, None, None, None, None)?;
+    let page = session.query_page(database, table, 1, 1, None, None, None, None)?;
     let cols = page
         .columns
         .iter()
@@ -72,14 +81,18 @@ fn dump_structure(session: &dyn DriverSession, engine_hint: &str, table: &str) -
     ))
 }
 
-fn export_all_pages(session: &dyn DriverSession, table: &str) -> AppResult<RowsPage> {
+fn export_all_pages(
+    session: &dyn DriverSession,
+    database: Option<&str>,
+    table: &str,
+) -> AppResult<RowsPage> {
     let page_size = 500i64;
     let mut page = 1i64;
     let mut columns = Vec::new();
     let mut rows = Vec::new();
     let mut total = 0i64;
     loop {
-        let chunk = session.query_page(table, page, page_size, None, None, None, None)?;
+        let chunk = session.query_page(database, table, page, page_size, None, None, None, None)?;
         if page == 1 {
             columns = chunk.columns.clone();
             total = chunk.total;
@@ -107,6 +120,7 @@ pub fn dump_table_sql(
     table: String,
     include_data: bool,
     engine: String,
+    database: Option<String>,
 ) -> Result<String, String> {
     if !ident_ok(&table) {
         return Err(AppError::Validation("非法表名".into()).to_string());
@@ -114,9 +128,14 @@ pub fn dump_table_sql(
     pool.with_session(&connection_id, |session| {
         let mut out = String::new();
         out.push_str(&format!("-- Dump of {table}\n"));
-        out.push_str(&dump_structure(session, &engine, &table)?);
+        out.push_str(&dump_structure(
+            session,
+            &engine,
+            database.as_deref(),
+            &table,
+        )?);
         if include_data {
-            let data = export_all_pages(session, &table)?;
+            let data = export_all_pages(session, database.as_deref(), &table)?;
             out.push_str(&dump_inserts(&table, &data));
         }
         Ok(out)
@@ -159,8 +178,8 @@ mod tests {
         })
         .unwrap();
         let mut sql = String::new();
-        sql.push_str(&dump_structure(&session, "sqlite", "demo").unwrap());
-        let data = export_all_pages(&session, "demo").unwrap();
+        sql.push_str(&dump_structure(&session, "sqlite", None, "demo").unwrap());
+        let data = export_all_pages(&session, None, "demo").unwrap();
         sql.push_str(&dump_inserts("demo", &data));
         assert!(sql.contains("CREATE TABLE"));
         assert!(sql.contains("INSERT INTO"));

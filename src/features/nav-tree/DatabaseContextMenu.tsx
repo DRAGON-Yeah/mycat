@@ -89,6 +89,7 @@ export function DatabaseContextMenu({
         table: t.name,
         includeData,
         engine: String(conn.engine),
+        database,
       });
       parts.push(sql, "");
     }
@@ -125,6 +126,7 @@ export function DatabaseContextMenu({
           table: t.name,
           page: 1,
           pageSize: 1,
+          database,
         });
         for (const col of page.columns) {
           lines.push(
@@ -163,6 +165,7 @@ export function DatabaseContextMenu({
           table: t.name,
           page: 1,
           pageSize: 1,
+          database,
         });
         for (const col of page.columns.slice(0, 12)) {
           const typ = col.dataType.replace(/\s+/g, "_").replace(/[^A-Za-z0-9_]/g, "");
