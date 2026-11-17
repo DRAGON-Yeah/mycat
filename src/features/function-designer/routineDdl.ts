@@ -1,5 +1,5 @@
 import type { RoutineType } from "../object-list/routineMeta";
-import { quoteIdent, quoteTable } from "../nav-tree/sqlIdent";
+import { isPostgres, quoteIdent, quoteTable } from "../nav-tree/sqlIdent";
 
 export type RoutineParam = {
   name: string;
@@ -222,6 +222,17 @@ export function buildCreateRoutineSql(args: {
       return `${mode}${quoteIdent(engine, p.name.trim())} ${p.dataType.trim()}`;
     })
     .join(", ");
+
+  if (isPostgres(engine)) {
+    // Postgres: CREATE OR REPLACE + dollar-quoted body, no DEFINER/COMMENT clauses.
+    const bodySql = body.trim() || "BEGIN\nEND";
+    const head = `CREATE OR REPLACE ${routineType} ${qt}(${paramSql})`;
+    const returnsSql =
+      routineType === "FUNCTION"
+        ? `\nRETURNS ${returns.trim() || "integer"}`
+        : "";
+    return `${head}${returnsSql}\nLANGUAGE plpgsql\nAS $$\n${bodySql}\n$$;`;
+  }
 
   let definerClause = "";
   if (definerCurrentUser) {

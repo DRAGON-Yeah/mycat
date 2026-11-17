@@ -106,6 +106,36 @@ const KEYWORDS = [
   "REVOKE",
 ];
 
+/** Postgres-only keywords / functions (MySQL list above stays untouched). */
+const PG_KEYWORDS = [
+  "RETURNING",
+  "ILIKE",
+  "SIMILAR TO",
+  "SERIAL",
+  "BIGSERIAL",
+  "JSONB",
+  "UUID",
+  "TIMESTAMPTZ",
+  "INTERVAL",
+  "GENERATED ALWAYS AS IDENTITY",
+  "ON CONFLICT",
+  "DO NOTHING",
+  "DO UPDATE SET",
+  "MATERIALIZED VIEW",
+  "SCHEMA",
+  "CREATE SCHEMA",
+  "SET search_path",
+  "EXPLAIN (ANALYZE, BUFFERS)",
+  "NOW()",
+  "COALESCE",
+  "STRING_AGG",
+  "ARRAY_AGG",
+  "JSONB_BUILD_OBJECT",
+  "TO_CHAR",
+  "DATE_TRUNC",
+  "CURRENT_SCHEMA",
+];
+
 const SNIPPETS: { label: string; insert: string; detail: string }[] = [
   {
     label: "SELECT …",
@@ -259,7 +289,12 @@ export function registerSqlCompletions(monaco: Monaco) {
       }
 
       // Keywords (still useful elsewhere; de-prioritize in table context)
-      for (const kw of KEYWORDS) {
+      const engine = String(ctx.engine || "mysql").toLowerCase();
+      const keywords =
+        engine === "postgres" || engine === "postgresql"
+          ? [...KEYWORDS, ...PG_KEYWORDS]
+          : KEYWORDS;
+      for (const kw of keywords) {
         if (prefix && !kw.toLowerCase().startsWith(prefix)) continue;
         if (tableCtx && !prefix) continue; // after "FROM " show tables only
         suggestions.push({

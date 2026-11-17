@@ -91,6 +91,19 @@ export function applyRowChanges(args: {
   return invoke<number>("apply_row_changes", args);
 }
 
+/** Engine-native DDL (MySQL SHOW CREATE / PG catalogs / SQLite sqlite_master). */
+export function getTableDdl(args: {
+  connectionId: string;
+  table: string;
+  database?: string;
+}) {
+  return invoke<string>("get_table_ddl", {
+    connectionId: args.connectionId,
+    table: args.table,
+    database: args.database || null,
+  });
+}
+
 export function dumpTableSql(args: {
   connectionId: string;
   table: string;

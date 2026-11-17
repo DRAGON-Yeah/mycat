@@ -18,7 +18,7 @@ import {
   TABLE_DATA_CHANGED,
   type TableDataChangedDetail,
 } from "../../lib/tableEvents";
-import { quoteIdent, quoteTable } from "../nav-tree/sqlIdent";
+import { quoteIdent, quoteTable, splitQualified } from "../nav-tree/sqlIdent";
 import { CellEditorHost, needsChooser } from "./CellEditorHost";
 import {
   classifyEditor,
@@ -117,13 +117,17 @@ async function loadPrimaryKeyColumns(args: {
       .filter(Boolean);
   }
   if (e === "postgres" || e === "postgresql") {
+    const [schema, base] = splitQualified(table);
+    const schemaPredicate = schema
+      ? `n.nspname = '${schema.replace(/'/g, "''")}'`
+      : "n.nspname = current_schema()";
     const sql = `SELECT a.attname
 FROM pg_index i
 JOIN pg_class c ON c.oid = i.indrelid
 JOIN pg_namespace n ON n.oid = c.relnamespace
 JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-WHERE c.relname = '${table.replace(/'/g, "''")}'
-  AND n.nspname = current_schema()
+WHERE c.relname = '${base.replace(/'/g, "''")}'
+  AND ${schemaPredicate}
   AND i.indisprimary
 ORDER BY a.attnum`;
     try {
@@ -255,9 +259,21 @@ export function DataGrid({ tab }: Props) {
       const table = tab.table.replace(/`/g, "``");
       let sql = "";
       if (engine === "postgres" || engine === "postgresql") {
-        sql = `SELECT column_name AS "Field", udt_name AS "Type", is_nullable AS "Null"
+        const [schema, base] = splitQualified(tab.table);
+        const schemaPredicate = schema
+          ? `table_schema = '${schema.replace(/'/g, "''")}'`
+          : "table_schema = current_schema()";
+        sql = `SELECT column_name AS "Field",
+       data_type ||
+         CASE WHEN character_maximum_length IS NOT NULL
+              THEN '(' || character_maximum_length || ')'
+              WHEN numeric_precision IS NOT NULL AND numeric_scale IS NOT NULL
+              THEN '(' || numeric_precision || ',' || numeric_scale || ')'
+              ELSE '' END AS "Type",
+       is_nullable AS "Null"
 FROM information_schema.columns
-WHERE table_name = '${tab.table.replace(/'/g, "''")}'
+WHERE ${schemaPredicate}
+  AND table_name = '${base.replace(/'/g, "''")}'
 ORDER BY ordinal_position`;
       } else if (engine === "sqlite") {
         sql = `PRAGMA table_info(\`${table}\`)`;
@@ -662,12 +678,13 @@ ORDER BY ordinal_position`;
     if (!values) return;
     const cols = data.columns.map((c) => c.name);
     let text = "";
+    const engine = String(tab.connectionEngine || "mysql");
     if (kind === "insert") {
-      text = buildInsertSql(tab.table, cols, values);
+      text = buildInsertSql(tab.table, cols, values, engine);
     } else if (kind === "update") {
       const pk = pkColumns[0] ?? cols[0] ?? "id";
       const pkIdx = cols.indexOf(pk);
-      text = buildUpdateSql(tab.table, cols, values, pk, values[pkIdx]);
+      text = buildUpdateSql(tab.table, cols, values, pk, values[pkIdx], engine);
     } else if (kind === "tsv-data") text = buildTsvData(values);
     else if (kind === "tsv-headers") text = buildTsvHeaders(cols);
     else if (kind === "tsv-both") text = buildTsvHeadersAndData(cols, values);

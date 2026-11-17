@@ -62,7 +62,7 @@ export async function listRoutineMeta(args: {
   if (e === "postgres" || e === "postgresql") {
     const out = await executeSql(
       connectionId,
-      `SELECT p.proname,
+      `SELECT n.nspname, p.proname,
               CASE WHEN p.prokind = 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
               COALESCE(pg_catalog.pg_get_function_result(p.oid), ''),
               pg_catalog.pg_get_userbyid(p.proowner),
@@ -73,25 +73,29 @@ export async function listRoutineMeta(args: {
               CASE WHEN p.provolatile = 'i' THEN 'YES' ELSE 'NO' END
        FROM pg_catalog.pg_proc p
        JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = current_schema()
+       WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+         AND n.nspname NOT LIKE 'pg\\_%'
          AND p.prokind IN ('f', 'p')
-       ORDER BY p.proname`,
+       ORDER BY n.nspname, p.proname`,
       database,
     );
     for (const row of out.rows) {
-      const name = String(row[0] ?? "");
-      if (!name) continue;
-      const rt = String(row[1] ?? "FUNCTION").toUpperCase();
+      const schema = String(row[0] ?? "");
+      const proname = String(row[1] ?? "");
+      if (!proname) continue;
+      const name =
+        schema && schema !== "public" ? `${schema}.${proname}` : proname;
+      const rt = String(row[2] ?? "FUNCTION").toUpperCase();
       map[name] = {
         name,
         routineType: rt === "PROCEDURE" ? "PROCEDURE" : "FUNCTION",
-        returns: String(row[2] ?? ""),
-        definer: String(row[3] ?? ""),
-        securityType: String(row[4] ?? "") || "—",
-        created: String(row[5] ?? "") || "—",
-        lastAltered: String(row[6] ?? "") || "—",
-        comment: String(row[7] ?? ""),
-        isDeterministic: String(row[8] ?? ""),
+        returns: String(row[3] ?? ""),
+        definer: String(row[4] ?? ""),
+        securityType: String(row[5] ?? "") || "—",
+        created: String(row[6] ?? "") || "—",
+        lastAltered: String(row[7] ?? "") || "—",
+        comment: String(row[8] ?? ""),
+        isDeterministic: String(row[9] ?? ""),
       };
     }
     return map;

@@ -1,3 +1,5 @@
+import { quoteIdent, quoteTable } from "../nav-tree/sqlIdent";
+
 function sqlLiteral(value: unknown): string {
   if (value === null || value === undefined) return "NULL";
   if (typeof value === "number" || typeof value === "boolean") return String(value);
@@ -26,10 +28,11 @@ export function buildInsertSql(
   table: string,
   columns: string[],
   values: unknown[],
+  engine = "mysql",
 ): string {
-  const cols = columns.map((c) => `\`${c}\``).join(", ");
+  const cols = columns.map((c) => quoteIdent(engine, c)).join(", ");
   const vals = values.map(sqlLiteral).join(", ");
-  return `INSERT INTO \`${table}\` (${cols}) VALUES (${vals});`;
+  return `INSERT INTO ${quoteTable(engine, null, table)} (${cols}) VALUES (${vals});`;
 }
 
 export function buildUpdateSql(
@@ -38,15 +41,16 @@ export function buildUpdateSql(
   values: unknown[],
   pkColumn: string,
   pkValue: unknown,
+  engine = "mysql",
 ): string {
   const sets = columns
     .filter((c) => c !== pkColumn)
     .map((c) => {
       const idx = columns.indexOf(c);
-      return `\`${c}\`=${sqlLiteral(values[idx])}`;
+      return `${quoteIdent(engine, c)}=${sqlLiteral(values[idx])}`;
     })
     .join(", ");
-  return `UPDATE \`${table}\` SET ${sets} WHERE \`${pkColumn}\`=${sqlLiteral(pkValue)};`;
+  return `UPDATE ${quoteTable(engine, null, table)} SET ${sets} WHERE ${quoteIdent(engine, pkColumn)}=${sqlLiteral(pkValue)};`;
 }
 
 export function buildTsvData(values: unknown[]): string {

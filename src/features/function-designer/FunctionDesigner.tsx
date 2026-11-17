@@ -78,9 +78,9 @@ export function FunctionDesigner({ tab }: Props) {
             routineType: tab.routineType ?? "FUNCTION",
           });
           if (cancelled) return;
-          setSql(ddl);
+          setSql(ddl.endsWith(";") ? ddl : `${ddl};`);
           setName(tab.table);
-          setReadonlyHint("PostgreSQL 目前以只读 DDL 展示，保存请用查询窗口。");
+          setReadonlyHint(null);
           return;
         }
         const ddl = await fetchRoutineDdl({
@@ -133,13 +133,9 @@ export function FunctionDesigner({ tab }: Props) {
       setError("连接不可用");
       return;
     }
-    if (isPg) {
-      setError("PostgreSQL 设计器暂不支持保存");
-      return;
-    }
     const parsed = parseRoutineDdl(sql);
     const n = parsed.name || name.trim();
-    if (!identOk(n)) {
+    if (!n.split(".").every((part) => identOk(part))) {
       setError("例程名仅允许字母、数字、下划线，且不能以数字开头");
       return;
     }
@@ -148,7 +144,8 @@ export function FunctionDesigner({ tab }: Props) {
     setMessage(null);
     try {
       await openConnection(conn.id);
-      if (tab.mode === "alter") {
+      // Postgres uses CREATE OR REPLACE, so no drop is needed before saving.
+      if (tab.mode === "alter" && !isPg) {
         await dropRoutine({
           conn,
           database: tab.database,

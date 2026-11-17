@@ -3,6 +3,7 @@ import {
   dumpTableSql,
   executeSql,
   fetchTablePage,
+  getTableDdl,
   openConnection,
 } from "../connections/sessionApi";
 import { downloadTextFile, rowsToCsv, parseCsv } from "../import-export/csv";
@@ -13,7 +14,14 @@ import {
   loadDesignerIndexes,
   loadTableOptions,
 } from "../table-designer/loadColumns";
-import { engineKey, identOk, quoteIdent, quoteTable } from "./sqlIdent";
+import {
+  engineKey,
+  identOk,
+  isPostgres,
+  quoteIdent,
+  quoteTable,
+  splitQualified,
+} from "./sqlIdent";
 
 export async function dumpSingleTable(args: {
   conn: ConnectionDto;
@@ -255,9 +263,13 @@ export async function fetchCreateDdl(args: {
     if (!sql) throw new Error("无法获取 DDL");
     return sql.endsWith(";") ? sql : `${sql};`;
   }
-  // Postgres fallback
-  const qt = quoteTable(String(conn.engine), null, table);
-  return `-- Postgres: use pg_dump for full DDL\n-- Table: ${qt}\n`;
+  // Postgres: real DDL assembled by the backend from the catalogs.
+  const ddl = await getTableDdl({
+    connectionId: conn.id,
+    table,
+    database,
+  });
+  return ddl.endsWith(";") ? ddl : `${ddl};`;
 }
 
 export async function exportTableCsv(args: {
@@ -525,7 +537,17 @@ export async function dropTableOrView(args: {
 }) {
   const { conn, database, table, isView } = args;
   await openConnection(conn.id);
-  const qt = quoteTable(String(conn.engine), database, table);
+  const engine = String(conn.engine);
+  const qt = quoteTable(engine, database, table);
+  if (isView && isPostgres(engine)) {
+    // Views and materialized views need different DROP statements.
+    try {
+      await executeSql(conn.id, `DROP VIEW ${qt}`, database);
+    } catch {
+      await executeSql(conn.id, `DROP MATERIALIZED VIEW ${qt}`, database);
+    }
+    return;
+  }
   await executeSql(
     conn.id,
     isView ? `DROP VIEW ${qt}` : `DROP TABLE ${qt}`,
@@ -637,7 +659,10 @@ export async function copyTable(args: {
   await openConnection(conn.id);
   const e = engineKey(conn.engine);
   const src = quoteTable(String(conn.engine), database, table);
-  const dst = quoteTable(String(conn.engine), database, newName);
+  // Postgres: keep the copy in the same schema as the source.
+  const [schema] = splitQualified(table);
+  const dstName = schema ? `${schema}.${newName}` : newName;
+  const dst = quoteTable(String(conn.engine), database, dstName);
 
   if (e === "mysql") {
     await executeSql(conn.id, `CREATE TABLE ${dst} LIKE ${src}`, database);

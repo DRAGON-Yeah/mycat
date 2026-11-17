@@ -109,6 +109,20 @@ pub fn cancel_query(pool: State<'_, SessionPool>, connection_id: String) -> Resu
     pool.cancel_query(&connection_id).map_err(|e| e.to_string())
 }
 
+/// Engine-native DDL for a table or view (MySQL SHOW CREATE / PG catalogs).
+#[tauri::command(async)]
+pub fn get_table_ddl(
+    pool: State<'_, SessionPool>,
+    connection_id: String,
+    table: String,
+    database: Option<String>,
+) -> Result<String, String> {
+    pool.with_session(&connection_id, |s| {
+        s.table_ddl(database.as_deref(), &table)
+    })
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command(async)]
 pub fn apply_row_changes(
     pool: State<'_, SessionPool>,

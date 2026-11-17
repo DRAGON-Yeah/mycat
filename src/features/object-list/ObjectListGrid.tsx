@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   listTables,
+  openConnection,
   type DbObject,
 } from "../connections/sessionApi";
 import { useColumnResize } from "../data-grid/useColumnResize";
@@ -355,6 +356,9 @@ export function ObjectListGrid() {
       setLoading(true);
       setError(null);
       try {
+        // Self-heal: the session may have been closed (app reload, engine edit).
+        await openConnection(connection.id);
+        if (cancelled) return;
         if (wantEvents) {
           const map = await listEventMeta({
             connectionId: connection.id,

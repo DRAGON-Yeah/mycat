@@ -17,6 +17,8 @@ pub struct SessionPool {
     sessions: Mutex<HashMap<String, Arc<Mutex<LiveSession>>>>,
     /// Resolved opts for side-channel KILL / pg_cancel (tunnel-rewritten).
     cancel_opts: Mutex<HashMap<String, ConnectOpts>>,
+    /// Original opts used to open the session; lets `open` be idempotent.
+    open_opts: Mutex<HashMap<String, ConnectOpts>>,
     /// connection_id → backend pid while a query is running (0 = sqlite / unknown).
     active_pids: Mutex<HashMap<String, i64>>,
     /// SQLite interrupt handles (callable while Connection is busy).
@@ -28,6 +30,7 @@ impl SessionPool {
         Self {
             sessions: Mutex::new(HashMap::new()),
             cancel_opts: Mutex::new(HashMap::new()),
+            open_opts: Mutex::new(HashMap::new()),
             active_pids: Mutex::new(HashMap::new()),
             sqlite_interrupts: Mutex::new(HashMap::new()),
         }
@@ -40,7 +43,14 @@ impl SessionPool {
     }
 
     pub fn open(&self, connection_id: &str, opts: ConnectOpts) -> AppResult<()> {
-        let (resolved, tunnel) = resolve_with_tunnel(opts)?;
+        // Reuse a live session when the connection settings did not change: the UI
+        // calls open_connection before every object-list refresh, and reconnecting
+        // each time is slow (and resets PG search_path / MySQL USE).
+        if self.can_reuse(connection_id, &opts) {
+            return Ok(());
+        }
+
+        let (resolved, tunnel) = resolve_with_tunnel(opts.clone())?;
         let engine = resolved.engine.clone();
         let session = connect(&resolved)?;
 
@@ -79,7 +89,25 @@ impl SessionPool {
             map.insert(connection_id.to_string(), ih);
         }
 
+        if let Ok(mut map) = self.open_opts.lock() {
+            map.insert(connection_id.to_string(), opts);
+        }
+
         Ok(())
+    }
+
+    /// True when the pooled session was opened with the same settings and is alive.
+    fn can_reuse(&self, connection_id: &str, opts: &ConnectOpts) -> bool {
+        let same = {
+            let Ok(map) = self.open_opts.lock() else {
+                return false;
+            };
+            map.get(connection_id).map(|o| o == opts).unwrap_or(false)
+        };
+        if !same {
+            return false;
+        }
+        self.with_session(connection_id, |s| s.ping()).is_ok()
     }
 
     pub fn close(&self, connection_id: &str) -> AppResult<()> {
@@ -90,6 +118,9 @@ impl SessionPool {
         guard.remove(connection_id);
         drop(guard);
         if let Ok(mut m) = self.cancel_opts.lock() {
+            m.remove(connection_id);
+        }
+        if let Ok(mut m) = self.open_opts.lock() {
             m.remove(connection_id);
         }
         if let Ok(mut m) = self.active_pids.lock() {

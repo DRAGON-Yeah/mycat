@@ -48,27 +48,30 @@ export async function listViewMeta(args: {
   if (e === "postgres" || e === "postgresql") {
     const out = await executeSql(
       connectionId,
-      `SELECT c.relname,
+      `SELECT n.nspname, c.relname,
               CASE WHEN c.relkind = 'v' THEN 'DEFINER' ELSE '' END,
               '',
-              CASE WHEN pg_catalog.pg_get_viewdef(c.oid, true) IS NOT NULL THEN 'NO' ELSE 'NO' END,
+              'NO',
               pg_catalog.pg_get_userbyid(c.relowner)
        FROM pg_catalog.pg_class c
        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-       WHERE c.relkind = 'v'
-         AND n.nspname = current_schema()
-       ORDER BY c.relname`,
+       WHERE c.relkind IN ('v', 'm')
+         AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+         AND n.nspname NOT LIKE 'pg\\_%'
+       ORDER BY n.nspname, c.relname`,
       database,
     );
     for (const row of out.rows) {
-      const name = String(row[0] ?? "");
-      if (!name) continue;
+      const schema = String(row[0] ?? "");
+      const relname = String(row[1] ?? "");
+      if (!relname) continue;
+      const name = schema && schema !== "public" ? `${schema}.${relname}` : relname;
       map[name] = {
         name,
-        securityType: String(row[1] ?? "—"),
-        checkOption: String(row[2] ?? ""),
+        securityType: String(row[2] ?? "—"),
+        checkOption: String(row[3] ?? ""),
         isUpdatable: "否",
-        definer: String(row[4] ?? ""),
+        definer: String(row[5] ?? ""),
       };
     }
     return map;

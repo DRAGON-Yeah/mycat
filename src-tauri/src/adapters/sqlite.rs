@@ -199,6 +199,26 @@ impl DriverSession for SqliteSession {
         Some(self.conn.get_interrupt_handle())
     }
 
+    fn ping(&self) -> AppResult<()> {
+        self.conn.query_row("SELECT 1", [], |_| Ok(()))?;
+        Ok(())
+    }
+
+    fn table_ddl(&self, _database: Option<&str>, table: &str) -> AppResult<String> {
+        let sql: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type IN ('table','view') AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match sql {
+            Some(sql) if !sql.trim().is_empty() => Ok(format!("{};\n", sql.trim_end_matches(';'))),
+            _ => Err(AppError::Message(format!("无法获取 {table} 的 DDL"))),
+        }
+    }
+
     fn execute_sql(&self, sql: &str) -> AppResult<QueryOutcome> {
         let started = Instant::now();
         let trimmed = sql.trim();

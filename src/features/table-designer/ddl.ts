@@ -1,4 +1,11 @@
-import { engineKey, identOk, quoteIdent, quoteTable } from "../nav-tree/sqlIdent";
+import {
+  engineKey,
+  identOk,
+  isPostgres,
+  quoteIdent,
+  quoteTable,
+  splitQualified,
+} from "../nav-tree/sqlIdent";
 import {
   composedType,
   type DesignerCheck,
@@ -12,7 +19,9 @@ import {
 function formatDefault(v: string): string {
   const t = v.trim();
   if (
-    /^(NULL|CURRENT_TIMESTAMP|CURRENT_DATE|TRUE|FALSE)$/i.test(t) ||
+    /^(NULL|CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|TRUE|FALSE|NOW\(\))$/i.test(
+      t,
+    ) ||
     /^-?\d+(\.\d+)?$/.test(t)
   ) {
     return t;
@@ -23,11 +32,22 @@ function formatDefault(v: string): string {
   ) {
     return t;
   }
+  // Function calls (now(), nextval('s'::regclass), CURRENT_TIMESTAMP(3)) and
+  // Postgres cast expressions ('x'::text) are already valid SQL.
+  if (/^[A-Za-z_][\w.]*\s*\([\s\S]*\)$/.test(t) || t.includes("::")) {
+    return t;
+  }
   return sqlString(t);
 }
 
 function sqlString(s: string): string {
   return `'${s.replace(/'/g, "''")}'`;
+}
+
+/** Table names may be schema-qualified for Postgres (`sales.orders`). */
+function tableNameOk(name: string): boolean {
+  const [, base] = splitQualified(name);
+  return identOk(base);
 }
 
 function colDefMysql(c: DesignerColumn): string {
@@ -54,7 +74,34 @@ function colDefGeneric(engine: string, c: DesignerColumn): string {
     c.defaultValue == null || c.defaultValue === ""
       ? ""
       : ` DEFAULT ${formatDefault(c.defaultValue)}`;
+  if (isPostgres(engine) && /identity/i.test(c.extra)) {
+    const always = /always/i.test(c.extra);
+    return `${quoteIdent(engine, c.name)} ${typ}${nullSql} GENERATED ${
+      always ? "ALWAYS" : "BY DEFAULT"
+    } AS IDENTITY`;
+  }
   return `${quoteIdent(engine, c.name)} ${typ}${nullSql}${def}`;
+}
+
+function indexColumns(engine: string, columns: string): string {
+  return columns
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((c) => quoteIdent(engine, c))
+    .join(", ");
+}
+
+function fkClause(
+  engine: string,
+  database: string,
+  fk: DesignerForeignKey,
+): string | null {
+  const cols = indexColumns(engine, fk.columns);
+  const refs = indexColumns(engine, fk.refColumns);
+  if (!cols || !fk.refTable.trim() || !refs) return null;
+  const refTable = quoteTable(engine, database, fk.refTable);
+  return `CONSTRAINT ${quoteIdent(engine, fk.name)} FOREIGN KEY (${cols}) REFERENCES ${refTable} (${refs}) ON DELETE ${fk.onDelete || "RESTRICT"} ON UPDATE ${fk.onUpdate || "RESTRICT"}`;
 }
 
 export function buildCreateTableSql(args: {
@@ -69,7 +116,7 @@ export function buildCreateTableSql(args: {
 }): string {
   const { engine, database, table, columns, indexes, foreignKeys, checks, options } =
     args;
-  if (!identOk(table)) {
+  if (!tableNameOk(table)) {
     throw new Error("表名仅允许字母、数字、下划线");
   }
   if (columns.length === 0) {
@@ -80,6 +127,7 @@ export function buildCreateTableSql(args: {
     if (!c.typeName.trim()) throw new Error(`列 ${c.name} 缺少类型`);
   }
   const e = engineKey(engine);
+  const pg = isPostgres(engine);
   const qt = quoteTable(engine, database, table);
   const defs =
     e === "mysql"
@@ -95,12 +143,7 @@ export function buildCreateTableSql(args: {
     for (const ix of indexes) {
       if (!ix.name || ix.name.toUpperCase() === "PRIMARY") continue;
       if (!identOk(ix.name)) continue;
-      const cols = ix.columns
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .map((c) => quoteIdent("mysql", c))
-        .join(", ");
+      const cols = indexColumns("mysql", ix.columns);
       if (!cols) continue;
       const uniq = ix.unique ? "UNIQUE " : "";
       const using = (ix.indexType || "BTREE").toUpperCase();
@@ -110,34 +153,20 @@ export function buildCreateTableSql(args: {
     }
   }
 
-  if (e === "mysql" && foreignKeys) {
+  // Postgres: foreign keys / checks are table constraints, indexes are separate.
+  if ((e === "mysql" || pg) && foreignKeys) {
     for (const fk of foreignKeys) {
       if (!fk.name || !identOk(fk.name)) continue;
-      const cols = fk.columns
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .map((c) => quoteIdent("mysql", c))
-        .join(", ");
-      const refs = fk.refColumns
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .map((c) => quoteIdent("mysql", c))
-        .join(", ");
-      if (!cols || !fk.refTable || !refs) continue;
-      const refTable = quoteTable("mysql", database, fk.refTable);
-      defs.push(
-        `CONSTRAINT ${quoteIdent("mysql", fk.name)} FOREIGN KEY (${cols}) REFERENCES ${refTable} (${refs}) ON DELETE ${fk.onDelete || "RESTRICT"} ON UPDATE ${fk.onUpdate || "RESTRICT"}`,
-      );
+      const clause = fkClause(engine, database, fk);
+      if (clause) defs.push(clause);
     }
   }
 
-  if (e === "mysql" && checks) {
+  if ((e === "mysql" || pg) && checks) {
     for (const ck of checks) {
       if (!ck.name || !identOk(ck.name) || !ck.expression.trim()) continue;
       defs.push(
-        `CONSTRAINT ${quoteIdent("mysql", ck.name)} CHECK (${ck.expression})`,
+        `CONSTRAINT ${quoteIdent(engine, ck.name)} CHECK (${ck.expression})`,
       );
     }
   }
@@ -158,6 +187,37 @@ export function buildCreateTableSql(args: {
     }
     if (parts.length) sql += `\n${parts.join("\n")}`;
   }
+  sql += ";";
+
+  if (pg) {
+    const extra: string[] = [];
+    if (indexes) {
+      for (const ix of indexes) {
+        if (!ix.name || ix.name.toUpperCase() === "PRIMARY") continue;
+        if (!identOk(ix.name)) continue;
+        const cols = indexColumns("postgres", ix.columns);
+        if (!cols) continue;
+        const uniq = ix.unique ? "UNIQUE " : "";
+        extra.push(
+          `CREATE ${uniq}INDEX ${quoteIdent("postgres", ix.name)} ON ${qt} (${cols});`,
+        );
+      }
+    }
+    if (options?.comment?.trim()) {
+      extra.push(
+        `COMMENT ON TABLE ${qt} IS ${sqlString(options.comment.trim())};`,
+      );
+    }
+    for (const c of columns) {
+      if (c.comment?.trim()) {
+        extra.push(
+          `COMMENT ON COLUMN ${qt}.${quoteIdent("postgres", c.name)} IS ${sqlString(c.comment.trim())};`,
+        );
+      }
+    }
+    if (extra.length) sql += `\n${extra.join("\n")}`;
+  }
+
   return sql;
 }
 
@@ -173,6 +233,7 @@ export function buildAlterTableSql(args: {
   const { engine, database, table, baseline, columns, options, baselineOptions } =
     args;
   const e = engineKey(engine);
+  const pg = isPostgres(engine);
   const qt = quoteTable(engine, database, table);
   const stmts: string[] = [];
   const baseByOrig = new Map(
@@ -206,15 +267,25 @@ export function buildAlterTableSql(args: {
           `ALTER TABLE ${qt} ADD COLUMN ${colDefGeneric(engine, c)}`,
         );
       }
+      if (pg && c.comment?.trim()) {
+        stmts.push(
+          `COMMENT ON COLUMN ${qt}.${quoteIdent("postgres", c.name)} IS ${sqlString(c.comment.trim())}`,
+        );
+      }
       continue;
     }
 
     const renamed = prev.originalName !== c.name;
+    const typeChanged = composedType(prev) !== composedType(c);
+    const nullChanged = prev.notNull !== c.notNull;
+    const defaultChanged =
+      String(prev.defaultValue ?? "") !== String(c.defaultValue ?? "");
+    const commentChanged = (prev.comment || "") !== (c.comment || "");
     const changed =
-      composedType(prev) !== composedType(c) ||
-      prev.notNull !== c.notNull ||
-      String(prev.defaultValue ?? "") !== String(c.defaultValue ?? "") ||
-      (prev.comment || "") !== (c.comment || "") ||
+      typeChanged ||
+      nullChanged ||
+      defaultChanged ||
+      commentChanged ||
       prev.virtual !== c.virtual ||
       prev.isPk !== c.isPk;
 
@@ -224,20 +295,37 @@ export function buildAlterTableSql(args: {
           `ALTER TABLE ${qt} CHANGE COLUMN ${quoteIdent("mysql", prev.originalName!)} ${colDefMysql(c)}`,
         );
       }
-    } else if (e === "postgres" || e === "postgresql") {
+    } else if (pg) {
       if (renamed) {
         stmts.push(
           `ALTER TABLE ${qt} RENAME COLUMN ${quoteIdent("postgres", prev.originalName!)} TO ${quoteIdent("postgres", c.name)}`,
         );
       }
-      if (changed) {
+      const col = quoteIdent("postgres", c.name);
+      if (typeChanged) {
         stmts.push(
-          `ALTER TABLE ${qt} ALTER COLUMN ${quoteIdent("postgres", c.name)} TYPE ${composedType(c)}`,
+          `ALTER TABLE ${qt} ALTER COLUMN ${col} TYPE ${composedType(c)} USING ${col}::${composedType(c)}`,
         );
+      }
+      if (nullChanged) {
         stmts.push(
           c.notNull
-            ? `ALTER TABLE ${qt} ALTER COLUMN ${quoteIdent("postgres", c.name)} SET NOT NULL`
-            : `ALTER TABLE ${qt} ALTER COLUMN ${quoteIdent("postgres", c.name)} DROP NOT NULL`,
+            ? `ALTER TABLE ${qt} ALTER COLUMN ${col} SET NOT NULL`
+            : `ALTER TABLE ${qt} ALTER COLUMN ${col} DROP NOT NULL`,
+        );
+      }
+      if (defaultChanged) {
+        stmts.push(
+          c.defaultValue == null || c.defaultValue === ""
+            ? `ALTER TABLE ${qt} ALTER COLUMN ${col} DROP DEFAULT`
+            : `ALTER TABLE ${qt} ALTER COLUMN ${col} SET DEFAULT ${formatDefault(c.defaultValue)}`,
+        );
+      }
+      if (commentChanged) {
+        stmts.push(
+          c.comment?.trim()
+            ? `COMMENT ON COLUMN ${qt}.${col} IS ${sqlString(c.comment.trim())}`
+            : `COMMENT ON COLUMN ${qt}.${col} IS NULL`,
         );
       }
     } else if (renamed) {
@@ -249,22 +337,34 @@ export function buildAlterTableSql(args: {
     }
   }
 
-  // PK changes (MySQL): drop/add primary key if set changed
-  if (e === "mysql") {
-    const oldPk = baseline
-      .filter((c) => c.isPk)
-      .map((c) => c.originalName || c.name)
-      .join(",");
-    const newPk = columns.filter((c) => c.isPk).map((c) => c.name).join(",");
-    if (oldPk !== newPk) {
-      if (oldPk) stmts.push(`ALTER TABLE ${qt} DROP PRIMARY KEY`);
-      if (newPk) {
-        const pkCols = columns
-          .filter((c) => c.isPk)
-          .map((c) => quoteIdent("mysql", c.name))
-          .join(", ");
-        stmts.push(`ALTER TABLE ${qt} ADD PRIMARY KEY (${pkCols})`);
-      }
+  // PK changes
+  const oldPk = baseline
+    .filter((c) => c.isPk)
+    .map((c) => c.originalName || c.name)
+    .join(",");
+  const newPk = columns.filter((c) => c.isPk).map((c) => c.name).join(",");
+  if (e === "mysql" && oldPk !== newPk) {
+    if (oldPk) stmts.push(`ALTER TABLE ${qt} DROP PRIMARY KEY`);
+    if (newPk) {
+      const pkCols = columns
+        .filter((c) => c.isPk)
+        .map((c) => quoteIdent("mysql", c.name))
+        .join(", ");
+      stmts.push(`ALTER TABLE ${qt} ADD PRIMARY KEY (${pkCols})`);
+    }
+  } else if (pg && oldPk !== newPk) {
+    const base = splitQualified(table)[1];
+    if (oldPk) {
+      stmts.push(
+        `ALTER TABLE ${qt} DROP CONSTRAINT IF EXISTS ${quoteIdent("postgres", `${base}_pkey`)}`,
+      );
+    }
+    if (newPk) {
+      const pkCols = columns
+        .filter((c) => c.isPk)
+        .map((c) => quoteIdent("postgres", c.name))
+        .join(", ");
+      stmts.push(`ALTER TABLE ${qt} ADD PRIMARY KEY (${pkCols})`);
     }
   }
 
@@ -299,6 +399,14 @@ export function buildAlterTableSql(args: {
     }
   }
 
+  if (pg && options && baselineOptions && options.comment !== baselineOptions.comment) {
+    stmts.push(
+      options.comment?.trim()
+        ? `COMMENT ON TABLE ${qt} IS ${sqlString(options.comment.trim())}`
+        : `COMMENT ON TABLE ${qt} IS NULL`,
+    );
+  }
+
   return stmts;
 }
 
@@ -310,6 +418,172 @@ export function buildTriggerSql(args: {
 }): string {
   const { engine, database, table, trigger } = args;
   const qt = quoteTable(engine, database, table);
+  if (isPostgres(engine)) {
+    // Trigger names are not schema-qualified in Postgres.
+    return `CREATE TRIGGER ${quoteIdent("postgres", trigger.name)} ${trigger.timing} ${trigger.event} ON ${qt} FOR EACH ROW ${trigger.statement}`;
+  }
   const tn = quoteTable(engine, database, trigger.name);
   return `CREATE TRIGGER ${tn} ${trigger.timing} ${trigger.event} ON ${qt} FOR EACH ROW\n${trigger.statement}`;
+}
+
+export type ObjectSyncArgs = {
+  engine: string;
+  database: string;
+  table: string;
+  baselineIndexes: DesignerIndex[];
+  indexes: DesignerIndex[];
+  baselineFks: DesignerForeignKey[];
+  fks: DesignerForeignKey[];
+  baselineChecks: DesignerCheck[];
+  checks: DesignerCheck[];
+  baselineTriggers: DesignerTrigger[];
+  triggers: DesignerTrigger[];
+};
+
+/**
+ * Diff indexes / foreign keys / checks / triggers into DDL statements.
+ * Supports MySQL and Postgres (Postgres uses DROP CONSTRAINT + separate indexes).
+ */
+export function buildObjectSyncSql(args: ObjectSyncArgs): string[] {
+  const {
+    engine,
+    database,
+    table,
+    baselineIndexes,
+    indexes,
+    baselineFks,
+    fks,
+    baselineChecks,
+    checks,
+    baselineTriggers,
+    triggers,
+  } = args;
+  const e = engineKey(engine);
+  const pg = isPostgres(engine);
+  if (e !== "mysql" && !pg) return [];
+
+  const qt = quoteTable(engine, database, table);
+  const norm = (s: string) => s.replace(/\s+/g, "").toLowerCase();
+  const stmts: string[] = [];
+  const dropIndex = (name: string) =>
+    pg
+      ? `DROP INDEX IF EXISTS ${quoteIdent("postgres", name)}`
+      : `DROP INDEX ${quoteIdent("mysql", name)} ON ${qt}`;
+  const dropConstraint = (name: string) =>
+    pg
+      ? `ALTER TABLE ${qt} DROP CONSTRAINT IF EXISTS ${quoteIdent("postgres", name)}`
+      : "";
+
+  const baseIx = new Map(
+    baselineIndexes
+      .filter((i) => i.name.toUpperCase() !== "PRIMARY")
+      .map((i) => [i.name, i]),
+  );
+  const wantIx = indexes.filter((i) => i.name.toUpperCase() !== "PRIMARY");
+  const wantIxNames = new Set(wantIx.map((i) => i.name));
+  for (const b of baseIx.values()) {
+    if (!wantIxNames.has(b.name)) stmts.push(dropIndex(b.name));
+  }
+  for (const ix of wantIx) {
+    if (!identOk(ix.name) || !ix.columns.trim()) continue;
+    const cols = indexColumns(engine, ix.columns);
+    if (!cols) continue;
+    const old = baseIx.get(ix.name);
+    const changed =
+      !old ||
+      norm(old.columns) !== norm(ix.columns) ||
+      Boolean(old.unique) !== Boolean(ix.unique) ||
+      (old.indexType || "BTREE").toUpperCase() !==
+        (ix.indexType || "BTREE").toUpperCase();
+    if (!changed) continue;
+    if (old) stmts.push(dropIndex(ix.name));
+    const uniq = ix.unique ? "UNIQUE " : "";
+    stmts.push(
+      `CREATE ${uniq}INDEX ${quoteIdent(engine, ix.name)} ON ${qt} (${cols})`,
+    );
+  }
+
+  const baseFkMap = new Map(baselineFks.map((f) => [f.name, f]));
+  const wantFkNames = new Set(fks.map((f) => f.name));
+  for (const b of baselineFks) {
+    if (wantFkNames.has(b.name)) continue;
+    stmts.push(
+      pg
+        ? dropConstraint(b.name)
+        : `ALTER TABLE ${qt} DROP FOREIGN KEY ${quoteIdent("mysql", b.name)}`,
+    );
+  }
+  for (const fk of fks) {
+    if (!identOk(fk.name) || !fk.refTable.trim()) continue;
+    const old = baseFkMap.get(fk.name);
+    const changed =
+      !old ||
+      norm(old.columns) !== norm(fk.columns) ||
+      old.refTable !== fk.refTable ||
+      norm(old.refColumns) !== norm(fk.refColumns) ||
+      (old.onDelete || "RESTRICT") !== (fk.onDelete || "RESTRICT") ||
+      (old.onUpdate || "RESTRICT") !== (fk.onUpdate || "RESTRICT");
+    if (!changed) continue;
+    if (old) {
+      stmts.push(
+        pg
+          ? dropConstraint(fk.name)
+          : `ALTER TABLE ${qt} DROP FOREIGN KEY ${quoteIdent("mysql", fk.name)}`,
+      );
+    }
+    const clause = fkClause(engine, database, fk);
+    if (clause) stmts.push(`ALTER TABLE ${qt} ADD ${clause}`);
+  }
+
+  const baseCkMap = new Map(baselineChecks.map((c) => [c.name, c]));
+  const wantCkNames = new Set(checks.map((c) => c.name));
+  for (const b of baselineChecks) {
+    if (wantCkNames.has(b.name)) continue;
+    stmts.push(
+      pg
+        ? dropConstraint(b.name)
+        : `ALTER TABLE ${qt} DROP CHECK ${quoteIdent("mysql", b.name)}`,
+    );
+  }
+  for (const ck of checks) {
+    if (!identOk(ck.name) || !ck.expression.trim()) continue;
+    const old = baseCkMap.get(ck.name);
+    if (old && old.expression.trim() === ck.expression.trim()) continue;
+    if (old) {
+      stmts.push(
+        pg
+          ? dropConstraint(ck.name)
+          : `ALTER TABLE ${qt} DROP CHECK ${quoteIdent("mysql", ck.name)}`,
+      );
+    }
+    stmts.push(
+      `ALTER TABLE ${qt} ADD CONSTRAINT ${quoteIdent(engine, ck.name)} CHECK (${ck.expression})`,
+    );
+  }
+
+  const baseTrMap = new Map(baselineTriggers.map((x) => [x.name, x]));
+  const wantTrNames = new Set(triggers.map((x) => x.name));
+  const dropTrigger = (name: string) =>
+    pg
+      ? `DROP TRIGGER IF EXISTS ${quoteIdent("postgres", name)} ON ${qt}`
+      : `DROP TRIGGER IF EXISTS ${quoteTable("mysql", database, name)}`;
+  for (const b of baselineTriggers) {
+    if (!wantTrNames.has(b.name)) stmts.push(dropTrigger(b.name));
+  }
+  for (const tr of triggers) {
+    if (!tr.name.trim() || !tr.statement.trim()) continue;
+    const old = baseTrMap.get(tr.name);
+    if (
+      old &&
+      old.timing === tr.timing &&
+      old.event === tr.event &&
+      old.statement === tr.statement
+    ) {
+      continue;
+    }
+    if (old) stmts.push(dropTrigger(tr.name));
+    stmts.push(buildTriggerSql({ engine, database, table, trigger: tr }));
+  }
+
+  return stmts.filter(Boolean);
 }

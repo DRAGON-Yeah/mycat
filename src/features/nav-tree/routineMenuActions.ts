@@ -5,7 +5,7 @@ import {
   listRoutineMeta,
   type RoutineType,
 } from "../object-list/routineMeta";
-import { engineKey, identOk, quoteTable } from "./sqlIdent";
+import { engineKey, identOk, quoteTable, splitQualified } from "./sqlIdent";
 import {
   buildDropRoutineSql,
   buildRunSql,
@@ -38,12 +38,16 @@ export async function fetchRoutineDdl(args: {
     return sql.endsWith(";") ? sql : `${sql};`;
   }
   if (e === "postgres" || e === "postgresql") {
+    const [schema, base] = splitQualified(name);
+    const schemaPredicate = schema
+      ? `n.nspname = '${schema.replace(/'/g, "''")}'`
+      : "n.nspname = current_schema()";
     const out = await executeSql(
       conn.id,
       `SELECT pg_get_functiondef(p.oid)
        FROM pg_proc p
        JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = current_schema() AND p.proname = '${name.replace(/'/g, "''")}'
+       WHERE ${schemaPredicate} AND p.proname = '${base.replace(/'/g, "''")}'
        LIMIT 1`,
       database,
     );

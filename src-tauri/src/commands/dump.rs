@@ -4,8 +4,15 @@ use crate::session::SessionPool;
 use serde_json::Value;
 use tauri::State;
 
-fn ident_ok(name: &str) -> bool {
-    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+/// Table names may arrive schema-qualified (`sales.orders`) from the PG browser.
+fn table_name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+        && !name.starts_with('.')
+        && !name.ends_with('.')
+        && !name.contains("..")
 }
 
 fn sql_literal(v: &Value) -> String {
@@ -26,11 +33,24 @@ fn quote_ident(engine: &str, name: &str) -> String {
     }
 }
 
+/// `schema.table` (Postgres object browser) must be quoted part by part.
+fn quote_table_name(engine: &str, table: &str) -> String {
+    if engine == "mysql" {
+        return quote_ident(engine, table);
+    }
+    match table.split_once('.') {
+        Some((schema, name)) if !schema.is_empty() && !name.is_empty() => {
+            format!("{}.{}", quote_ident(engine, schema), quote_ident(engine, name))
+        }
+        _ => quote_ident(engine, table),
+    }
+}
+
 fn dump_inserts(engine: &str, table: &str, page: &RowsPage) -> String {
     if page.rows.is_empty() {
         return String::new();
     }
-    let table_q = quote_ident(engine, table);
+    let table_q = quote_table_name(engine, table);
     let cols = page
         .columns
         .iter()
@@ -57,53 +77,12 @@ fn dump_inserts(engine: &str, table: &str, page: &RowsPage) -> String {
 
 fn dump_structure(
     session: &dyn DriverSession,
-    engine_hint: &str,
+    _engine_hint: &str,
     database: Option<&str>,
     table: &str,
 ) -> AppResult<String> {
-    if engine_hint == "sqlite" || engine_hint.is_empty() {
-        if let Ok(out) = session.execute_sql(&format!(
-            "SELECT sql FROM sqlite_master WHERE type IN ('table','view') AND name = '{table}'"
-        )) {
-            if let Some(row) = out.rows.first() {
-                if let Some(Value::String(sql)) = row.first() {
-                    return Ok(format!("{sql};\n\n"));
-                }
-            }
-        }
-    }
-    if engine_hint == "mysql" {
-        let table_sql = match database.map(str::trim).filter(|d| !d.is_empty()) {
-            Some(db) if ident_ok(db) => format!("`{db}`.`{table}`"),
-            _ => format!("`{table}`"),
-        };
-        // Prefer VIEW DDL when the object is a view.
-        if let Ok(out) = session.execute_sql(&format!("SHOW CREATE VIEW {table_sql}")) {
-            if let Some(row) = out.rows.first() {
-                if let Some(Value::String(sql)) = row.get(1).or_else(|| row.first()) {
-                    return Ok(format!("{sql};\n\n"));
-                }
-            }
-        }
-        if let Ok(out) = session.execute_sql(&format!("SHOW CREATE TABLE {table_sql}")) {
-            if let Some(row) = out.rows.first() {
-                if let Some(Value::String(sql)) = row.get(1).or_else(|| row.first()) {
-                    return Ok(format!("{sql};\n\n"));
-                }
-            }
-        }
-    }
-    // Postgres / fallback: emit a comment + column list from one page
-    let page = session.query_page(database, table, 1, 1, None, None, None, None)?;
-    let cols = page
-        .columns
-        .iter()
-        .map(|c| format!("  \"{}\" {}", c.name, c.data_type))
-        .collect::<Vec<_>>()
-        .join(",\n");
-    Ok(format!(
-        "-- Structure inferred from live metadata\nCREATE TABLE IF NOT EXISTS \"{table}\" (\n{cols}\n);\n\n"
-    ))
+    let ddl = session.table_ddl(database, table)?;
+    Ok(format!("{}\n", ddl.trim_end()))
 }
 
 fn export_all_pages(
@@ -147,7 +126,7 @@ pub fn dump_table_sql(
     engine: String,
     database: Option<String>,
 ) -> Result<String, String> {
-    if !ident_ok(&table) {
+    if !table_name_ok(&table) {
         return Err(AppError::Validation("非法表名".into()).to_string());
     }
     pool.with_session(&connection_id, |session| {

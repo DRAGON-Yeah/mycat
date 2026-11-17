@@ -89,6 +89,7 @@ pub fn run() {
             commands::session::execute_sql,
             commands::session::cancel_query,
             commands::session::apply_row_changes,
+            commands::session::get_table_ddl,
             commands::dump::dump_table_sql,
             commands::queries::list_saved_queries,
             commands::queries::upsert_saved_query,

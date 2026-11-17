@@ -6,7 +6,7 @@ use crate::error::AppResult;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectOpts {
     pub engine: String,
@@ -117,6 +117,16 @@ pub trait DriverSession: Send {
     /// Server-side backend/connection id used by cancel (MySQL CONNECTION_ID / PG pid).
     fn backend_pid(&self) -> AppResult<Option<i64>> {
         Ok(None)
+    }
+    /// Cheap liveness probe; used before reusing a pooled session.
+    fn ping(&self) -> AppResult<()> {
+        Ok(())
+    }
+    /// Engine-native DDL for a table or view (SHOW CREATE TABLE / pg catalogs).
+    fn table_ddl(&self, _database: Option<&str>, _table: &str) -> AppResult<String> {
+        Err(crate::error::AppError::Message(
+            "当前引擎不支持导出 DDL".into(),
+        ))
     }
     /// SQLite InterruptHandle for cross-thread cancel (None for other engines).
     fn sqlite_interrupt_handle(&self) -> Option<rusqlite::InterruptHandle> {

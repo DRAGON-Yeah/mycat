@@ -294,6 +294,38 @@ impl DriverSession for MysqlSession {
         Ok(id.map(|v| i64::from(v)))
     }
 
+    fn ping(&self) -> AppResult<()> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::Message("mysql lock".into()))?;
+        let one: Option<u8> = conn.query_first("SELECT 1")?;
+        if one.is_some() {
+            Ok(())
+        } else {
+            Err(AppError::Message("mysql ping failed".into()))
+        }
+    }
+
+    fn table_ddl(&self, database: Option<&str>, table: &str) -> AppResult<String> {
+        let reference = table_ref(database, table)?;
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::Message("mysql lock".into()))?;
+        for kind in ["TABLE", "VIEW"] {
+            let sql = format!("SHOW CREATE {kind} {reference}");
+            if let Ok(row) = conn.query_first::<mysql::Row, _>(&sql) {
+                if let Some(value) = row.as_ref().and_then(|r| r.get::<String, _>(1)) {
+                    if !value.trim().is_empty() {
+                        return Ok(format!("{};\n", value.trim_end_matches(';')));
+                    }
+                }
+            }
+        }
+        Err(AppError::Message(format!("无法获取 {table} 的 DDL")))
+    }
+
     fn use_database(&self, database: Option<&str>) -> AppResult<()> {
         let Some(db) = database.map(str::trim).filter(|d| !d.is_empty()) else {
             return Ok(());
@@ -530,6 +562,129 @@ mod tests {
             msg.contains("Access denied") || msg.contains("driver") || msg.contains("Password"),
             "unexpected error: {msg}"
         );
+    }
+
+    fn live_opts() -> Option<ConnectOpts> {
+        if std::env::var("MYCAT_MYSQL_TEST").ok().as_deref() != Some("1") {
+            return None;
+        }
+        Some(ConnectOpts {
+            engine: "mysql".into(),
+            host: Some(std::env::var("MYCAT_MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into())),
+            port: Some(
+                std::env::var("MYCAT_MYSQL_PORT")
+                    .ok()
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(3306),
+            ),
+            database: None,
+            user: Some(std::env::var("MYCAT_MYSQL_USER").unwrap_or_else(|_| "root".into())),
+            password: Some(
+                std::env::var("MYCAT_MYSQL_PASSWORD").unwrap_or_else(|_| "root".into()),
+            ),
+            ssl_mode: Some("disable".into()),
+            ssl_trust: None,
+            ssh_enabled: None,
+            ssh_host: None,
+            ssh_port: None,
+            ssh_user: None,
+            ssh_password: None,
+        })
+    }
+
+    /// Regression guard for the shared driver surface: `MYCAT_MYSQL_TEST=1 cargo test --lib mysql_live`.
+    #[test]
+    fn mysql_live_roundtrip() {
+        let Some(opts) = live_opts() else {
+            return;
+        };
+        let session = MysqlSession::connect(&opts).expect("connect");
+        session.ping().expect("ping");
+        session
+            .execute_sql(
+                "DROP DATABASE IF EXISTS mycat_test;
+                 CREATE DATABASE mycat_test;
+                 CREATE TABLE mycat_test.sample (
+                   id INT AUTO_INCREMENT PRIMARY KEY,
+                   name VARCHAR(64) NOT NULL,
+                   amount DECIMAL(12,2),
+                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                 );",
+            )
+            .expect("setup");
+
+        let tables = session.list_tables(Some("mycat_test"), None).expect("list");
+        assert!(tables.iter().any(|t| t.name == "sample"));
+
+        let page = session
+            .query_page(Some("mycat_test"), "sample", 1, 10, None, None, None, None)
+            .expect("page");
+        assert_eq!(page.total, 0);
+        assert_eq!(page.columns.len(), 4);
+
+        let inserted = session
+            .apply_row_changes(
+                Some("mycat_test"),
+                "sample",
+                &[RowChange {
+                    op: "insert".into(),
+                    pk_columns: vec![],
+                    pk_values: vec![],
+                    columns: vec!["name".into(), "amount".into()],
+                    values: vec![Value::String("第一条".into()), Value::from(9.5)],
+                }],
+            )
+            .expect("insert");
+        assert_eq!(inserted, 1);
+
+        let page = session
+            .query_page(
+                Some("mycat_test"),
+                "sample",
+                1,
+                10,
+                Some("id"),
+                Some("DESC"),
+                Some("name"),
+                Some("第一"),
+            )
+            .expect("page");
+        assert_eq!(page.total, 1);
+        assert_eq!(page.rows[0][1], Value::String("第一条".into()));
+
+        let ddl = session.table_ddl(Some("mycat_test"), "sample").expect("ddl");
+        assert!(ddl.contains("CREATE TABLE"));
+        assert!(ddl.contains("AUTO_INCREMENT"));
+
+        session
+            .execute_sql("DROP DATABASE mycat_test")
+            .expect("cleanup");
+    }
+
+    /// `open_connection` is called before every object-list refresh: it must not
+    /// reconnect when the settings are unchanged.
+    #[test]
+    fn session_pool_reuses_live_session() {
+        let Some(opts) = live_opts() else {
+            return;
+        };
+        let pool = crate::session::SessionPool::new();
+        pool.open("c1", opts.clone()).expect("open");
+        let pid1 = pool
+            .with_session("c1", |s| s.backend_pid())
+            .expect("pid1");
+        pool.open("c1", opts.clone()).expect("reopen");
+        let pid2 = pool
+            .with_session("c1", |s| s.backend_pid())
+            .expect("pid2");
+        assert_eq!(pid1, pid2, "unchanged settings must reuse the session");
+
+        let mut changed = opts.clone();
+        changed.password = Some("definitely-wrong".into());
+        assert!(pool.open("c1", changed).is_err(), "settings change reconnects");
+
+        pool.close("c1").expect("close");
+        assert!(pool.with_session("c1", |s| s.ping()).is_err());
     }
 
     #[test]

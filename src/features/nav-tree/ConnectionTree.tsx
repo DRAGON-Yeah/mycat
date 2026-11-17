@@ -77,6 +77,7 @@ import { CloseWorkspaceDialog } from "./CloseWorkspaceDialog";
 import { EditDatabaseDialog } from "./EditDatabaseDialog";
 import { NewDatabaseDialog } from "./NewDatabaseDialog";
 import { IconEngine } from "./EngineIcons";
+import { engineKey, quoteIdent } from "./sqlIdent";
 import {
   IconBackups,
   IconDatabase,
@@ -389,6 +390,27 @@ export function ConnectionTree() {
         const prevMap = new Map(prev.map((n) => [n.conn.id, n]));
         return items.map((conn) => {
           const old = prevMap.get(conn.id);
+          // Editing host/engine/database invalidates the cached database list.
+          const sameTarget =
+            old &&
+            old.conn.engine === conn.engine &&
+            old.conn.host === conn.host &&
+            old.conn.port === conn.port &&
+            old.conn.user === conn.user &&
+            old.conn.database === conn.database;
+          if (old && !sameTarget) {
+            return {
+              conn,
+              expanded: false,
+              connected: false,
+              loading: false,
+              error: null,
+              databases: [],
+              openDbs: {},
+              openQueryFolders: {},
+              savedQueries: {},
+            };
+          }
           return old
             ? { ...old, conn }
             : {
@@ -775,8 +797,9 @@ export function ConnectionTree() {
     setNewDbBusy(true);
     try {
       await openConnection(conn.id);
-      let sql = `CREATE DATABASE \`${name}\``;
-      if (String(conn.engine).toLowerCase() === "mysql") {
+      const engine = String(conn.engine);
+      let sql = `CREATE DATABASE ${quoteIdent(engine, name)}`;
+      if (engineKey(engine) === "mysql") {
         if (charset) sql += ` CHARACTER SET ${charset}`;
         if (collate) sql += ` COLLATE ${collate}`;
       }
@@ -796,7 +819,12 @@ export function ConnectionTree() {
     setEditBusy(true);
     try {
       await openConnection(connId);
-      let sql = `ALTER DATABASE \`${database.replace(/`/g, "``")}\` CHARACTER SET ${charset}`;
+      const node = nodes.find((n) => n.conn.id === connId);
+      const engine = String(node?.conn.engine ?? "mysql");
+      if (engineKey(engine) !== "mysql") {
+        throw new Error("当前引擎不支持修改数据库字符集");
+      }
+      let sql = `ALTER DATABASE ${quoteIdent(engine, database)} CHARACTER SET ${charset}`;
       if (collate) sql += ` COLLATE ${collate}`;
       await executeSql(connId, sql);
       setPendingEdit(null);
@@ -1042,6 +1070,13 @@ export function ConnectionTree() {
                         {dbOpen && (
                           <ul className="tree-children">
                             {FOLDERS.map((folder) => {
+                              // MySQL Event Scheduler only.
+                              if (
+                                folder.id === "events" &&
+                                !/mysql|mariadb/i.test(String(n.conn.engine))
+                              ) {
+                                return null;
+                              }
                               if (
                                 folder.id === "tables" ||
                                 folder.id === "views" ||
