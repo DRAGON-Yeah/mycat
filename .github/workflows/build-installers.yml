@@ -52,13 +52,14 @@ jobs:
           workspaces: src-tauri -> target
           key: ${{ matrix.name }}
 
-      # ssh2 / libssh2 在 Windows 上需要 OpenSSL
-      - name: Install OpenSSL (Windows)
+      # ssh2 使用 vendored-openssl：Windows 上需要 perl + nasm 编译 OpenSSL
+      - name: Install OpenSSL build tools (Windows)
         if: startsWith(matrix.platform, 'windows')
         shell: pwsh
         run: |
-          choco install openssl --no-progress -y
-          "OPENSSL_DIR=C:\Program Files\OpenSSL-Win64" | Out-File -FilePath $env:GITHUB_ENV -Append
+          choco install nasm --no-progress -y
+          "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Append
+          perl -v
 
       - name: Install frontend deps
         run: npm ci

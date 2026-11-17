@@ -34,7 +34,8 @@ mysql = { version = "28.0.4", features = ["native-tls"] }
 postgres = "0.19.14"
 native-tls = "0.2.18"
 postgres-native-tls = "0.5.3"
-ssh2 = "0.9.7"
+# vendored-openssl：静态编译 OpenSSL，避免打包后依赖本机 Homebrew 的 libssl
+ssh2 = { version = "0.9.7", features = ["vendored-openssl"] }
 tauri-plugin-dialog = "2.8.4"
 tauri-plugin-fs = "2.7.1"
 
