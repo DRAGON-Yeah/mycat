@@ -72,7 +72,18 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
   const [info, setInfo] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  /** 测试连接耗时较长时才显示遮罩，避免闪烁 */
+  const [busyVisible, setBusyVisible] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    if (!testing) {
+      setBusyVisible(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setBusyVisible(true), 200);
+    return () => window.clearTimeout(timer);
+  }, [testing]);
 
   useModSaveShortcut(() => {
     if (!saving && !testing) formRef.current?.requestSubmit();
@@ -423,6 +434,18 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
           >
             {saving ? "保存中…" : "保存"}
           </button>
+        </div>
+
+        <div
+          className={`modal-busy ${busyVisible ? "is-visible" : ""}`}
+          aria-hidden={!busyVisible}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="modal-busy-card">
+            <span className="modal-busy-spinner" aria-hidden />
+            <span className="modal-busy-text">正在测试连接…</span>
+          </div>
         </div>
       </form>
     </div>

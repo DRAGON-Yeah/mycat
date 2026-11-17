@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -193,6 +194,33 @@ export function ConnectionTree() {
     conn: ConnectionDto;
     database: string;
   } | null>(null);
+  /** Long-running connect/open: overlay label + delayed visibility */
+  const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  const [busyVisible, setBusyVisible] = useState(false);
+  const busyTimer = useRef<number | null>(null);
+
+  const beginBusy = useCallback((label: string) => {
+    setBusyLabel(label);
+    if (busyTimer.current !== null) window.clearTimeout(busyTimer.current);
+    // 200ms 内完成的操作不弹遮罩，避免闪烁
+    busyTimer.current = window.setTimeout(() => setBusyVisible(true), 200);
+  }, []);
+
+  const endBusy = useCallback(() => {
+    if (busyTimer.current !== null) {
+      window.clearTimeout(busyTimer.current);
+      busyTimer.current = null;
+    }
+    setBusyVisible(false);
+    setBusyLabel(null);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (busyTimer.current !== null) window.clearTimeout(busyTimer.current);
+    },
+    [],
+  );
 
   const activeConnectionId = useWorkspaceStore((s) => s.activeConnectionId);
   const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
@@ -371,6 +399,7 @@ export function ConnectionTree() {
           : n,
       ),
     );
+    beginBusy(`正在连接「${node.conn.name}」…`);
     try {
       const databases = await ensureOpen(node);
       setNodes((prev) =>
@@ -401,32 +430,39 @@ export function ConnectionTree() {
             : n,
         ),
       );
+    } finally {
+      endBusy();
     }
   }
 
   async function refreshConnectionDatabases(connId: string) {
     const node = nodes.find((n) => n.conn.id === connId);
     if (!node) return;
-    openConn(node.conn);
-    await openConnection(node.conn.id);
-    const databases =
-      node.conn.engine === "sqlite"
-        ? [node.conn.host || "main"]
-        : await listDatabases(node.conn.id);
-    setNodes((prev) =>
-      prev.map((n) =>
-        n.conn.id === connId
-          ? {
-              ...n,
-              databases,
-              expanded: true,
-              connected: true,
-              error: null,
-              loading: false,
-            }
-          : n,
-      ),
-    );
+    beginBusy(`正在刷新「${node.conn.name}」…`);
+    try {
+      openConn(node.conn);
+      await openConnection(node.conn.id);
+      const databases =
+        node.conn.engine === "sqlite"
+          ? [node.conn.host || "main"]
+          : await listDatabases(node.conn.id);
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.conn.id === connId
+            ? {
+                ...n,
+                databases,
+                expanded: true,
+                connected: true,
+                error: null,
+                loading: false,
+              }
+            : n,
+        ),
+      );
+    } finally {
+      endBusy();
+    }
   }
 
   async function loadSavedQueries(connId: string, database: string) {
@@ -727,8 +763,10 @@ export function ConnectionTree() {
   }
 
   async function onSelectDatabase(node: ConnNode, db: string) {
+    const needsOpen = !node.expanded || node.databases.length === 0;
+    if (needsOpen) beginBusy(`正在打开「${db}」…`);
     try {
-      if (!node.expanded || node.databases.length === 0) {
+      if (needsOpen) {
         const databases = await ensureOpen(node);
         setNodes((prev) =>
           prev.map((n) =>
@@ -768,6 +806,8 @@ export function ConnectionTree() {
             : n,
         ),
       );
+    } finally {
+      if (needsOpen) endBusy();
     }
   }
 
@@ -1864,6 +1904,18 @@ export function ConnectionTree() {
           save={save}
         />
       )}
+
+      <div
+        className={`tree-busy ${busyVisible ? "is-visible" : ""}`}
+        aria-hidden={!busyVisible}
+        role="status"
+        aria-live="polite"
+      >
+        <div className="tree-busy-card">
+          <span className="tree-busy-spinner" aria-hidden />
+          <span className="tree-busy-text">{busyLabel ?? ""}</span>
+        </div>
+      </div>
     </aside>
   );
 }
