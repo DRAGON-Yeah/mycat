@@ -1205,3 +1205,14 @@
   margin: 0 4px;
   flex-shrink: 0;
 }
+
+.panel-toggle-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.panel-toggle-btn:disabled:hover {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}

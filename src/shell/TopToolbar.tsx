@@ -11,7 +11,7 @@ import {
 import { ToolbarIcon } from "./ToolbarIcons";
 
 type Item = {
-  id: ToolbarAction;
+  id: ToolbarAction | "console";
   label: string;
 };
 
@@ -25,6 +25,7 @@ const ITEMS: Item[] = [
   { id: "automation", label: "自动化" },
   { id: "model", label: "模型" },
   { id: "bi", label: "BI" },
+  { id: "console", label: "Console" },
 ];
 
 /** 面板收起图标：圆角方框 + 左侧/底部/右侧实心条 */
@@ -56,11 +57,13 @@ function PanelIcon({ side }: { side: "left" | "bottom" | "right" }) {
 
 function PanelToggles({
   layout,
+  hasBottomPanel,
   onToggleTree,
   onToggleBottom,
   onToggleInspector,
 }: {
   layout: LayoutSizes;
+  hasBottomPanel: boolean;
   onToggleTree: () => void;
   onToggleBottom: () => void;
   onToggleInspector: () => void;
@@ -71,13 +74,15 @@ function PanelToggles({
       side: "left" as const,
       collapsed: layout.treeCollapsed,
       label: "左侧面板",
+      disabled: false,
       onClick: onToggleTree,
     },
     {
       key: "bottom",
       side: "bottom" as const,
       collapsed: layout.bottomCollapsed,
-      label: "下方面板",
+      label: "下方面板（查询结果）",
+      disabled: !hasBottomPanel,
       onClick: onToggleBottom,
     },
     {
@@ -85,6 +90,7 @@ function PanelToggles({
       side: "right" as const,
       collapsed: layout.inspectorCollapsed,
       label: "右侧面板",
+      disabled: false,
       onClick: onToggleInspector,
     },
   ];
@@ -95,9 +101,14 @@ function PanelToggles({
           key={item.key}
           type="button"
           className={`panel-toggle-btn ${item.collapsed ? "is-collapsed" : ""}`}
-          title={`${item.collapsed ? "展开" : "收起"}${item.label}`}
+          title={
+            item.disabled
+              ? "当前视图没有下方面板"
+              : `${item.collapsed ? "展开" : "收起"}${item.label}`
+          }
           aria-label={`${item.collapsed ? "展开" : "收起"}${item.label}`}
           aria-pressed={item.collapsed}
+          disabled={item.disabled}
           onClick={item.onClick}
         >
           <PanelIcon side={item.side} />
@@ -124,34 +135,36 @@ export function TopToolbar() {
         <span className="brand-text">Mycat</span>
       </div>
       <nav className="top-toolbar-items">
-        {ITEMS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={`toolbar-item ${toolbarAction === item.id && centerMode !== "console" ? "is-active" : ""}`}
-            onClick={() => setToolbarAction(item.id)}
-          >
-            <ToolbarIcon id={item.id} />
-            <span className="toolbar-label">{item.label}</span>
-          </button>
-        ))}
+        {ITEMS.map((item) => {
+          const isConsole = item.id === "console";
+          const active = isConsole
+            ? centerMode === "console"
+            : toolbarAction === item.id && centerMode !== "console";
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={`toolbar-item ${active ? "is-active" : ""}`}
+              onClick={() => {
+                if (isConsole) openConsole();
+                else setToolbarAction(item.id as ToolbarAction);
+              }}
+            >
+              <ToolbarIcon id={item.id} />
+              <span className="toolbar-label">{item.label}</span>
+            </button>
+          );
+        })}
       </nav>
       <div className="top-toolbar-actions">
         <PanelToggles
           layout={layout}
+          hasBottomPanel={centerMode === "query"}
           onToggleTree={toggleTree}
           onToggleBottom={toggleBottom}
           onToggleInspector={toggleInspector}
         />
         <span className="toolbar-sep" aria-hidden />
-        <button
-          type="button"
-          className={`toolbar-item ${centerMode === "console" ? "is-active" : ""}`}
-          onClick={() => openConsole()}
-        >
-          <ToolbarIcon id="console" />
-          <span className="toolbar-label">Console</span>
-        </button>
         <ThemeToggle />
       </div>
     </header>
