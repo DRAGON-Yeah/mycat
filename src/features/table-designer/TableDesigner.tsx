@@ -189,12 +189,14 @@ export function TableDesigner({ tab }: Props) {
     const t = tabRef.current;
     if (t.mode === "create") {
       const pg = isPostgres(t.connectionEngine);
+      // SQLite only auto-assigns ids for `INTEGER PRIMARY KEY`.
+      const sqlite = engineKey(t.connectionEngine) === "sqlite";
       const seed = t.seedColumns?.length
         ? t.seedColumns.map(seedToColumn)
         : [
             newColumn({
               name: "id",
-              typeName: pg ? "bigint" : "bigint",
+              typeName: sqlite ? "integer" : "bigint",
               length: "",
               notNull: true,
               isPk: true,

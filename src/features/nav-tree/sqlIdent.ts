@@ -47,9 +47,10 @@ export function baseName(name: string | null | undefined): string {
 /**
  * Quote a table reference.
  *
- * MySQL/SQLite qualify with the database (`db`.`table`). Postgres cannot cross
+ * MySQL qualifies with the database (`db`.`table`). Postgres cannot cross
  * databases, so the database argument is ignored there and a `schema.table`
- * name is quoted part by part instead.
+ * name is quoted part by part instead. SQLite's "database" is the file itself,
+ * so it is never used as a qualifier either.
  */
 export function quoteTable(
   engine: string,
@@ -65,6 +66,6 @@ export function quoteTable(
       : quoteIdent(engine, name);
   }
   const q = quoteIdent(engine, t);
-  if (!database?.trim()) return q;
+  if (e === "sqlite" || !database?.trim()) return q;
   return `${quoteIdent(engine, database.trim())}.${q}`;
 }
