@@ -20,16 +20,19 @@ jobs:
         include:
           # macOS：Universal 包，同时支持 Intel(x86_64) 与 Apple Silicon(arm64)
           - name: macOS Universal (Intel + Apple Silicon)
+            slug: macos-universal
             platform: macos-latest
             args: --target universal-apple-darwin
             targets: aarch64-apple-darwin,x86_64-apple-darwin
           # Windows：x64 安装包（NSIS .exe + MSI）
           - name: Windows x64
+            slug: windows-x64
             platform: windows-latest
             args: ""
             targets: ""
           # Windows：ARM64 安装包
           - name: Windows ARM64
+            slug: windows-arm64
             platform: windows-latest
             args: --target aarch64-pc-windows-msvc
             targets: aarch64-pc-windows-msvc
@@ -74,7 +77,7 @@ jobs:
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
-          name: installers-${{ matrix.name }}
+          name: installers-${{ matrix.slug }}
           path: |
             src-tauri/target/**/release/bundle/dmg/*.dmg
             src-tauri/target/**/release/bundle/macos/*.app.tar.gz
