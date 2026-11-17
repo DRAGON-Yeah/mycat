@@ -4,6 +4,7 @@ import {
   executeSql,
   fetchTablePage,
   getTableDdl,
+  listTables,
   openConnection,
 } from "../connections/sessionApi";
 import { downloadTextFile, rowsToCsv, parseCsv } from "../import-export/csv";
@@ -45,12 +46,14 @@ export async function dumpSingleTable(args: {
   );
 }
 
-export async function exportTableDictionary(args: {
+/** Shared body of the per-table data dictionary (columns + indexes). */
+async function tableDictionarySection(args: {
   conn: ConnectionDto;
   database: string;
   table: string;
-}) {
-  const { conn, database, table } = args;
+  heading?: string;
+}): Promise<string[]> {
+  const { conn, database, table, heading } = args;
   const engine = String(conn.engine);
   const [cols, meta, indexes] = await Promise.all([
     loadDesignerColumns({
@@ -72,9 +75,8 @@ export async function exportTableDictionary(args: {
       table,
     }),
   ]);
-  const lines = [
-    `# 数据字典 · ${database}.${table}`,
-    "",
+  return [
+    ...(heading ? [heading, ""] : []),
     `- 引擎: ${meta.options.engine || "—"}`,
     `- 校对: ${meta.options.collation || "—"}`,
     `- 约行数: ${meta.stats.tableRows}`,
@@ -95,6 +97,19 @@ export async function exportTableDictionary(args: {
         `- **${ix.name}** (${ix.unique ? "UNIQUE " : ""}${ix.indexType || "BTREE"}): ${ix.columns}`,
     ),
     "",
+  ];
+}
+
+export async function exportTableDictionary(args: {
+  conn: ConnectionDto;
+  database: string;
+  table: string;
+}) {
+  const { conn, database, table } = args;
+  const lines = [
+    `# 数据字典 · ${database}.${table}`,
+    "",
+    ...(await tableDictionarySection({ conn, database, table })),
   ];
   try {
     const viewDdl = await fetchCreateDdl({
@@ -121,6 +136,49 @@ export async function exportTableDictionary(args: {
     lines.join("\n"),
     "text/markdown",
   );
+}
+
+/** Data dictionary for every base table of a database. */
+export async function exportAllTablesDictionary(args: {
+  conn: ConnectionDto;
+  database: string;
+}) {
+  const { conn, database } = args;
+  await openConnection(conn.id);
+  const all = await listTables(conn.id, database);
+  const tables = all.filter((t) => t.kind !== "view");
+  const lines = [
+    `# 表数据字典 · ${database}`,
+    "",
+    `连接：${conn.name}（${conn.engine}）`,
+    `生成时间：${new Date().toLocaleString()}`,
+    "",
+  ];
+  for (const t of tables) {
+    try {
+      lines.push(
+        ...(await tableDictionarySection({
+          conn,
+          database,
+          table: t.name,
+          heading: `## ${t.name}`,
+        })),
+      );
+    } catch (err) {
+      lines.push(
+        `## ${t.name}`,
+        "",
+        `（无法读取：${err instanceof Error ? err.message : String(err)}）`,
+        "",
+      );
+    }
+  }
+  await downloadTextFile(
+    `${database}-tables-dictionary.md`,
+    lines.join("\n"),
+    "text/markdown",
+  );
+  return tables.length;
 }
 
 export async function reverseSingleTableModel(args: {
@@ -700,6 +758,7 @@ export function maintainOpsForEngine(engine: string): MaintainOp[] {
   const e = engineKey(engine);
   if (e === "mysql") return ["analyze", "optimize", "check", "repair"];
   if (e === "postgres" || e === "postgresql") return ["analyze"];
+  if (e === "sqlite") return ["analyze"];
   return [];
 }
 
@@ -719,6 +778,9 @@ export async function maintainTable(args: {
   const e = engineKey(conn.engine);
   let sql = "";
   if (e === "postgres" || e === "postgresql") {
+    sql = `ANALYZE ${qt}`;
+  } else if (e === "sqlite") {
+    // SQLite has no per-table maintenance verbs; ANALYZE takes the table name.
     sql = `ANALYZE ${qt}`;
   } else {
     const map: Record<MaintainOp, string> = {

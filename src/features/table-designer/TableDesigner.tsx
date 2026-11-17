@@ -23,7 +23,9 @@ import {
   buildAlterTableSql,
   buildCreateTableSql,
   buildObjectSyncSql,
+  buildSqliteRebuildSql,
   buildTriggerSql,
+  sqliteNeedsRebuild,
 } from "./ddl";
 import {
   loadDesignerChecks,
@@ -44,6 +46,7 @@ import {
 } from "./mysqlCharsets";
 import {
   MYSQL_TYPES,
+  SQLITE_TYPES,
   composedType,
   emptyOptions,
   newColumn,
@@ -551,6 +554,28 @@ export function TableDesigner({ tab }: Props) {
       if (tab.mode === "create") {
         return ddlSql;
       }
+      if (
+        engineKey(tab.connectionEngine) === "sqlite" &&
+        sqliteNeedsRebuild({
+          baseline,
+          columns,
+          baselineFks,
+          fks,
+          baselineChecks,
+          checks,
+        })
+      ) {
+        return buildSqliteRebuildSql({
+          engine: tab.connectionEngine,
+          database: tab.database,
+          table: tab.table,
+          columns,
+          indexes,
+          foreignKeys: fks,
+          checks,
+          triggers,
+        });
+      }
       const stmts = buildAlterTableSql({
         engine: tab.connectionEngine,
         database: tab.database,
@@ -653,23 +678,60 @@ export function TableDesigner({ tab }: Props) {
         return;
       }
 
-      const stmts = buildAlterTableSql({
-        engine: tab.connectionEngine,
-        database: db,
-        table: tab.table,
-        baseline,
-        columns,
-        options,
-        baselineOptions,
-      });
-      for (const sql of stmts) {
-        await runSql(sql);
+      const sqlite = engineKey(tab.connectionEngine) === "sqlite";
+      // SQLite cannot alter column definitions or constraints in place: rebuild
+      // the table (create shadow, copy, swap) when such a change is requested.
+      const rebuild =
+        sqlite &&
+        sqliteNeedsRebuild({
+          baseline,
+          columns,
+          baselineFks,
+          fks,
+          baselineChecks,
+          checks,
+        });
+      if (rebuild) {
+        const script = buildSqliteRebuildSql({
+          engine: tab.connectionEngine,
+          database: db,
+          table: tab.table,
+          columns,
+          indexes,
+          foreignKeys: fks,
+          checks,
+          triggers,
+        });
+        try {
+          await runSql(script);
+        } catch (err) {
+          try {
+            await runSql("ROLLBACK;");
+          } catch {
+            /* ignore */
+          }
+          throw err;
+        }
+      } else {
+        const stmts = buildAlterTableSql({
+          engine: tab.connectionEngine,
+          database: db,
+          table: tab.table,
+          baseline,
+          columns,
+          options,
+          baselineOptions,
+        });
+        for (const sql of stmts) {
+          await runSql(sql);
+        }
       }
 
-      // index / FK / check / trigger sync (MySQL + Postgres)
+      // index / FK / check / trigger sync (MySQL + Postgres + SQLite)
       if (
         engineKey(tab.connectionEngine) === "mysql" ||
-        isPostgres(tab.connectionEngine)
+        isPostgres(tab.connectionEngine) ||
+        sqlite
       ) {
         const [baseIx, baseFk, baseCk, baseTr] = await Promise.all([
           loadDesignerIndexes({
@@ -747,6 +809,8 @@ export function TableDesigner({ tab }: Props) {
   }
 
   const isMysql = engineKey(tab.connectionEngine) === "mysql";
+  const typeChoices =
+    engineKey(tab.connectionEngine) === "sqlite" ? SQLITE_TYPES : MYSQL_TYPES;
   const canSave =
     !saving &&
     !loading &&
@@ -935,10 +999,10 @@ export function TableDesigner({ tab }: Props) {
                             patchCol(c.key, patch);
                           }}
                         >
-                          {!MYSQL_TYPES.includes(c.typeName) && (
+                          {!typeChoices.includes(c.typeName) && (
                             <option value={c.typeName}>{c.typeName}</option>
                           )}
-                          {MYSQL_TYPES.map((t) => (
+                          {typeChoices.map((t) => (
                             <option key={t} value={t}>
                               {t}
                             </option>
@@ -1310,7 +1374,11 @@ export function TableDesigner({ tab }: Props) {
           {!loading && pane === "options" && (
             <div className="td-options">
               {!isMysql && (
-                <p className="pane-placeholder">选项页目前以 MySQL 为主。</p>
+                <p className="pane-placeholder">
+                  {engineKey(tab.connectionEngine) === "sqlite"
+                    ? "SQLite 没有表引擎/字符集等选项，此页仅展示统计信息。"
+                    : "选项页目前以 MySQL 为主。"}
+                </p>
               )}
               <label>
                 引擎
@@ -1434,6 +1502,11 @@ export function TableDesigner({ tab }: Props) {
 
           {!loading && pane === "comments" && (
             <div className="td-comments">
+              {engineKey(tab.connectionEngine) === "sqlite" && (
+                <p className="pane-placeholder">
+                  SQLite 不支持表/列注释，此页内容不会被保存。
+                </p>
+              )}
               <label>
                 表注释
                 <textarea

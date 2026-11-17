@@ -6,9 +6,6 @@ const LABELS: Record<string, string> = {
   view: "视图",
   function: "函数",
   backup: "备份",
-  automation: "自动化",
-  model: "模型",
-  bi: "BI",
 };
 
 export function PlaceholderPane({ feature }: Props) {
@@ -16,7 +13,7 @@ export function PlaceholderPane({ feature }: Props) {
   return (
     <div className="placeholder-pane">
       <h2>{label}</h2>
-      <p>此功能尚未在 Phase 0 实现，入口仅作 Navicat 风格菜单占位。</p>
+      <p>该入口暂未提供独立面板，请通过左侧导航树或对应工具栏操作。</p>
     </div>
   );
 }

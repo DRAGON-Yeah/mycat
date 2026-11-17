@@ -4,7 +4,10 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
+import { AutomationPane } from "../features/automation/AutomationPane";
+import { BiPane } from "../features/bi/BiPane";
 import { DataGrid } from "../features/data-grid/DataGrid";
+import { ModelPane } from "../features/model/ModelPane";
 import { ObjectListGrid } from "../features/object-list/ObjectListGrid";
 import { PlaceholderPane } from "../features/placeholders/PlaceholderPane";
 import { ConsolePanel } from "../features/query/Console";
@@ -19,6 +22,12 @@ import {
   type TabKind,
   type TabMenuTarget,
 } from "./TabContextMenu";
+
+const FEATURE_TABS = [
+  { mode: "automation" as const, label: "自动化" },
+  { mode: "model" as const, label: "模型" },
+  { mode: "bi" as const, label: "BI" },
+];
 
 function queryTabLabel(title: string, database: string, connectionName: string) {
   const db = database || "?";
@@ -56,6 +65,7 @@ export function MainWorkspace() {
   const activeConnection = useWorkspaceStore((s) => s.activeConnection);
   const openQuery = useWorkspaceStore((s) => s.openQuery);
   const closeTabsByIds = useWorkspaceStore((s) => s.closeTabsByIds);
+  const setToolbarAction = useWorkspaceStore((s) => s.setToolbarAction);
 
   const [tabMenu, setTabMenu] = useState<TabMenuTarget | null>(null);
 
@@ -228,6 +238,19 @@ export function MainWorkspace() {
           >
             <span className="ws-tab-label">Console</span>
           </button>
+
+          {FEATURE_TABS.map((f) => (
+            <button
+              key={f.mode}
+              type="button"
+              role="tab"
+              aria-selected={centerMode === f.mode}
+              className={`ws-tab ws-tab-system ${centerMode === f.mode ? "is-active" : ""}`}
+              onClick={() => setToolbarAction(f.mode)}
+            >
+              <span className="ws-tab-label">{f.label}</span>
+            </button>
+          ))}
 
           <span className="ws-tabbar-divider" aria-hidden />
 
@@ -409,6 +432,12 @@ export function MainWorkspace() {
       <div className="ws-body">
         {centerMode === "placeholder" && placeholderFeature ? (
           <PlaceholderPane feature={placeholderFeature} />
+        ) : centerMode === "automation" ? (
+          <AutomationPane />
+        ) : centerMode === "model" ? (
+          <ModelPane />
+        ) : centerMode === "bi" ? (
+          <BiPane />
         ) : centerMode === "query" ? (
           <QueryEditor />
         ) : centerMode === "console" ? (

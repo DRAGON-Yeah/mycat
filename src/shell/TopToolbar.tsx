@@ -9,26 +9,24 @@ import { ToolbarIcon } from "./ToolbarIcons";
 type Item = {
   id: ToolbarAction;
   label: string;
-  placeholder?: string;
 };
 
 const ITEMS: Item[] = [
   { id: "connection", label: "连接" },
   { id: "table", label: "表" },
-  { id: "view", label: "视图", placeholder: "view" },
+  { id: "view", label: "视图" },
   { id: "function", label: "函数" },
   { id: "query", label: "查询" },
   { id: "backup", label: "备份" },
   { id: "automation", label: "自动化" },
-  { id: "model", label: "模型", placeholder: "model" },
-  { id: "bi", label: "BI", placeholder: "bi" },
+  { id: "model", label: "模型" },
+  { id: "bi", label: "BI" },
 ];
 
 export function TopToolbar() {
   const toolbarAction = useWorkspaceStore((s) => s.toolbarAction);
   const centerMode = useWorkspaceStore((s) => s.centerMode);
   const setToolbarAction = useWorkspaceStore((s) => s.setToolbarAction);
-  const setCenterMode = useWorkspaceStore((s) => s.setCenterMode);
   const openConsole = useWorkspaceStore((s) => s.openConsole);
 
   return (
@@ -42,19 +40,8 @@ export function TopToolbar() {
           <button
             key={item.id}
             type="button"
-            className={`toolbar-item ${toolbarAction === item.id && centerMode !== "console" ? "is-active" : ""} ${item.placeholder ? "is-soft" : ""}`}
-            onClick={() => {
-              if (item.id === "query") {
-                setToolbarAction("query");
-                return;
-              }
-              if (item.placeholder) {
-                setToolbarAction(item.id, item.placeholder);
-                return;
-              }
-              setToolbarAction(item.id);
-              if (item.id === "connection") setCenterMode("welcome");
-            }}
+            className={`toolbar-item ${toolbarAction === item.id && centerMode !== "console" ? "is-active" : ""}`}
+            onClick={() => setToolbarAction(item.id)}
           >
             <ToolbarIcon id={item.id} />
             <span className="toolbar-label">{item.label}</span>

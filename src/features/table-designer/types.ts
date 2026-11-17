@@ -157,6 +157,21 @@ export const MYSQL_TYPES = [
   "varbinary",
 ];
 
+/** SQLite storage classes + the common declared types (any name is accepted). */
+export const SQLITE_TYPES = [
+  "integer",
+  "text",
+  "real",
+  "blob",
+  "numeric",
+  "varchar",
+  "char",
+  "boolean",
+  "decimal",
+  "date",
+  "datetime",
+];
+
 export function emptyOptions(): TableOptions {
   return {
     engine: "InnoDB",

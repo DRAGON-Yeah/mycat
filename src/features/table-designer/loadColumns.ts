@@ -278,6 +278,50 @@ WHERE c.relname = '${pgTableName(table)}'
     };
   }
 
+  if (e === "sqlite") {
+    await openConnection(connectionId);
+    let rows = "—";
+    try {
+      const cnt = await executeSql(
+        connectionId,
+        `SELECT COUNT(*) FROM ${quoteTable(engine, null, table)}`,
+        database,
+      );
+      const n = Number(cnt.rows[0]?.[0] ?? 0);
+      rows = Number.isFinite(n) ? String(n) : "—";
+    } catch {
+      /* ignore */
+    }
+    let dataLength = "—";
+    try {
+      const pc = await executeSql(connectionId, "PRAGMA page_count", database);
+      const ps = await executeSql(connectionId, "PRAGMA page_size", database);
+      const total =
+        Number(pc.rows[0]?.[0] ?? 0) * Number(ps.rows[0]?.[0] ?? 0);
+      if (total > 0) dataLength = formatBytes(total);
+    } catch {
+      /* ignore */
+    }
+    return {
+      options: {
+        engine: "SQLite",
+        charset: "",
+        collation: "",
+        rowFormat: "",
+        autoIncrement: "",
+        comment: "",
+        avgRowLength: "",
+      },
+      stats: {
+        tableRows: rows,
+        dataLength,
+        indexLength: "—",
+        createTime: "—",
+        updateTime: "—",
+      },
+    };
+  }
+
   if (e !== "mysql") {
     return { options: emptyOptions(), stats: emptyStats };
   }
@@ -361,6 +405,42 @@ ORDER BY i.relname`;
         originalName: name,
       };
     });
+  }
+
+  if (engineKey(engine) === "sqlite") {
+    const list = await executeSql(
+      connectionId,
+      `PRAGMA index_list(${sqliteLiteral(table)})`,
+      database,
+    );
+    const m = colMap(list.columns);
+    const out: DesignerIndex[] = [];
+    for (const row of list.rows) {
+      const name = cell(row, m.name);
+      const origin = cell(row, m.origin);
+      // Implicit UNIQUE / PRIMARY KEY indexes cannot be edited on their own.
+      if (!name || name.startsWith("sqlite_autoindex") || origin === "pk") continue;
+      const info = await executeSql(
+        connectionId,
+        `PRAGMA index_info(${sqliteLiteral(name)})`,
+        database,
+      );
+      const im = colMap(info.columns);
+      const cols = info.rows
+        .map((r) => cell(r, im.name))
+        .filter(Boolean)
+        .join(", ");
+      if (!cols) continue;
+      out.push({
+        key: `ix-${name}`,
+        name,
+        columns: cols,
+        unique: cell(row, m.unique) === "1",
+        indexType: "BTREE",
+        originalName: name,
+      });
+    }
+    return out;
   }
 
   if (engineKey(engine) !== "mysql") return [];
@@ -448,6 +528,39 @@ ORDER BY con.conname`;
         originalName: name,
       };
     });
+  }
+
+  if (engineKey(engine) === "sqlite") {
+    const out = await executeSql(
+      connectionId,
+      `PRAGMA foreign_key_list(${sqliteLiteral(table)})`,
+      database,
+    );
+    const m = colMap(out.columns);
+    const byId = new Map<string, DesignerForeignKey>();
+    for (const row of out.rows) {
+      const id = cell(row, m.id);
+      const refTable = cell(row, m.table);
+      const prev = byId.get(id);
+      const from = cell(row, m.from);
+      const to = cell(row, m.to);
+      if (prev) {
+        prev.columns = `${prev.columns}, ${from}`;
+        prev.refColumns = `${prev.refColumns}, ${to}`;
+      } else {
+        byId.set(id, {
+          key: `fk-${id}`,
+          name: `fk_${refTable}_${id}`,
+          columns: from,
+          refTable,
+          refColumns: to,
+          onDelete: cell(row, m.on_delete) || "NO ACTION",
+          onUpdate: cell(row, m.on_update) || "NO ACTION",
+          originalName: `fk_${refTable}_${id}`,
+        });
+      }
+    }
+    return [...byId.values()];
   }
 
   if (engineKey(engine) !== "mysql") return [];
@@ -543,6 +656,26 @@ ORDER BY t.tgname`;
     });
   }
 
+  if (engineKey(engine) === "sqlite") {
+    const out = await executeSql(
+      connectionId,
+      `SELECT name, sql FROM sqlite_master
+       WHERE type = 'trigger' AND tbl_name = ${sqliteLiteral(table)}
+       ORDER BY name`,
+      database,
+    );
+    return out.rows.map((row) => {
+      const name = String(row[0] ?? "");
+      const parsed = parseSqliteTrigger(String(row[1] ?? ""));
+      return {
+        key: `tr-${name}`,
+        name,
+        ...parsed,
+        originalName: name,
+      };
+    });
+  }
+
   if (engineKey(engine) !== "mysql") return [];
   const sql = `SELECT TRIGGER_NAME, ACTION_TIMING, EVENT_MANIPULATION, ACTION_STATEMENT
 FROM information_schema.TRIGGERS
@@ -593,6 +726,15 @@ ORDER BY con.conname`;
     }
   }
 
+  if (engineKey(engine) === "sqlite") {
+    const out = await executeSql(
+      connectionId,
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ${sqliteLiteral(table)}`,
+      database,
+    );
+    return parseSqliteChecks(String(out.rows[0]?.[0] ?? ""));
+  }
+
   if (engineKey(engine) !== "mysql") return [];
   const sql = `SELECT CONSTRAINT_NAME, CHECK_CLAUSE
 FROM information_schema.CHECK_CONSTRAINTS cc
@@ -613,4 +755,73 @@ WHERE tc.TABLE_SCHEMA = '${database.replace(/'/g, "''")}'
   } catch {
     return [];
   }
+}
+
+// ---------------------------------------------------------------------------
+// SQLite helpers
+// ---------------------------------------------------------------------------
+
+/** PRAGMA arguments accept a name or a string literal. */
+function sqliteLiteral(name: string): string {
+  return `'${name.replace(/'/g, "''")}'`;
+}
+
+function readParen(
+  s: string,
+  openIdx: number,
+): { inner: string; end: number } | null {
+  let depth = 0;
+  for (let i = openIdx; i < s.length; i++) {
+    const c = s[i];
+    if (c === "(") depth++;
+    else if (c === ")") {
+      depth--;
+      if (depth === 0) return { inner: s.slice(openIdx + 1, i), end: i };
+    }
+  }
+  return null;
+}
+
+/** `CREATE TRIGGER ... BEFORE INSERT ON t FOR EACH ROW BEGIN ... END` */
+export function parseSqliteTrigger(sql: string): {
+  timing: string;
+  event: string;
+  statement: string;
+} {
+  const head = sql.match(
+    /create\s+(?:temp\s+|temporary\s+)?trigger\s+(?:if\s+not\s+exists\s+)?(?:`[^`]+`|"[^"]+"|\[[^\]]+\]|\w+)\s*(before|after|instead\s+of)?\s*(insert|update|delete)/i,
+  );
+  const timing = (head?.[1] ?? "before").toUpperCase().replace(/\s+/g, " ");
+  const event = (head?.[2] ?? "insert").toUpperCase();
+  const beginIdx = sql.search(/\bbegin\b/i);
+  const statement =
+    beginIdx >= 0 ? sql.slice(beginIdx).trim().replace(/;\s*$/, "") : "";
+  return { timing, event, statement };
+}
+
+/** Pull `[CONSTRAINT name] CHECK (expr)` clauses out of a CREATE TABLE script. */
+export function parseSqliteChecks(createSql: string): DesignerCheck[] {
+  const out: DesignerCheck[] = [];
+  const re =
+    /(?:constraint\s+(?:`[^`]+`|"[^"]+"|\[[^\]]+\]|\w+)\s+)?check\s*\(/gi;
+  let m: RegExpExecArray | null;
+  let seq = 0;
+  while ((m = re.exec(createSql))) {
+    const openIdx = m.index + m[0].length - 1;
+    const parsed = readParen(createSql, openIdx);
+    if (!parsed) break;
+    const named = m[0].match(
+      /constraint\s+(?:`([^`]+)`|"([^"]+)"|\[([^\]]+)\]|(\w+))/i,
+    );
+    seq += 1;
+    const name = named?.[1] ?? named?.[2] ?? named?.[3] ?? named?.[4] ?? `check_${seq}`;
+    out.push({
+      key: `ck-${name}`,
+      name,
+      expression: parsed.inner.trim(),
+      originalName: name,
+    });
+    re.lastIndex = parsed.end + 1;
+  }
+  return out;
 }

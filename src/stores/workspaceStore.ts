@@ -100,7 +100,10 @@ export type CenterMode =
   | "table-designer"
   | "query"
   | "console"
-  | "placeholder";
+  | "placeholder"
+  | "automation"
+  | "model"
+  | "bi";
 
 export type ToolbarAction =
   | "connection"
@@ -111,7 +114,12 @@ export type ToolbarAction =
   | "backup"
   | "automation"
   | "model"
-  | "bi";
+  | "bi"
+  /** 事件文件夹 / 事件设计器（工具栏无独立按钮） */
+  | "events";
+
+/** 独立功能面板：切换后关闭页签不应把用户带走 */
+const FEATURE_MODES: CenterMode[] = ["automation", "model", "bi"];
 
 export type SelectionKind = "none" | "connection" | "database" | "table" | "folder";
 
@@ -392,7 +400,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             : folder === "functions"
               ? "function"
               : folder === "events"
-                ? "automation"
+                ? "events"
                 : folder === "backups"
                   ? "backup"
                   : "table",
@@ -466,10 +474,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return;
     }
     if (
+      action === "automation" ||
+      action === "model" ||
+      action === "bi"
+    ) {
+      set({
+        toolbarAction: action,
+        centerMode: action,
+        placeholderFeature: null,
+      });
+      return;
+    }
+    if (
       action === "table" ||
       action === "view" ||
       action === "function" ||
-      action === "automation" ||
       action === "backup"
     ) {
       const folder =
@@ -479,9 +498,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             ? "views"
             : action === "function"
               ? "functions"
-              : action === "automation"
-                ? "events"
-                : "backups";
+              : "backups";
       const db = get().selectedDatabase;
       if (db) {
         get().selectObjectFolder(db, folder);
@@ -817,7 +834,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         activeTabId: null,
         activeQueryId: null,
         centerMode: "table-designer",
-        toolbarAction: "automation",
+        toolbarAction: "events",
         placeholderFeature: null,
       });
       return existing.id;
@@ -845,7 +862,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       activeTabId: null,
       activeQueryId: null,
       centerMode: "table-designer",
-      toolbarAction: "automation",
+      toolbarAction: "events",
       placeholderFeature: null,
     });
     return id;
@@ -862,7 +879,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       activeQueryId: null,
       centerMode: "table-designer",
       toolbarAction: isEv
-        ? "automation"
+        ? "events"
         : isFn
           ? "function"
           : isView
@@ -973,7 +990,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             : get().selectedFolder,
       centerMode: "table-designer",
       toolbarAction: isEv
-        ? "automation"
+        ? "events"
         : isFn
           ? "function"
           : isView
@@ -1242,7 +1259,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       state.centerMode === "console" ||
       state.centerMode === "objectList" ||
       state.centerMode === "welcome" ||
-      state.centerMode === "placeholder";
+      state.centerMode === "placeholder" ||
+      FEATURE_MODES.includes(state.centerMode);
 
     let centerMode: CenterMode;
     if (keepPane) {
@@ -1412,6 +1430,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const clearingSelection =
       get().activeConnectionId === connectionId &&
       get().selectedDatabase === database;
+    const keepFeature = FEATURE_MODES.includes(get().centerMode);
 
     set({
       tabs,
@@ -1430,22 +1449,26 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             focusObjectListFilter: false,
           }
         : {}),
-      centerMode: activeDesignerId
-        ? "table-designer"
+      centerMode: keepFeature
+        ? get().centerMode
+        : activeDesignerId
+          ? "table-designer"
+          : activeQueryId
+            ? "query"
+            : activeTabId
+              ? "table"
+              : clearingSelection
+                ? "welcome"
+                : get().selectedDatabase
+                  ? "objectList"
+                  : "welcome",
+      toolbarAction: keepFeature
+        ? get().toolbarAction
         : activeQueryId
           ? "query"
-          : activeTabId
+          : activeTabId || activeDesignerId
             ? "table"
-            : clearingSelection
-              ? "welcome"
-              : get().selectedDatabase
-                ? "objectList"
-                : "welcome",
-      toolbarAction: activeQueryId
-        ? "query"
-        : activeTabId || activeDesignerId
-          ? "table"
-          : "connection",
+            : "connection",
       placeholderFeature: null,
     });
     return { ok: true };
@@ -1483,6 +1506,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       : (designerTabs[designerTabs.length - 1]?.id ?? null);
 
     const clearing = get().activeConnectionId === connectionId;
+    const keepFeature = FEATURE_MODES.includes(get().centerMode);
 
     set({
       tabs,
@@ -1503,18 +1527,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             focusObjectListFilter: false,
           }
         : {}),
-      centerMode: activeDesignerId
-        ? "table-designer"
+      centerMode: keepFeature
+        ? get().centerMode
+        : activeDesignerId
+          ? "table-designer"
+          : activeQueryId
+            ? "query"
+            : activeTabId
+              ? "table"
+              : "welcome",
+      toolbarAction: keepFeature
+        ? get().toolbarAction
         : activeQueryId
           ? "query"
-          : activeTabId
+          : activeTabId || activeDesignerId
             ? "table"
-            : "welcome",
-      toolbarAction: activeQueryId
-        ? "query"
-        : activeTabId || activeDesignerId
-          ? "table"
-          : "connection",
+            : "connection",
       placeholderFeature: null,
     });
     return { ok: true };

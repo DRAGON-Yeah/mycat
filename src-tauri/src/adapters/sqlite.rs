@@ -25,6 +25,73 @@ fn json_to_sql(v: &Value) -> SqlValue {
     }
 }
 
+/// Number of statements in a script, ignoring `;` inside quotes and comments.
+fn statement_count(sql: &str) -> usize {
+    let mut count = 0usize;
+    let mut has_content = false;
+    let mut single = false;
+    let mut double = false;
+    let mut backtick = false;
+    let mut bracket = false;
+    let mut line_comment = false;
+    let mut block_comment = false;
+    let mut chars = sql.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if line_comment {
+            if ch == '\n' {
+                line_comment = false;
+            }
+            continue;
+        }
+        if block_comment {
+            if ch == '*' && chars.peek() == Some(&'/') {
+                chars.next();
+                block_comment = false;
+            }
+            continue;
+        }
+        match ch {
+            '-' if !single && !double && !backtick && !bracket && chars.peek() == Some(&'-') => {
+                chars.next();
+                line_comment = true;
+            }
+            '/' if !single && !double && !backtick && !bracket && chars.peek() == Some(&'*') => {
+                chars.next();
+                block_comment = true;
+            }
+            '\'' if !double && !backtick && !bracket => {
+                single = !single;
+                has_content = true;
+            }
+            '"' if !single && !backtick && !bracket => {
+                double = !double;
+                has_content = true;
+            }
+            '`' if !single && !double && !bracket => {
+                backtick = !backtick;
+                has_content = true;
+            }
+            '[' if !single && !double && !backtick => {
+                bracket = true;
+                has_content = true;
+            }
+            ']' if bracket => bracket = false,
+            ';' if !single && !double && !backtick && !bracket => {
+                if has_content {
+                    count += 1;
+                    has_content = false;
+                }
+            }
+            c if !c.is_whitespace() => has_content = true,
+            _ => {}
+        }
+    }
+    if has_content {
+        count += 1;
+    }
+    count
+}
+
 fn ident_ok(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
@@ -227,7 +294,14 @@ impl DriverSession for SqliteSession {
         }
 
         let upper = trimmed.to_uppercase();
-        if upper.starts_with("SELECT") || upper.starts_with("WITH") || upper.starts_with("PRAGMA") {
+        let returns_rows = upper.starts_with("SELECT")
+            || upper.starts_with("WITH")
+            || upper.starts_with("PRAGMA")
+            || ((upper.starts_with("INSERT")
+                || upper.starts_with("UPDATE")
+                || upper.starts_with("DELETE"))
+                && upper.contains(" RETURNING "));
+        if returns_rows && statement_count(trimmed) <= 1 {
             let mut stmt = self.conn.prepare(trimmed)?;
             let column_count = stmt.column_count();
             let columns: Vec<String> = (0..column_count)
@@ -252,11 +326,18 @@ impl DriverSession for SqliteSession {
             });
         }
 
-        let affected = self.conn.execute(trimmed, [])?;
+        // Scripts (table rebuilds, migrations) run as a batch; single statements
+        // keep reporting their own affected-row count.
+        let affected = if statement_count(trimmed) > 1 {
+            self.conn.execute_batch(trimmed)?;
+            self.conn.changes() as i64
+        } else {
+            self.conn.execute(trimmed, [])? as i64
+        };
         Ok(QueryOutcome {
             columns: vec![],
             rows: vec![],
-            rows_affected: affected as i64,
+            rows_affected: affected,
             elapsed_ms: started.elapsed().as_millis(),
         })
     }
@@ -455,6 +536,63 @@ mod tests {
             )
             .unwrap();
         assert_eq!(after.total, 1);
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn sqlite_multi_statement_and_returning() {
+        let path = std::env::temp_dir().join(format!("mycat-t7-{}.db", uuid::Uuid::new_v4()));
+        let _ = fs::remove_file(&path);
+        let session = SqliteSession::connect(&ConnectOpts {
+            engine: "sqlite".into(),
+            host: Some(path.display().to_string()),
+            port: None,
+            database: None,
+            user: None,
+            password: None,
+            ssl_mode: None,
+            ssl_trust: None,
+            ssh_enabled: None,
+            ssh_host: None,
+            ssh_port: None,
+            ssh_user: None,
+            ssh_password: None,
+        })
+        .unwrap();
+
+        // table rebuild style script
+        session
+            .execute_sql(
+                "PRAGMA foreign_keys=off;
+                 CREATE TABLE a(id INTEGER PRIMARY KEY, name TEXT);
+                 INSERT INTO a(name) VALUES ('x');
+                 CREATE TABLE a_new(id INTEGER PRIMARY KEY, name TEXT, age INTEGER);
+                 INSERT INTO a_new(id, name) SELECT id, name FROM a;
+                 DROP TABLE a;
+                 ALTER TABLE a_new RENAME TO a;
+                 CREATE INDEX ix_a_name ON a(name);
+                 PRAGMA foreign_keys=on;",
+            )
+            .expect("script");
+        let cols = session
+            .query_page(None, "a", 1, 10, None, None, None, None)
+            .unwrap();
+        assert_eq!(cols.columns.len(), 3);
+        assert_eq!(cols.total, 1);
+
+        // INSERT ... RETURNING must come back as rows
+        let out = session
+            .execute_sql("INSERT INTO a(name, age) VALUES ('y', 3) RETURNING id, age")
+            .expect("returning");
+        assert_eq!(out.columns, vec!["id".to_string(), "age".to_string()]);
+        assert_eq!(out.rows.len(), 1);
+
+        // semicolons inside literals/comments must not split statements
+        let out = session
+            .execute_sql("SELECT 'a;b' AS v -- trailing; comment\n")
+            .expect("semicolon literal");
+        assert_eq!(out.rows.len(), 1);
 
         let _ = fs::remove_file(&path);
     }

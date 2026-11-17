@@ -10,6 +10,9 @@ import { downloadTextFile, isSaveCancelled } from "../import-export/csv";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { confirmDialog } from "../../lib/confirm";
 import { engineKey, quoteIdent } from "./sqlIdent";
+import { buildModelTables } from "../model/modelImport";
+import { saveModel } from "../model/modelApi";
+import { newModel } from "../model/types";
 
 export type DbMenuTarget = {
   x: number;
@@ -165,42 +168,32 @@ export function DatabaseContextMenu({
 
   async function exportReverseModel() {
     ensureContext();
-    const tables = await listTables(conn.id, database);
-    const baseTables = tables.filter((x) => x.kind !== "view");
-    const lines: string[] = [
-      `# 逆向模型 · ${database}`,
-      "",
-      "```mermaid",
-      "erDiagram",
-    ];
-    for (const t of baseTables) {
-      const safe = t.name.replace(/[^A-Za-z0-9_]/g, "_");
-      lines.push(`  ${safe} {`);
-      try {
-        const page = await fetchTablePage({
-          connectionId: conn.id,
-          table: t.name,
-          page: 1,
-          pageSize: 1,
-          database,
-        });
-        for (const col of page.columns.slice(0, 12)) {
-          const typ = col.dataType.replace(/\s+/g, "_").replace(/[^A-Za-z0-9_]/g, "");
-          lines.push(`    ${typ || "string"} ${col.name}`);
-        }
-      } catch {
-        lines.push("    string id");
-      }
-      lines.push("  }");
+    setBusy(true);
+    try {
+      const tables = await listTables(conn.id, database);
+      const baseTables = tables.filter((x) => x.kind !== "view");
+      const model = newModel({
+        name: `${database} 逆向模型`,
+        connectionId: conn.id,
+        connectionName: conn.name,
+        database,
+      });
+      const built = await buildModelTables({
+        connectionId: conn.id,
+        engine: String(conn.engine),
+        database,
+        tableNames: baseTables.map((t) => t.name),
+      });
+      saveModel({ ...model, tables: built.tables, links: built.links });
+      setToolbarAction("model");
+      onMessage(
+        `已生成模型「${model.name}」（${built.tables.length} 张表 / ${built.links.length} 个关系）`,
+      );
+    } catch (err) {
+      onMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
     }
-    lines.push("```", "");
-    await downloadTextFile(
-      `${database}-model.md`,
-      lines.join("\n"),
-      "text/markdown",
-    );
-    setToolbarAction("model", "model");
-    onMessage(`已生成逆向模型（${baseTables.length} 张表）`);
   }
 
   return (

@@ -104,7 +104,8 @@ function fkClause(
   return `CONSTRAINT ${quoteIdent(engine, fk.name)} FOREIGN KEY (${cols}) REFERENCES ${refTable} (${refs}) ON DELETE ${fk.onDelete || "RESTRICT"} ON UPDATE ${fk.onUpdate || "RESTRICT"}`;
 }
 
-export function buildCreateTableSql(args: {
+/** Bare `CREATE TABLE ...;` statement (no indexes / comments appended). */
+function createTableStatement(args: {
   engine: string;
   database: string;
   table: string;
@@ -153,8 +154,8 @@ export function buildCreateTableSql(args: {
     }
   }
 
-  // Postgres: foreign keys / checks are table constraints, indexes are separate.
-  if ((e === "mysql" || pg) && foreignKeys) {
+  // Foreign keys / checks are table constraints on MySQL, Postgres and SQLite.
+  if ((e === "mysql" || pg || e === "sqlite") && foreignKeys) {
     for (const fk of foreignKeys) {
       if (!fk.name || !identOk(fk.name)) continue;
       const clause = fkClause(engine, database, fk);
@@ -162,7 +163,7 @@ export function buildCreateTableSql(args: {
     }
   }
 
-  if ((e === "mysql" || pg) && checks) {
+  if ((e === "mysql" || pg || e === "sqlite") && checks) {
     for (const ck of checks) {
       if (!ck.name || !identOk(ck.name) || !ck.expression.trim()) continue;
       defs.push(
@@ -189,7 +190,50 @@ export function buildCreateTableSql(args: {
   }
   sql += ";";
 
-  if (pg) {
+  return sql;
+}
+
+/** `CREATE [UNIQUE] INDEX ...` statements for SQLite (indexes are separate objects). */
+function sqliteIndexStatements(
+  table: string,
+  indexes: DesignerIndex[] | undefined,
+): string[] {
+  const out: string[] = [];
+  for (const ix of indexes ?? []) {
+    if (!ix.name || ix.name.toUpperCase() === "PRIMARY") continue;
+    if (!identOk(ix.name)) continue;
+    const cols = indexColumns("sqlite", ix.columns);
+    if (!cols) continue;
+    const uniq = ix.unique ? "UNIQUE " : "";
+    out.push(
+      `CREATE ${uniq}INDEX ${quoteIdent("sqlite", ix.name)} ON ${quoteTable("sqlite", null, table)} (${cols});`,
+    );
+  }
+  return out;
+}
+
+export function buildCreateTableSql(args: {
+  engine: string;
+  database: string;
+  table: string;
+  columns: DesignerColumn[];
+  indexes?: DesignerIndex[];
+  foreignKeys?: DesignerForeignKey[];
+  checks?: DesignerCheck[];
+  options?: TableOptions;
+}): string {
+  const { engine, database, table, columns, indexes, options } = args;
+  let sql = createTableStatement(args);
+  const e = engineKey(engine);
+  const qt = quoteTable(engine, database, table);
+
+  if (e === "sqlite") {
+    const extra = sqliteIndexStatements(table, indexes);
+    if (extra.length) sql += `\n${extra.join("\n")}`;
+    return sql;
+  }
+
+  if (isPostgres(engine)) {
     const extra: string[] = [];
     if (indexes) {
       for (const ix of indexes) {
@@ -246,7 +290,7 @@ export function buildAlterTableSql(args: {
   for (const b of baseline) {
     if (b.originalName && !keptOrig.has(b.originalName)) {
       if (e === "sqlite") {
-        throw new Error("SQLite 不支持直接 DROP COLUMN");
+        throw new Error("SQLite 删除列需要重建表（保存时会自动重建）");
       }
       stmts.push(
         `ALTER TABLE ${qt} DROP COLUMN ${quoteIdent(engine, b.originalName)}`,
@@ -333,7 +377,7 @@ export function buildAlterTableSql(args: {
         `ALTER TABLE ${qt} RENAME COLUMN ${quoteIdent("sqlite", prev.originalName!)} TO ${quoteIdent("sqlite", c.name)}`,
       );
     } else if (changed) {
-      throw new Error(`SQLite 无法直接修改列「${c.name}」`);
+      throw new Error(`SQLite 修改列「${c.name}」需要重建表（保存时会自动重建）`);
     }
   }
 
@@ -460,6 +504,9 @@ export function buildObjectSyncSql(args: ObjectSyncArgs): string[] {
   } = args;
   const e = engineKey(engine);
   const pg = isPostgres(engine);
+  if (e === "sqlite") {
+    return sqliteObjectSyncSql(args);
+  }
   if (e !== "mysql" && !pg) return [];
 
   const qt = quoteTable(engine, database, table);
@@ -586,4 +633,170 @@ export function buildObjectSyncSql(args: ObjectSyncArgs): string[] {
   }
 
   return stmts.filter(Boolean);
+}
+
+/** SQLite: indexes and triggers are standalone objects; FKs/CHECKs need a rebuild. */
+function sqliteObjectSyncSql(args: ObjectSyncArgs): string[] {
+  const { table, baselineIndexes, indexes, baselineTriggers, triggers } = args;
+  const norm = (s: string) => s.replace(/\s+/g, "").toLowerCase();
+  const qt = quoteTable("sqlite", null, table);
+  const stmts: string[] = [];
+
+  const baseIx = new Map(
+    baselineIndexes
+      .filter((i) => i.name.toUpperCase() !== "PRIMARY")
+      .map((i) => [i.name, i]),
+  );
+  const wantIx = indexes.filter((i) => i.name.toUpperCase() !== "PRIMARY");
+  const wantIxNames = new Set(wantIx.map((i) => i.name));
+  for (const b of baseIx.values()) {
+    if (!wantIxNames.has(b.name)) {
+      stmts.push(`DROP INDEX IF EXISTS ${quoteIdent("sqlite", b.name)}`);
+    }
+  }
+  for (const ix of wantIx) {
+    if (!identOk(ix.name) || !ix.columns.trim()) continue;
+    const cols = indexColumns("sqlite", ix.columns);
+    if (!cols) continue;
+    const old = baseIx.get(ix.name);
+    const changed =
+      !old ||
+      norm(old.columns) !== norm(ix.columns) ||
+      Boolean(old.unique) !== Boolean(ix.unique);
+    if (!changed) continue;
+    if (old) stmts.push(`DROP INDEX IF EXISTS ${quoteIdent("sqlite", ix.name)}`);
+    const uniq = ix.unique ? "UNIQUE " : "";
+    stmts.push(
+      `CREATE ${uniq}INDEX ${quoteIdent("sqlite", ix.name)} ON ${qt} (${cols})`,
+    );
+  }
+
+  const baseTr = new Map(baselineTriggers.map((x) => [x.name, x]));
+  const wantTrNames = new Set(triggers.map((x) => x.name));
+  for (const b of baselineTriggers) {
+    if (!wantTrNames.has(b.name)) {
+      stmts.push(`DROP TRIGGER IF EXISTS ${quoteIdent("sqlite", b.name)}`);
+    }
+  }
+  for (const tr of triggers) {
+    if (!tr.name.trim() || !tr.statement.trim()) continue;
+    const old = baseTr.get(tr.name);
+    if (
+      old &&
+      old.timing === tr.timing &&
+      old.event === tr.event &&
+      old.statement === tr.statement
+    ) {
+      continue;
+    }
+    if (old) stmts.push(`DROP TRIGGER IF EXISTS ${quoteIdent("sqlite", tr.name)}`);
+    stmts.push(
+      buildTriggerSql({ engine: "sqlite", database: "", table, trigger: tr }),
+    );
+  }
+  return stmts;
+}
+
+/**
+ * SQLite cannot ALTER a column definition, drop a column that is indexed /
+ * constrained, or add FKs / CHECKs. Those changes need the documented
+ * "12-step" table rebuild.
+ */
+export function sqliteNeedsRebuild(args: {
+  baseline: DesignerColumn[];
+  columns: DesignerColumn[];
+  baselineFks: DesignerForeignKey[];
+  fks: DesignerForeignKey[];
+  baselineChecks: DesignerCheck[];
+  checks: DesignerCheck[];
+}): boolean {
+  const { baseline, columns, baselineFks, fks, baselineChecks, checks } = args;
+  const kept = new Set(
+    columns.filter((c) => c.originalName).map((c) => c.originalName!),
+  );
+  for (const b of baseline) {
+    if (b.originalName && !kept.has(b.originalName)) return true; // dropped
+  }
+  for (const c of columns) {
+    if (!c.originalName) continue;
+    const prev = baseline.find((b) => b.originalName === c.originalName);
+    if (!prev) continue;
+    if (
+      prev.name !== c.name ||
+      composedType(prev) !== composedType(c) ||
+      prev.notNull !== c.notNull ||
+      String(prev.defaultValue ?? "") !== String(c.defaultValue ?? "") ||
+      prev.isPk !== c.isPk
+    ) {
+      return true;
+    }
+  }
+  const norm = (s: string) => s.replace(/\s+/g, "").toLowerCase();
+  const fkKey = (f: DesignerForeignKey) =>
+    `${f.name}|${norm(f.columns)}|${f.refTable}|${norm(f.refColumns)}|${f.onDelete}|${f.onUpdate}`;
+  const baseFk = new Set(baselineFks.map(fkKey));
+  const wantFk = new Set(fks.map(fkKey));
+  if (baseFk.size !== wantFk.size) return true;
+  for (const k of wantFk) if (!baseFk.has(k)) return true;
+  const ckKey = (c: DesignerCheck) => `${c.name}|${norm(c.expression)}`;
+  const baseCk = new Set(baselineChecks.map(ckKey));
+  const wantCk = new Set(checks.map(ckKey));
+  if (baseCk.size !== wantCk.size) return true;
+  for (const k of wantCk) if (!baseCk.has(k)) return true;
+  return false;
+}
+
+/** Full rebuild script: create shadow table, copy data, swap, restore indexes/triggers. */
+export function buildSqliteRebuildSql(args: {
+  engine: string;
+  database: string;
+  table: string;
+  columns: DesignerColumn[];
+  indexes?: DesignerIndex[];
+  foreignKeys?: DesignerForeignKey[];
+  checks?: DesignerCheck[];
+  triggers?: DesignerTrigger[];
+}): string {
+  const { table, columns, indexes, foreignKeys, checks, triggers } = args;
+  const base = splitQualified(table)[1];
+  const tmp = `${base}__mycat_new`;
+  const q = (n: string) => quoteIdent("sqlite", n);
+  const pairs = columns
+    .filter((c) => c.originalName)
+    .map((c) => ({ to: c.name, from: c.originalName! }));
+
+  const lines: string[] = [
+    "PRAGMA foreign_keys=off;",
+    "BEGIN;",
+    `DROP TABLE IF EXISTS ${q(tmp)};`,
+    createTableStatement({
+      engine: "sqlite",
+      database: "",
+      table: tmp,
+      columns,
+      foreignKeys,
+      checks,
+    }),
+  ];
+  if (pairs.length > 0) {
+    lines.push(
+      `INSERT INTO ${q(tmp)} (${pairs.map((p) => q(p.to)).join(", ")}) SELECT ${pairs
+        .map((p) => q(p.from))
+        .join(", ")} FROM ${q(base)};`,
+    );
+  }
+  lines.push(
+    `DROP TABLE ${q(base)};`,
+    `ALTER TABLE ${q(tmp)} RENAME TO ${q(base)};`,
+    ...sqliteIndexStatements(base, indexes),
+    ...(triggers ?? [])
+      .filter((t) => t.name.trim() && t.statement.trim())
+      .map(
+        (t) =>
+          `${buildTriggerSql({ engine: "sqlite", database: "", table: base, trigger: t })};`,
+      ),
+    "COMMIT;",
+    "PRAGMA foreign_keys=on;",
+  );
+  return lines.join("\n");
 }

@@ -50,6 +50,10 @@ import {
   type ViewsFolderMenuTarget,
 } from "./ViewsFolderContextMenu";
 import {
+  TablesFolderContextMenu,
+  type TablesFolderMenuTarget,
+} from "./TablesFolderContextMenu";
+import {
   FunctionsFolderContextMenu,
   type FunctionsFolderMenuTarget,
 } from "./FunctionsFolderContextMenu";
@@ -182,6 +186,8 @@ export function ConnectionTree() {
   const [tableMenu, setTableMenu] = useState<TableMenuTarget | null>(null);
   const [viewsFolderMenu, setViewsFolderMenu] =
     useState<ViewsFolderMenuTarget | null>(null);
+  const [tablesFolderMenu, setTablesFolderMenu] =
+    useState<TablesFolderMenuTarget | null>(null);
   const [functionsFolderMenu, setFunctionsFolderMenu] =
     useState<FunctionsFolderMenuTarget | null>(null);
   const [routineMenu, setRoutineMenu] = useState<RoutineMenuTarget | null>(
@@ -292,6 +298,7 @@ export function ConnectionTree() {
       setQueriesFolderMenu(null);
       setTableMenu(null);
       setViewsFolderMenu(null);
+      setTablesFolderMenu(null);
     }
     document.addEventListener("click", onDocClick);
     return () => document.removeEventListener("click", onDocClick);
@@ -1070,11 +1077,13 @@ export function ConnectionTree() {
                         {dbOpen && (
                           <ul className="tree-children">
                             {FOLDERS.map((folder) => {
+                              const eng = String(n.conn.engine).toLowerCase();
                               // MySQL Event Scheduler only.
-                              if (
-                                folder.id === "events" &&
-                                !/mysql|mariadb/i.test(String(n.conn.engine))
-                              ) {
+                              if (folder.id === "events" && !/mysql|mariadb/.test(eng)) {
+                                return null;
+                              }
+                              // SQLite has no stored routines.
+                              if (folder.id === "functions" && eng === "sqlite") {
                                 return null;
                               }
                               if (
@@ -1228,7 +1237,26 @@ export function ConnectionTree() {
                                       }
                                     }}
                                     onFolderContextMenu={
-                                      folder.id === "views"
+                                      folder.id === "tables"
+                                        ? ({ x, y }) => {
+                                            setDbMenu(null);
+                                            setConnMenu(null);
+                                            setSavedQueryMenu(null);
+                                            setQueriesFolderMenu(null);
+                                            setTableMenu(null);
+                                            setRoutineMenu(null);
+                                            setEventMenu(null);
+                                            setViewsFolderMenu(null);
+                                            setFunctionsFolderMenu(null);
+                                            setEventsFolderMenu(null);
+                                            setTablesFolderMenu({
+                                              x,
+                                              y,
+                                              conn: n.conn,
+                                              database: db,
+                                            });
+                                          }
+                                        : folder.id === "views"
                                         ? ({ x, y }) => {
                                             setDbMenu(null);
                                             setConnMenu(null);
@@ -1589,6 +1617,25 @@ export function ConnectionTree() {
               connectionId: tableMenu.conn.id,
               database: tableMenu.database,
               table: tableMenu.table,
+            });
+            window.dispatchEvent(new Event("mycat:object-list-refresh"));
+          }}
+          onMessage={(msg) => {
+            setToast(msg);
+            window.setTimeout(() => setToast(null), 2500);
+          }}
+        />
+      )}
+
+      {tablesFolderMenu && (
+        <TablesFolderContextMenu
+          target={tablesFolderMenu}
+          onClose={() => setTablesFolderMenu(null)}
+          onRefresh={() => {
+            emitTableDataChanged({
+              connectionId: tablesFolderMenu.conn.id,
+              database: tablesFolderMenu.database,
+              table: "*",
             });
             window.dispatchEvent(new Event("mycat:object-list-refresh"));
           }}
