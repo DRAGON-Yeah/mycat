@@ -132,7 +132,7 @@ fn open_client_inner(opts: &ConnectOpts) -> AppResult<Client> {
         .trim()
         .to_ascii_lowercase();
     let trust = opts.ssl_trust.unwrap_or(false);
-    let driver_err = |e: postgres::Error| AppError::Driver(e.to_string());
+    let driver_err = |e: postgres::Error| AppError::Driver(crate::error::postgres_message(&e));
 
     match mode.as_str() {
         "require" | "verify-ca" | "verify-full" => {
@@ -1320,6 +1320,13 @@ mod tests {
         assert!(ddl.contains("CREATE TABLE \"mycat_test\".\"sample\""));
         assert!(ddl.contains("PRIMARY KEY"));
         assert!(ddl.contains("COMMENT ON TABLE"));
+
+        // server errors must surface the real message, not just "db error"
+        let err = session
+            .execute_sql("SELECT * FROM no_such_table_here")
+            .expect_err("missing relation");
+        let msg = err.to_string();
+        assert!(msg.contains("does not exist"), "unexpected error: {msg}");
 
         // views: page + DDL
         session

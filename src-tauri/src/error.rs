@@ -26,8 +26,32 @@ impl From<mysql::Error> for AppError {
 
 impl From<postgres::Error> for AppError {
     fn from(value: postgres::Error) -> Self {
-        AppError::Driver(value.to_string())
+        AppError::Driver(postgres_message(&value))
     }
+}
+
+/// `postgres::Error`'s `Display` is just "db error" for server-side failures;
+/// surface the actual message so the UI can show what went wrong.
+pub fn postgres_message(e: &postgres::Error) -> String {
+    if let Some(db) = e.as_db_error() {
+        let mut out = format!("ERROR: {}", db.message());
+        if let Some(detail) = db.detail() {
+            out.push_str(&format!("\nDETAIL: {detail}"));
+        }
+        if let Some(hint) = db.hint() {
+            out.push_str(&format!("\nHINT: {hint}"));
+        } else if db.code().code() == "42P01" {
+            // undefined_table: by far the most common cause is case folding.
+            out.push_str(
+                "\nHINT: PostgreSQL 会把未加引号的标识符折叠为小写；混合大小写的表名请加双引号，如 \"MyTable\"。",
+            );
+        }
+        if let Some(ctx) = db.where_() {
+            out.push_str(&format!("\nCONTEXT: {ctx}"));
+        }
+        return out;
+    }
+    e.to_string()
 }
 
 impl Serialize for AppError {

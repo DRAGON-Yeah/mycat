@@ -220,6 +220,22 @@ function wordRange(
   };
 }
 
+
+/** Postgres folds unquoted identifiers to lower case, so mixed-case or otherwise
+ *  unsafe names must be inserted quoted or the statement fails. */
+function insertIdent(engine: string | null, name: string): string {
+  const e = String(engine || "mysql").toLowerCase();
+  if (e !== "postgres" && e !== "postgresql") return name;
+  return name
+    .split(".")
+    .map((part) =>
+      /^[a-z_][a-z0-9_]*$/.test(part)
+        ? part
+        : `"${part.replace(/"/g, '""')}"`,
+    )
+    .join(".");
+}
+
 function precedingText(model: editor.ITextModel, position: Position): string {
   const line = model.getLineContent(position.lineNumber);
   const before = line.slice(0, position.column - 1);
@@ -258,7 +274,7 @@ export function registerSqlCompletions(monaco: Monaco) {
           suggestions.push({
             label: col,
             kind: monaco.languages.CompletionItemKind.Field,
-            insertText: col,
+            insertText: insertIdent(ctx.engine, col),
             range,
             detail: `列 · ${table}`,
             sortText: `0_${col}`,
@@ -277,7 +293,7 @@ export function registerSqlCompletions(monaco: Monaco) {
               t.kind === "view"
                 ? monaco.languages.CompletionItemKind.Interface
                 : monaco.languages.CompletionItemKind.Class,
-            insertText: t.name,
+            insertText: insertIdent(ctx.engine, t.name),
             range,
             detail:
               t.kind === "view"
