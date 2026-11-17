@@ -104,6 +104,12 @@ const EVENT_COLS = [
   { key: "comment", label: "注释", defaultWidth: 140 },
 ] as const;
 
+/** PostgreSQL 的系统目录不记录表的创建/修改时间，这里给出解释性提示。 */
+const PG_NO_TIME_HINT =
+  "PostgreSQL 不记录表的创建/修改时间，系统目录中无法获取";
+const PG_COLLATION_HINT =
+  "PostgreSQL 没有表级排序规则：此处显示各字符列一致的排序规则，否则回退到数据库默认值";
+
 function formatBytes(n?: number | null) {
   if (n == null || Number.isNaN(n)) return "—";
   if (n < 1024) return `${n} B`;
@@ -177,6 +183,8 @@ export function ObjectListGrid() {
     return colWidths[key] ?? fallback;
   }
 
+  const isPostgres =
+    connection?.engine === "postgres" || connection?.engine === "postgresql";
   const wantViews = folder === "views";
   const wantFunctions = folder === "functions";
   const wantEvents = folder === "events";
@@ -954,9 +962,27 @@ export function ObjectListGrid() {
                             <td>{formatRows(t.tableRows)}</td>
                             <td>{formatBytes(t.dataLength)}</td>
                             <td>{t.engine ?? "—"}</td>
-                            <td>{t.createTime ?? "—"}</td>
-                            <td>{t.updateTime ?? "—"}</td>
-                            <td>{t.collation ?? "—"}</td>
+                            <td
+                              title={
+                                !t.createTime && isPostgres
+                                  ? PG_NO_TIME_HINT
+                                  : undefined
+                              }
+                            >
+                              {t.createTime ?? "—"}
+                            </td>
+                            <td
+                              title={
+                                !t.updateTime && isPostgres
+                                  ? PG_NO_TIME_HINT
+                                  : undefined
+                              }
+                            >
+                              {t.updateTime ?? "—"}
+                            </td>
+                            <td title={isPostgres ? PG_COLLATION_HINT : undefined}>
+                              {t.collation ?? "—"}
+                            </td>
                             <td className="comment-cell">
                               {t.comment || "—"}
                             </td>

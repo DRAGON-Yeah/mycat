@@ -410,16 +410,36 @@ impl PostgresSession {
             .filter(|s| !s.is_empty())
             .map(str::to_string);
 
+        // PostgreSQL keeps no table-level CREATE/UPDATE timestamps and no table-level
+        // collation: collation lives on columns (pg_attribute.attcollation) and on the
+        // database (pg_database.datcollate). We surface the column-level value when all
+        // collatable columns agree, fall back to the database default otherwise.
         let sql = format!(
             "SELECT n.nspname, c.relname, c.relkind,
                     GREATEST(c.reltuples, 0)::bigint,
                     pg_catalog.pg_total_relation_size(c.oid)::bigint,
                     COALESCE(pg_catalog.obj_description(c.oid, 'pg_class'), ''),
                     COALESCE(pg_catalog.pg_get_userbyid(c.relowner), ''),
-                    COALESCE(t.spcname, '')
+                    COALESCE(t.spcname, ''),
+                    COALESCE(d.datcollate, ''),
+                    COALESCE(col.coll, '')
              FROM pg_catalog.pg_class c
              JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
              LEFT JOIN pg_catalog.pg_tablespace t ON t.oid = c.reltablespace
+             JOIN pg_catalog.pg_database d ON d.datname = pg_catalog.current_database()
+             LEFT JOIN LATERAL (
+               SELECT CASE
+                        WHEN count(DISTINCT COALESCE(NULLIF(co.collname, 'default'), d.datcollate)) = 0 THEN ''
+                        WHEN count(DISTINCT COALESCE(NULLIF(co.collname, 'default'), d.datcollate)) = 1
+                          THEN min(COALESCE(NULLIF(co.collname, 'default'), d.datcollate))
+                        ELSE 'mixed'
+                      END AS coll
+               FROM pg_catalog.pg_attribute a
+               JOIN pg_catalog.pg_collation co ON co.oid = a.attcollation
+               WHERE a.attrelid = c.oid
+                 AND a.attnum > 0
+                 AND NOT a.attisdropped
+             ) col ON true
              WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f')
                AND n.nspname NOT IN ({})
                AND n.nspname NOT LIKE 'pg\\_temp%'
@@ -454,6 +474,13 @@ impl PostgresSession {
             let comment = cell_str(row, 5);
             let owner = cell_str(row, 6);
             let tablespace = cell_str(row, 7);
+            let db_collation = cell_str(row, 8);
+            let column_collation = cell_str(row, 9);
+            let collation = match column_collation.as_str() {
+                "" => db_collation,
+                "mixed" => "混合".to_string(),
+                other => other.to_string(),
+            };
             let display = if schema_name == "public" || schema_name.is_empty() {
                 relname
             } else {
@@ -471,7 +498,11 @@ impl PostgresSession {
                 }),
                 create_time: None,
                 update_time: None,
-                collation: None,
+                collation: if collation.is_empty() {
+                    None
+                } else {
+                    Some(collation)
+                },
                 comment: if comment.is_empty() { None } else { Some(comment) },
             });
         }
@@ -1225,6 +1256,19 @@ mod tests {
         // list_tables exposes non-public schemas with a qualified name
         let tables = session.list_tables(None, None).expect("list");
         assert!(tables.iter().any(|t| t.name == "mycat_test.sample"));
+
+        // PG has no table-level collation: the column falls back to the database
+        // default, while create/update timestamps stay unavailable.
+        let sample = tables
+            .iter()
+            .find(|t| t.name == "mycat_test.sample")
+            .expect("sample row");
+        assert!(sample
+            .collation
+            .as_deref()
+            .map_or(false, |c| !c.is_empty()));
+        assert!(sample.create_time.is_none());
+        assert!(sample.update_time.is_none());
 
         // schemas exclude the system catalogs
         let schemas = session.list_schemas(None).expect("schemas");
