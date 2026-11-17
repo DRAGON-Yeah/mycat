@@ -17,8 +17,34 @@ pub struct PostgresSession {
     inner: Mutex<PgInner>,
 }
 
+/// `postgres::Client` closes its socket through the driver's own runtime on drop,
+/// which panics when the session is released from a tokio worker thread. The
+/// newtype moves that work to a plain thread.
+struct PgClient(Option<Client>);
+
+impl std::ops::Deref for PgClient {
+    type Target = Client;
+    fn deref(&self) -> &Client {
+        self.0.as_ref().expect("postgres client")
+    }
+}
+
+impl std::ops::DerefMut for PgClient {
+    fn deref_mut(&mut self) -> &mut Client {
+        self.0.as_mut().expect("postgres client")
+    }
+}
+
+impl Drop for PgClient {
+    fn drop(&mut self) {
+        if let Some(client) = self.0.take() {
+            let _ = std::thread::scope(|scope| scope.spawn(move || drop(client)).join());
+        }
+    }
+}
+
 struct PgInner {
-    client: Client,
+    client: PgClient,
     /// Resolved options of the live connection (used to reconnect to another db).
     opts: ConnectOpts,
     database: String,
@@ -89,6 +115,16 @@ fn tls_connector(trust: bool) -> AppResult<MakeTlsConnector> {
 }
 
 fn open_client(opts: &ConnectOpts) -> AppResult<Client> {
+    // `postgres::Config::connect` builds its own runtime and blocks on it, which
+    // panics ("Cannot start a runtime from within a runtime") when the command is
+    // dispatched from Tauri's tokio worker. Run it on a plain OS thread instead.
+    let owned = opts.clone();
+    std::thread::spawn(move || open_client_inner(&owned))
+        .join()
+        .unwrap_or_else(|_| Err(AppError::Message("PostgreSQL 连接线程异常退出".into())))
+}
+
+fn open_client_inner(opts: &ConnectOpts) -> AppResult<Client> {
     let mode = opts
         .ssl_mode
         .as_deref()
@@ -290,7 +326,7 @@ impl PgInner {
         let mut next = self.opts.clone();
         next.database = Some(db.to_string());
         let client = open_client(&next)?;
-        self.client = client;
+        self.client = PgClient(Some(client));
         self.opts = next;
         self.database = db.to_string();
         Ok(())
@@ -312,7 +348,7 @@ impl PostgresSession {
         let database = opts.database.clone().unwrap_or_else(|| "postgres".into());
         Ok(Self {
             inner: Mutex::new(PgInner {
-                client,
+                client: PgClient(Some(client)),
                 opts,
                 database,
             }),
@@ -326,13 +362,13 @@ impl PostgresSession {
     }
 }
 
-impl DriverSession for PostgresSession {
-    fn ping(&self) -> AppResult<()> {
+impl PostgresSession {
+    fn ping_inner(&self) -> AppResult<()> {
         let mut inner = self.lock()?;
         run_simple(&mut inner.client, "SELECT 1").map(|_| ())
     }
 
-    fn list_databases(&self) -> AppResult<Vec<String>> {
+    fn list_databases_inner(&self) -> AppResult<Vec<String>> {
         let mut inner = self.lock()?;
         let out = run_simple(
             &mut inner.client,
@@ -347,7 +383,7 @@ impl DriverSession for PostgresSession {
             .collect())
     }
 
-    fn list_schemas(&self, database: Option<&str>) -> AppResult<Vec<String>> {
+    fn list_schemas_inner(&self, database: Option<&str>) -> AppResult<Vec<String>> {
         let mut inner = self.lock()?;
         inner.ensure_database(database)?;
         let out = run_simple(
@@ -366,7 +402,7 @@ impl DriverSession for PostgresSession {
 
     /// Lists every user object of the database. Names outside `public` are
     /// returned as `schema.table` so they stay addressable from the UI.
-    fn list_tables(&self, database: Option<&str>, schema: Option<&str>) -> AppResult<Vec<DbObject>> {
+    fn list_tables_inner(&self, database: Option<&str>, schema: Option<&str>) -> AppResult<Vec<DbObject>> {
         let mut inner = self.lock()?;
         inner.ensure_database(database)?;
         let only_schema = schema
@@ -442,7 +478,7 @@ impl DriverSession for PostgresSession {
         Ok(objects)
     }
 
-    fn query_page(
+    fn query_page_inner(
         &self,
         database: Option<&str>,
         table: &str,
@@ -532,13 +568,13 @@ impl DriverSession for PostgresSession {
         })
     }
 
-    fn backend_pid(&self) -> AppResult<Option<i64>> {
+    fn backend_pid_inner(&self) -> AppResult<Option<i64>> {
         let mut inner = self.lock()?;
         let out = run_simple(&mut inner.client, "SELECT pg_backend_pid()")?;
         Ok(Some(first_i64(&out)))
     }
 
-    fn execute_sql(&self, sql: &str) -> AppResult<QueryOutcome> {
+    fn execute_sql_inner(&self, sql: &str) -> AppResult<QueryOutcome> {
         let started = Instant::now();
         let trimmed = sql.trim();
         if trimmed.is_empty() {
@@ -556,12 +592,12 @@ impl DriverSession for PostgresSession {
         })
     }
 
-    fn use_database(&self, database: Option<&str>) -> AppResult<()> {
+    fn use_database_inner(&self, database: Option<&str>) -> AppResult<()> {
         let mut inner = self.lock()?;
         inner.ensure_database(database)
     }
 
-    fn apply_row_changes(
+    fn apply_row_changes_inner(
         &self,
         database: Option<&str>,
         table: &str,
@@ -704,7 +740,7 @@ impl DriverSession for PostgresSession {
         Ok(affected)
     }
 
-    fn table_ddl(&self, database: Option<&str>, table: &str) -> AppResult<String> {
+    fn table_ddl_inner(&self, database: Option<&str>, table: &str) -> AppResult<String> {
         let mut inner = self.lock()?;
         inner.ensure_database(database)?;
         let (inline_schema, name) = split_qualified(table.trim());
@@ -952,6 +988,92 @@ fn build_table_ddl(
     Ok(out)
 }
 
+
+/// The blocking `postgres` driver builds and drives its own tokio runtime, which
+/// panics ("Cannot start a runtime from within a runtime") when the call happens on
+/// a tokio worker thread — and Tauri dispatches `#[tauri::command(async)]` bodies
+/// there. Every public entry point therefore runs on a plain OS thread.
+fn off_runtime<T: Send>(f: impl FnOnce() -> AppResult<T> + Send) -> AppResult<T> {
+    std::thread::scope(|scope| {
+        scope
+            .spawn(f)
+            .join()
+            .unwrap_or_else(|_| Err(AppError::Message("PostgreSQL 工作线程异常退出".into())))
+    })
+}
+
+impl DriverSession for PostgresSession {
+    fn ping(&self) -> AppResult<()> {
+        off_runtime(|| self.ping_inner())
+    }
+
+    fn list_databases(&self) -> AppResult<Vec<String>> {
+        off_runtime(|| self.list_databases_inner())
+    }
+
+    fn list_schemas(&self, database: Option<&str>) -> AppResult<Vec<String>> {
+        off_runtime(|| self.list_schemas_inner(database))
+    }
+
+    fn list_tables(
+        &self,
+        database: Option<&str>,
+        schema: Option<&str>,
+    ) -> AppResult<Vec<DbObject>> {
+        off_runtime(|| self.list_tables_inner(database, schema))
+    }
+
+    fn query_page(
+        &self,
+        database: Option<&str>,
+        table: &str,
+        page: i64,
+        page_size: i64,
+        sort_col: Option<&str>,
+        sort_dir: Option<&str>,
+        filter_col: Option<&str>,
+        filter_value: Option<&str>,
+    ) -> AppResult<RowsPage> {
+        off_runtime(|| {
+            self.query_page_inner(
+                database,
+                table,
+                page,
+                page_size,
+                sort_col,
+                sort_dir,
+                filter_col,
+                filter_value,
+            )
+        })
+    }
+
+    fn backend_pid(&self) -> AppResult<Option<i64>> {
+        off_runtime(|| self.backend_pid_inner())
+    }
+
+    fn execute_sql(&self, sql: &str) -> AppResult<QueryOutcome> {
+        off_runtime(|| self.execute_sql_inner(sql))
+    }
+
+    fn use_database(&self, database: Option<&str>) -> AppResult<()> {
+        off_runtime(|| self.use_database_inner(database))
+    }
+
+    fn apply_row_changes(
+        &self,
+        database: Option<&str>,
+        table: &str,
+        changes: &[RowChange],
+    ) -> AppResult<i64> {
+        off_runtime(|| self.apply_row_changes_inner(database, table, changes))
+    }
+
+    fn table_ddl(&self, database: Option<&str>, table: &str) -> AppResult<String> {
+        off_runtime(|| self.table_ddl_inner(database, table))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1037,6 +1159,42 @@ mod tests {
             ssh_user: None,
             ssh_password: None,
         })
+    }
+
+    /// Tauri dispatches `#[tauri::command(async)]` bodies on a tokio worker, so the
+    /// blocking driver must not create a nested runtime there.
+    #[test]
+    fn postgres_connect_inside_async_runtime() {
+        let Some(opts) = live_opts() else {
+            return;
+        };
+        tauri::async_runtime::block_on(async {
+            let session = PostgresSession::connect(&opts).expect("connect inside runtime");
+            session.ping().expect("ping");
+            let dbs = session.list_databases().expect("databases");
+            assert!(!dbs.is_empty());
+        });
+    }
+
+    /// Same, through the session pool used by the Tauri commands.
+    #[test]
+    fn postgres_pool_inside_async_runtime() {
+        let Some(opts) = live_opts() else {
+            return;
+        };
+        tauri::async_runtime::block_on(async {
+            let pool = crate::session::SessionPool::new();
+            pool.open("pg", opts.clone()).expect("open");
+            let dbs = pool
+                .with_session("pg", |s| s.list_databases())
+                .expect("databases");
+            assert!(!dbs.is_empty());
+            let tables = pool
+                .with_session("pg", |s| s.list_tables(None, None))
+                .expect("tables");
+            assert!(tables.len() < 100_000);
+            pool.close("pg").expect("close");
+        });
     }
 
     /// End-to-end check against a real server: `MYCAT_PG_TEST=1 cargo test --lib postgres_live`.
