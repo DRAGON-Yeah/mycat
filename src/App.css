@@ -465,6 +465,10 @@ body.is-row-resizing * {
   color: #2563eb;
 }
 
+.ws-tab-context-menu {
+  min-width: 208px;
+}
+
 .ws-body {
   flex: 1;
   min-height: 0;

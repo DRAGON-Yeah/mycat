@@ -1,3 +1,9 @@
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { DataGrid } from "../features/data-grid/DataGrid";
 import { ObjectListGrid } from "../features/object-list/ObjectListGrid";
 import { PlaceholderPane } from "../features/placeholders/PlaceholderPane";
@@ -8,6 +14,11 @@ import { ViewDesigner } from "../features/view-designer/ViewDesigner";
 import { FunctionDesigner } from "../features/function-designer/FunctionDesigner";
 import { EventDesigner } from "../features/event-designer/EventDesigner";
 import { useWorkspaceStore } from "../stores/workspaceStore";
+import {
+  TabContextMenu,
+  type TabKind,
+  type TabMenuTarget,
+} from "./TabContextMenu";
 
 function queryTabLabel(title: string, database: string, connectionName: string) {
   const db = database || "?";
@@ -44,6 +55,130 @@ export function MainWorkspace() {
   const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
   const activeConnection = useWorkspaceStore((s) => s.activeConnection);
   const openQuery = useWorkspaceStore((s) => s.openQuery);
+  const closeTabsByIds = useWorkspaceStore((s) => s.closeTabsByIds);
+
+  const [tabMenu, setTabMenu] = useState<TabMenuTarget | null>(null);
+
+  /** Closable document tabs in tab-bar order. */
+  const closableTabs = useMemo(
+    () => [
+      ...queryTabs.map((q) => ({ kind: "query" as const, id: q.id })),
+      ...tabs.map((t) => ({ kind: "table" as const, id: t.id })),
+      ...designerTabs.map((t) => ({ kind: "designer" as const, id: t.id })),
+    ],
+    [queryTabs, tabs, designerTabs],
+  );
+
+  useEffect(() => {
+    if (!tabMenu) return;
+    function onDoc(e: MouseEvent) {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.(".ws-tab-context-menu")) return;
+      setTabMenu(null);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [tabMenu]);
+
+  function openTabMenu(
+    e: ReactMouseEvent,
+    kind: TabKind,
+    id: string,
+    canReveal = true,
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    const index = closableTabs.findIndex(
+      (t) => t.kind === kind && t.id === id,
+    );
+    setTabMenu({
+      x: e.clientX,
+      y: e.clientY,
+      kind,
+      id,
+      hasOthers: closableTabs.length > 1,
+      hasRight: index >= 0 && index < closableTabs.length - 1,
+      canReveal,
+    });
+  }
+
+  function closeMenuTab() {
+    if (tabMenu) closeTabsByIds([tabMenu.id]);
+  }
+
+  function closeMenuOthers() {
+    if (!tabMenu) return;
+    closeTabsByIds(
+      closableTabs.filter((t) => t.id !== tabMenu.id).map((t) => t.id),
+    );
+  }
+
+  function closeMenuRight() {
+    if (!tabMenu) return;
+    const index = closableTabs.findIndex(
+      (t) => t.kind === tabMenu.kind && t.id === tabMenu.id,
+    );
+    if (index < 0) return;
+    closeTabsByIds(closableTabs.slice(index + 1).map((t) => t.id));
+  }
+
+  function closeMenuAll() {
+    closeTabsByIds(closableTabs.map((t) => t.id));
+  }
+
+  function revealMenuTab() {
+    if (!tabMenu) return;
+    let detail:
+      | {
+          connectionId: string;
+          database: string;
+          folder: string;
+          table: string | null;
+        }
+      | null = null;
+    if (tabMenu.kind === "query") {
+      const q = queryTabs.find((t) => t.id === tabMenu.id);
+      if (q) {
+        detail = {
+          connectionId: q.connectionId,
+          database: q.database,
+          folder: "queries",
+          table: null,
+        };
+      }
+    } else if (tabMenu.kind === "table") {
+      const t = tabs.find((x) => x.id === tabMenu.id);
+      if (t) {
+        detail = {
+          connectionId: t.connectionId,
+          database: t.database,
+          folder: "tables",
+          table: t.table,
+        };
+      }
+    } else {
+      const d = designerTabs.find((x) => x.id === tabMenu.id);
+      if (d) {
+        detail = {
+          connectionId: d.connectionId,
+          database: d.database,
+          folder:
+            d.kind === "view"
+              ? "views"
+              : d.kind === "function"
+                ? "functions"
+                : d.kind === "event"
+                  ? "events"
+                  : "tables",
+          table: d.table,
+        };
+      }
+    }
+    if (!detail) return;
+    window.dispatchEvent(
+      new CustomEvent("mycat:reveal-in-nav", { detail }),
+    );
+  }
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
   const activeDesigner =
@@ -105,6 +240,7 @@ export function MainWorkspace() {
                 role="tab"
                 aria-selected={active}
                 title={`${q.title} @${q.database || "?"} (${q.connectionName})`}
+                onContextMenu={(e) => openTabMenu(e, "query", q.id)}
               >
                 <button
                   type="button"
@@ -157,6 +293,7 @@ export function MainWorkspace() {
                 role="tab"
                 aria-selected={active}
                 title={fullTitle}
+                onContextMenu={(e) => openTabMenu(e, "table", t.id)}
               >
                 <button
                   type="button"
@@ -217,6 +354,9 @@ export function MainWorkspace() {
                 role="tab"
                 aria-selected={active}
                 title={label}
+                onContextMenu={(e) =>
+                  openTabMenu(e, "designer", t.id, t.mode !== "create")
+                }
               >
                 <button
                   type="button"
@@ -297,6 +437,18 @@ export function MainWorkspace() {
           </div>
         )}
       </div>
+
+      {tabMenu && (
+        <TabContextMenu
+          target={tabMenu}
+          onClose={() => setTabMenu(null)}
+          onCloseTab={closeMenuTab}
+          onCloseOthers={closeMenuOthers}
+          onCloseRight={closeMenuRight}
+          onCloseAll={closeMenuAll}
+          onReveal={revealMenuTab}
+        />
+      )}
     </main>
   );
 }

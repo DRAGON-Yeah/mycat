@@ -129,6 +129,11 @@ type WorkspaceState = {
   selectDatabase: (database: string) => void;
   selectObjectFolder: (database: string, folder: ObjectFolder) => void;
   selectTableMeta: (table: string | null) => void;
+  /** Highlight an object in the nav tree without switching the center pane. */
+  revealInNavTree: (
+    conn: ConnectionDto,
+    opts: { database: string; folder: ObjectFolder; table?: string | null },
+  ) => void;
   setCenterMode: (mode: CenterMode) => void;
   /** Activate Console for a connection (optional database context). */
   openConsole: (opts?: {
@@ -196,6 +201,8 @@ type WorkspaceState = {
   applyQueryContext: (connection: ConnectionDto, database: string) => void;
   closeTab: (id: string, opts?: { force?: boolean }) => boolean;
   closeQueryTab: (id: string, opts?: { force?: boolean }) => boolean;
+  /** Close several document tabs (query/table/designer ids) in one pass. */
+  closeTabsByIds: (ids: string[], opts?: { force?: boolean }) => boolean;
   setActiveTab: (id: string) => void;
   setActiveQuery: (id: string) => void;
   updateQueryTab: (
@@ -380,6 +387,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           : get().selectedDatabase
             ? "database"
             : "connection",
+    }),
+  revealInNavTree: (conn, opts) =>
+    set({
+      activeConnectionId: conn.id,
+      activeConnection: conn,
+      selectedDatabase: opts.database,
+      selectedFolder: opts.folder,
+      selectedTable: opts.table ?? null,
+      selectionKind: opts.table ? "table" : "folder",
     }),
   setCenterMode: (mode) => set({ centerMode: mode, placeholderFeature: null }),
   openConsole: (opts) => {
@@ -1066,6 +1082,103 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             ? "objectList"
             : "welcome",
       toolbarAction: activeQueryId ? "query" : get().toolbarAction,
+    });
+    return true;
+  },
+  closeTabsByIds: (ids, opts) => {
+    const targets = new Set(ids);
+    if (targets.size === 0) return true;
+    const state = get();
+    const dirtyTables = state.tabs.filter((t) => targets.has(t.id) && t.dirty);
+    const dirtyQueries = state.queryTabs.filter(
+      (t) => targets.has(t.id) && t.dirty && t.sql.trim(),
+    );
+    const dirtyDesigners = state.designerTabs.filter(
+      (t) => targets.has(t.id) && t.dirty,
+    );
+    if (!opts?.force) {
+      for (const t of dirtyTables) {
+        if (!window.confirm(`「${t.table}」有未保存更改，确定关闭？`)) return false;
+      }
+      for (const t of dirtyQueries) {
+        const label = t.title?.trim() || "无标题";
+        if (
+          !window.confirm(
+            `「${label}」有未保存更改，关闭将丢失修改。确定关闭？`,
+          )
+        ) {
+          return false;
+        }
+      }
+      for (const t of dirtyDesigners) {
+        const obj = t.kind === "view" ? "视图" : "表";
+        const ok = window.confirm(
+          t.mode === "create"
+            ? `新建${obj}「${t.table}」尚未保存，确定关闭并丢弃？`
+            : `设计器「${t.table}」有未保存更改，确定关闭？`,
+        );
+        if (!ok) return false;
+      }
+    }
+
+    const tabs = state.tabs.filter((t) => !targets.has(t.id));
+    const queryTabs = state.queryTabs.filter((t) => !targets.has(t.id));
+    const designerTabs = state.designerTabs.filter((t) => !targets.has(t.id));
+    let activeTabId =
+      state.activeTabId && targets.has(state.activeTabId)
+        ? (tabs[tabs.length - 1]?.id ?? null)
+        : state.activeTabId;
+    let activeQueryId =
+      state.activeQueryId && targets.has(state.activeQueryId)
+        ? (queryTabs[queryTabs.length - 1]?.id ?? null)
+        : state.activeQueryId;
+    let activeDesignerId =
+      state.activeDesignerId && targets.has(state.activeDesignerId)
+        ? (designerTabs[designerTabs.length - 1]?.id ?? null)
+        : state.activeDesignerId;
+
+    const keepPane =
+      state.centerMode === "console" ||
+      state.centerMode === "objectList" ||
+      state.centerMode === "welcome" ||
+      state.centerMode === "placeholder";
+
+    let centerMode: CenterMode;
+    if (keepPane) {
+      centerMode = state.centerMode;
+    } else if (state.centerMode === "table-designer" && activeDesignerId) {
+      centerMode = "table-designer";
+    } else if (state.centerMode === "query" && activeQueryId) {
+      centerMode = "query";
+    } else if (state.centerMode === "table" && activeTabId) {
+      centerMode = "table";
+    } else if (designerTabs.length > 0) {
+      activeDesignerId = designerTabs[designerTabs.length - 1]!.id;
+      centerMode = "table-designer";
+    } else if (tabs.length > 0) {
+      activeTabId = tabs[tabs.length - 1]!.id;
+      centerMode = "table";
+    } else if (queryTabs.length > 0) {
+      activeQueryId = queryTabs[queryTabs.length - 1]!.id;
+      centerMode = "query";
+    } else {
+      centerMode = state.selectedDatabase ? "objectList" : "welcome";
+    }
+
+    set({
+      tabs,
+      queryTabs,
+      designerTabs,
+      activeTabId,
+      activeQueryId,
+      activeDesignerId,
+      centerMode,
+      toolbarAction:
+        centerMode === "query"
+          ? "query"
+          : centerMode === "table"
+            ? "table"
+            : state.toolbarAction,
     });
     return true;
   },

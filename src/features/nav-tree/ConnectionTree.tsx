@@ -231,6 +231,7 @@ export function ConnectionTree() {
   const selectDatabase = useWorkspaceStore((s) => s.selectDatabase);
   const selectObjectFolder = useWorkspaceStore((s) => s.selectObjectFolder);
   const selectTableMeta = useWorkspaceStore((s) => s.selectTableMeta);
+  const revealInNavTree = useWorkspaceStore((s) => s.revealInNavTree);
   const openTable = useWorkspaceStore((s) => s.openTable);
   const openTableDesigner = useWorkspaceStore((s) => s.openTableDesigner);
   const openViewDesigner = useWorkspaceStore((s) => s.openViewDesigner);
@@ -293,6 +294,52 @@ export function ConnectionTree() {
     document.addEventListener("click", onDocClick);
     return () => document.removeEventListener("click", onDocClick);
   }, []);
+
+  // "在导航窗格中显示" from a workspace tab.
+  useEffect(() => {
+    async function onReveal(ev: Event) {
+      const detail = (
+        ev as CustomEvent<{
+          connectionId?: string;
+          database?: string;
+          folder?: ObjectFolder;
+          table?: string | null;
+        }>
+      ).detail;
+      if (!detail?.connectionId || !detail.database || !detail.folder) return;
+      const connId = detail.connectionId;
+      const database = detail.database;
+      const folder = detail.folder;
+      const node = nodes.find((n) => n.conn.id === connId);
+      if (!node) return;
+      if (!node.expanded) {
+        await toggleConnection(connId);
+      }
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.conn.id === connId
+            ? { ...n, openDbs: { ...n.openDbs, [database]: true } }
+            : n,
+        ),
+      );
+      revealInNavTree(node.conn, {
+        database,
+        folder,
+        table: detail.table ?? null,
+      });
+      // Let object folders (possibly just mounted) expand themselves.
+      window.setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent("mycat:reveal-in-nav-folder", {
+            detail: { connectionId: connId, database, folder },
+          }),
+        );
+      }, 0);
+    }
+    window.addEventListener("mycat:reveal-in-nav", onReveal);
+    return () => window.removeEventListener("mycat:reveal-in-nav", onReveal);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {

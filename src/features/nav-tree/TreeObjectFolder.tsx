@@ -169,6 +169,26 @@ export function TreeObjectFolder({
     return () => window.removeEventListener(TABLE_DATA_CHANGED, onChanged);
   }, [conn.id, database, expanded, loadItems]);
 
+  // Expand when a workspace tab asks to reveal an object here.
+  useEffect(() => {
+    function onReveal(ev: Event) {
+      const detail = (
+        ev as CustomEvent<{
+          connectionId?: string;
+          database?: string;
+          folder?: string;
+        }>
+      ).detail;
+      if (!detail) return;
+      if (detail.connectionId !== conn.id || detail.database !== database) return;
+      if (detail.folder !== folder) return;
+      setExpanded(true);
+    }
+    window.addEventListener("mycat:reveal-in-nav-folder", onReveal);
+    return () =>
+      window.removeEventListener("mycat:reveal-in-nav-folder", onReveal);
+  }, [conn.id, database, folder]);
+
   async function ensureDetail(table: string) {
     if (details[table] && !details[table]?.loading) return;
     setDetails((prev) => ({
