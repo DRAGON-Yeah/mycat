@@ -80,7 +80,9 @@ export function QueryEditor() {
   const [status, setStatus] = useState<string | null>(null);
   const [batchItems, setBatchItems] = useState<QueryBatchItem[]>([]);
   const [batchMessages, setBatchMessages] = useState<string[]>([]);
-  const [resultCollapsed, setResultCollapsed] = useState(false);
+  const resultCollapsed = useUiStore((s) => s.layout.bottomCollapsed);
+  const toggleBottom = useUiStore((s) => s.toggleBottom);
+  const setBottomCollapsed = useUiStore((s) => s.setBottomCollapsed);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [replaceQuery, setReplaceQuery] = useState("");
@@ -882,7 +884,7 @@ export function QueryEditor() {
           : `完成：成功 ${ok} · 失败 ${fail} · 结果集 ${resultCount}`,
       );
       if (cancelled) showToast("查询已取消");
-      setResultCollapsed(false);
+      if (resultCount > 0) setBottomCollapsed(false);
       if (fail && ok === 0 && !cancelled) {
         setError(items.find((x) => x.error)?.error ?? "执行失败");
       }
@@ -967,7 +969,7 @@ export function QueryEditor() {
         <div className="query-icon-group">
           <IconBtn
             title={resultCollapsed ? "显示结果" : "隐藏结果"}
-            onClick={() => setResultCollapsed((v) => !v)}
+            onClick={toggleBottom}
           >
             <IconPanel />
           </IconBtn>

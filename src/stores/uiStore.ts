@@ -8,6 +8,12 @@ export type LayoutSizes = {
   inspectorWidth: number;
   /** Query editor share of the editor+result split (0.2–0.85). */
   queryEditorRatio: number;
+  /** 左侧连接树是否收起 */
+  treeCollapsed: boolean;
+  /** 右侧信息面板是否收起 */
+  inspectorCollapsed: boolean;
+  /** 下方面板（查询结果区）是否收起 */
+  bottomCollapsed: boolean;
 };
 
 const LAYOUT_KEY = "mycat.layout";
@@ -16,6 +22,9 @@ const DEFAULT_LAYOUT: LayoutSizes = {
   treeWidth: 268,
   inspectorWidth: 236,
   queryEditorRatio: 0.55,
+  treeCollapsed: false,
+  inspectorCollapsed: false,
+  bottomCollapsed: false,
 };
 
 function clamp(n: number, min: number, max: number) {
@@ -39,6 +48,9 @@ function loadLayout(): LayoutSizes {
         0.2,
         0.85,
       ),
+      treeCollapsed: parsed.treeCollapsed === true,
+      inspectorCollapsed: parsed.inspectorCollapsed === true,
+      bottomCollapsed: parsed.bottomCollapsed === true,
     };
   } catch {
     return { ...DEFAULT_LAYOUT };
@@ -75,6 +87,10 @@ type UiState = {
   bumpTreeWidth: (delta: number) => void;
   bumpInspectorWidth: (delta: number) => void;
   bumpQueryEditorRatioByPx: (deltaPx: number, containerHeight: number) => void;
+  toggleTree: () => void;
+  toggleInspector: () => void;
+  toggleBottom: () => void;
+  setBottomCollapsed: (collapsed: boolean) => void;
 };
 
 export const useUiStore = create<UiState>((set, get) => ({
@@ -138,6 +154,36 @@ export const useUiStore = create<UiState>((set, get) => ({
     const next =
       get().layout.queryEditorRatio + deltaPx / containerHeight;
     get().setQueryEditorRatio(next);
+  },
+  toggleTree: () => {
+    const layout = {
+      ...get().layout,
+      treeCollapsed: !get().layout.treeCollapsed,
+    };
+    saveLayout(layout);
+    set({ layout });
+  },
+  toggleInspector: () => {
+    const layout = {
+      ...get().layout,
+      inspectorCollapsed: !get().layout.inspectorCollapsed,
+    };
+    saveLayout(layout);
+    set({ layout });
+  },
+  toggleBottom: () => {
+    const layout = {
+      ...get().layout,
+      bottomCollapsed: !get().layout.bottomCollapsed,
+    };
+    saveLayout(layout);
+    set({ layout });
+  },
+  setBottomCollapsed: (collapsed) => {
+    if (get().layout.bottomCollapsed === collapsed) return;
+    const layout = { ...get().layout, bottomCollapsed: collapsed };
+    saveLayout(layout);
+    set({ layout });
   },
 }));
 
