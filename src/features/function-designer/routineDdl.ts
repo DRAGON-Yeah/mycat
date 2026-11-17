@@ -248,6 +248,10 @@ export function buildCreateRoutineSql(args: {
   else parts.push("NOT DETERMINISTIC");
   if (dataAccess?.trim()) {
     parts.push(dataAccess.trim().toUpperCase());
+  } else if (routineType === "FUNCTION" && !deterministic) {
+    // MySQL 开启 binlog 且 log_bin_trust_function_creators=0 时，
+    // 函数必须声明 DETERMINISTIC / NO SQL / READS SQL DATA，否则创建失败
+    parts.push("NO SQL");
   }
   if (securityType === "INVOKER" || securityType === "DEFINER") {
     parts.push(`SQL SECURITY ${securityType}`);
