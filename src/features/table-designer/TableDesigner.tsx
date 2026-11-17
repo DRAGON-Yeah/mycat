@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -139,6 +140,12 @@ export function TableDesigner({ tab }: Props) {
     updateTime: "—",
   });
   const [selectedIdx, setSelectedIdx] = useState(0);
+  const [colMenu, setColMenu] = useState<{
+    x: number;
+    y: number;
+    index: number;
+  } | null>(null);
+  const [pkSubOpen, setPkSubOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -384,33 +391,121 @@ export function TableDesigner({ tab }: Props) {
     touch();
   }
 
-  function removeSelected() {
+  function removeSelected(index = selectedIdx) {
     if (columns.length === 0) return;
-    const key = columns[selectedIdx]?.key;
+    const key = columns[index]?.key;
     if (!key) return;
     setColumns((prev) => prev.filter((c) => c.key !== key));
-    setSelectedIdx((i) => Math.max(0, Math.min(i, columns.length - 2)));
+    setSelectedIdx(Math.max(0, Math.min(index, columns.length - 2)));
     touch();
   }
 
-  function moveSelected(dir: -1 | 1) {
+  function moveSelected(dir: -1 | 1, index = selectedIdx) {
+    const j = index + dir;
+    if (j < 0 || j >= columns.length) return;
     setColumns((prev) => {
-      const i = selectedIdx;
-      const j = i + dir;
-      if (j < 0 || j >= prev.length) return prev;
       const next = [...prev];
-      const tmp = next[i]!;
-      next[i] = next[j]!;
+      const tmp = next[index]!;
+      next[index] = next[j]!;
       next[j] = tmp;
       return next;
     });
-    setSelectedIdx((i) => {
-      const j = i + dir;
-      if (j < 0 || j >= columns.length) return i;
-      return j;
-    });
+    setSelectedIdx(j);
     touch();
   }
+
+  /** Duplicate the column at `index` and insert the copy right below it. */
+  function duplicateColumn(index: number) {
+    const src = columns[index];
+    if (!src) return;
+    const used = new Set(columns.map((c) => c.name.trim().toLowerCase()));
+    const base = src.name.trim() || "new_col";
+    let name = `${base}_copy`;
+    let n = 2;
+    while (used.has(name.toLowerCase())) name = `${base}_copy${n++}`;
+    const { key: _key, ...rest } = src;
+    const copy = newColumn({
+      ...rest,
+      name,
+      // Only one PK / AUTO_INCREMENT per table.
+      isPk: false,
+      extra: /auto_increment/i.test(src.extra) ? "" : src.extra,
+      originalName: null,
+    });
+    setColumns((prev) => {
+      const next = [...prev];
+      next.splice(index + 1, 0, copy);
+      return next;
+    });
+    setSelectedIdx(index + 1);
+    touch();
+  }
+
+  function togglePrimaryKey(index: number, on: boolean) {
+    const col = columns[index];
+    if (!col) return;
+    patchCol(col.key, on ? { isPk: true, notNull: true } : { isPk: false });
+  }
+
+  function openColMenu(e: ReactMouseEvent, index: number) {
+    e.preventDefault();
+    e.stopPropagation();
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    setSelectedIdx(index);
+    setPkSubOpen(false);
+    setColMenu({ x: e.clientX, y: e.clientY, index });
+  }
+
+  function closeColMenu() {
+    setColMenu(null);
+    setPkSubOpen(false);
+  }
+
+  useEffect(() => {
+    if (!colMenu) return;
+    function onDoc(e: MouseEvent) {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.(".td-col-menu")) return;
+      closeColMenu();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") closeColMenu();
+    }
+    document.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [colMenu]);
+
+  // Navicat-style field shortcuts (⌘/Ctrl + / D / - / ↑ / ↓).
+  useEffect(() => {
+    if (pane !== "fields") return;
+    function onKey(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      const key = e.key;
+      if (key === "+" || key === "=") {
+        e.preventDefault();
+        addCol();
+      } else if (key.toLowerCase() === "d") {
+        e.preventDefault();
+        duplicateColumn(selectedIdx);
+      } else if (key === "-") {
+        e.preventDefault();
+        removeSelected();
+      } else if (key === "ArrowUp") {
+        e.preventDefault();
+        moveSelected(-1);
+      } else if (key === "ArrowDown") {
+        e.preventDefault();
+        moveSelected(1);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pane, selectedIdx, columns]);
 
   const ddlSql = useMemo(() => {
     try {
@@ -1024,7 +1119,18 @@ export function TableDesigner({ tab }: Props) {
       <div className="td-body">
         <div className="td-main">
           {!loading && pane === "fields" && (
-            <div className="td-grid-wrap">
+            <div
+              className="td-grid-wrap"
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setPkSubOpen(false);
+                setColMenu({
+                  x: e.clientX,
+                  y: e.clientY,
+                  index: selectedIdx,
+                });
+              }}
+            >
               <table className="td-grid">
                 <thead>
                   <tr>
@@ -1045,6 +1151,7 @@ export function TableDesigner({ tab }: Props) {
                       key={c.key}
                       className={i === selectedIdx ? "is-selected" : undefined}
                       onClick={() => setSelectedIdx(i)}
+                      onContextMenu={(e) => openColMenu(e, i)}
                     >
                       <td className="td-col-name">
                         <input
@@ -1656,6 +1763,161 @@ export function TableDesigner({ tab }: Props) {
           </dl>
         </aside>
       </div>
+
+      {colMenu && (
+        <ColContextMenu x={colMenu.x} y={colMenu.y}>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              addCol();
+              closeColMenu();
+            }}
+          >
+            添加字段
+            <span className="menu-shortcut">⌘+</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!columns[colMenu.index]}
+            onClick={() => {
+              addCol(colMenu.index);
+              closeColMenu();
+            }}
+          >
+            插入字段
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!columns[colMenu.index]}
+            onClick={() => {
+              duplicateColumn(colMenu.index);
+              closeColMenu();
+            }}
+          >
+            复制字段
+            <span className="menu-shortcut">⌘D</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!columns[colMenu.index]}
+            onClick={() => {
+              removeSelected(colMenu.index);
+              closeColMenu();
+            }}
+          >
+            删除字段
+            <span className="menu-shortcut">⌘-</span>
+          </button>
+
+          <div className="dg-menu-sep" />
+
+          <div
+            className={`dg-menu-item has-sub ${pkSubOpen ? "is-open" : ""}`}
+            onMouseEnter={() => setPkSubOpen(true)}
+            onMouseLeave={() => setPkSubOpen(false)}
+          >
+            <button
+              type="button"
+              className="dg-menu-trigger"
+              disabled={!columns[colMenu.index]}
+            >
+              主键
+              <span className="dg-menu-arrow">›</span>
+            </button>
+            {pkSubOpen && (
+              <div className="dg-submenu">
+                <button
+                  type="button"
+                  disabled={!columns[colMenu.index] || !!columns[colMenu.index]?.isPk}
+                  onClick={() => {
+                    togglePrimaryKey(colMenu.index, true);
+                    closeColMenu();
+                  }}
+                >
+                  设置主键
+                </button>
+                <button
+                  type="button"
+                  disabled={!columns[colMenu.index]?.isPk}
+                  onClick={() => {
+                    togglePrimaryKey(colMenu.index, false);
+                    closeColMenu();
+                  }}
+                >
+                  取消主键
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="dg-menu-sep" />
+
+          <button
+            type="button"
+            role="menuitem"
+            disabled={colMenu.index <= 0}
+            onClick={() => {
+              moveSelected(-1, colMenu.index);
+              closeColMenu();
+            }}
+          >
+            上移
+            <span className="menu-shortcut">⌘↑</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={colMenu.index >= columns.length - 1}
+            onClick={() => {
+              moveSelected(1, colMenu.index);
+              closeColMenu();
+            }}
+          >
+            下移
+            <span className="menu-shortcut">⌘↓</span>
+          </button>
+        </ColContextMenu>
+      )}
+    </div>
+  );
+}
+
+function ColContextMenu({
+  x,
+  y,
+  children,
+}: {
+  x: number;
+  y: number;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: x, top: y });
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setPos({
+      left: Math.max(8, Math.min(x, window.innerWidth - rect.width - 8)),
+      top: Math.max(8, Math.min(y, window.innerHeight - rect.height - 8)),
+    });
+  }, [x, y]);
+
+  return (
+    <div
+      ref={ref}
+      className="dg-context-menu td-col-menu"
+      style={{ left: pos.left, top: pos.top }}
+      role="menu"
+      aria-label="字段操作"
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      {children}
     </div>
   );
 }

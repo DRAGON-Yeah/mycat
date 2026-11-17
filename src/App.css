@@ -469,6 +469,14 @@ body.is-row-resizing * {
   min-width: 208px;
 }
 
+.td-col-menu {
+  min-width: 184px;
+}
+
+.td-col-menu .dg-submenu {
+  min-width: 140px;
+}
+
 .ws-body {
   flex: 1;
   min-height: 0;
