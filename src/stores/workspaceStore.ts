@@ -1,6 +1,25 @@
 import { create } from "zustand";
 import type { ConnectionDto } from "../features/connections/types";
-import { confirmDialog } from "../lib/confirm";
+import { confirmCloseDialog, confirmDialog } from "../lib/confirm";
+import { hasTabSaver, runTabSaver } from "../lib/tabSavers";
+import { upsertSavedQuery } from "../features/query/savedQueriesApi";
+
+/** 调用页签自己的保存动作，并确认已不再 dirty */
+async function saveTabThenVerify(id: string): Promise<boolean> {
+  const ran = await runTabSaver(id);
+  if (!ran) return false;
+  // 表格的 dirty 由组件渲染后回写，稍等一拍再判断
+  for (let i = 0; i < 20; i++) {
+    const s = useWorkspaceStore.getState();
+    const dirty =
+      s.tabs.find((t) => t.id === id)?.dirty ||
+      s.queryTabs.find((t) => t.id === id)?.dirty ||
+      s.designerTabs.find((t) => t.id === id)?.dirty;
+    if (!dirty) return true;
+    await new Promise((r) => window.setTimeout(r, 50));
+  }
+  return false;
+}
 
 export type TableOpenOptions = {
   sortCol?: string;
@@ -202,6 +221,8 @@ type WorkspaceState = {
   applyQueryContext: (connection: ConnectionDto, database: string) => void;
   closeTab: (id: string, opts?: { force?: boolean }) => Promise<boolean>;
   closeQueryTab: (id: string, opts?: { force?: boolean }) => Promise<boolean>;
+  /** 保存查询页签（未命名时自动生成名称） */
+  saveQueryTab: (id: string) => Promise<boolean>;
   /** Close several document tabs (query/table/designer ids) in one pass. */
   closeTabsByIds: (ids: string[], opts?: { force?: boolean }) => Promise<boolean>;
   setActiveTab: (id: string) => void;
@@ -865,15 +886,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (!tab) return false;
     if (!opts?.force && tab.dirty) {
       const obj = tab.kind === "view" ? "视图" : "表";
-      const ok = await confirmDialog({
-        message:
-          tab.mode === "create"
-            ? `新建${obj}「${tab.table}」尚未保存，确定关闭并丢弃？`
-            : `设计器「${tab.table}」有未保存更改，确定关闭？`,
-        confirmText: "关闭并丢弃",
-        danger: true,
-      });
-      if (!ok) return false;
+      const message =
+        tab.mode === "create"
+          ? `新建${obj}「${tab.table}」尚未保存，确定关闭？`
+          : `设计器「${tab.table}」有未保存更改，确定关闭？`;
+      if (hasTabSaver(id)) {
+        const choice = await confirmCloseDialog({ message });
+        if (choice === "cancel") return false;
+        if (choice === "save" && !(await saveTabThenVerify(id))) return false;
+      } else {
+        const ok = await confirmDialog({
+          message,
+          confirmText: "关闭并丢弃",
+          danger: true,
+        });
+        if (!ok) return false;
+      }
     }
     const designerTabs = get().designerTabs.filter((t) => t.id !== id);
     const closingActive = get().activeDesignerId === id;
@@ -1038,12 +1066,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === id);
     if (!tab) return false;
     if (!opts?.force && tab.dirty) {
-      const ok = await confirmDialog({
-        message: `「${tab.table}」有未保存更改，确定关闭？`,
-        confirmText: "关闭并丢弃",
-        danger: true,
-      });
-      if (!ok) return false;
+      // 只有组件已挂载（注册了保存器）才提供「保存并关闭」
+      if (hasTabSaver(id)) {
+        const choice = await confirmCloseDialog({
+          message: `「${tab.table}」有未保存更改，确定关闭？`,
+        });
+        if (choice === "cancel") return false;
+        if (choice === "save" && !(await saveTabThenVerify(id))) return false;
+      } else {
+        const ok = await confirmDialog({
+          message: `「${tab.table}」有未保存更改，关闭将丢失修改。确定关闭？`,
+          confirmText: "关闭并丢弃",
+          danger: true,
+        });
+        if (!ok) return false;
+      }
     }
     const tabs = get().tabs.filter((t) => t.id !== id);
     const closingActive = get().activeTabId === id;
@@ -1069,12 +1106,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (!tab) return false;
     if (!opts?.force && tab.dirty && tab.sql.trim()) {
       const label = tab.title?.trim() || "无标题";
-      const ok = await confirmDialog({
-        message: `「${label}」有未保存更改，关闭将丢失修改。确定关闭？`,
-        confirmText: "关闭并丢弃",
-        danger: true,
+      const choice = await confirmCloseDialog({
+        message: `「${label}」有未保存更改，确定关闭？`,
       });
-      if (!ok) return false;
+      if (choice === "cancel") return false;
+      if (choice === "save" && !(await get().saveQueryTab(id))) return false;
     }
     const queryTabs = get().queryTabs.filter((t) => t.id !== id);
     const closingActive = get().activeQueryId === id;
@@ -1094,6 +1130,41 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       toolbarAction: activeQueryId ? "query" : get().toolbarAction,
     });
     return true;
+  },
+  saveQueryTab: async (id) => {
+    const tab = get().queryTabs.find((t) => t.id === id);
+    if (!tab) return false;
+    if (!tab.dirty) return true;
+    const title = tab.title?.trim();
+    const name =
+      title && title !== "无标题"
+        ? title
+        : `未命名查询-${new Date().toISOString().slice(11, 19)}`;
+    try {
+      const saved = await upsertSavedQuery({
+        id: tab.savedQueryId || undefined,
+        connectionId: tab.connectionId,
+        database: tab.database || null,
+        name,
+        sql: tab.sql || "",
+      });
+      get().updateQueryTab(id, {
+        title: saved.name,
+        savedQueryId: saved.id,
+        dirty: false,
+      });
+      window.dispatchEvent(
+        new CustomEvent("saved-queries-changed", {
+          detail: {
+            connectionId: tab.connectionId,
+            database: tab.database || undefined,
+          },
+        }),
+      );
+      return true;
+    } catch {
+      return false;
+    }
   },
   closeTabsByIds: async (ids, opts) => {
     const targets = new Set(ids);
@@ -1121,13 +1192,33 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         const shown = labels.slice(0, 8).join("\n");
         const more =
           labels.length > 8 ? `\n… 等共 ${labels.length} 个页签` : "";
-        const ok = await confirmDialog({
-          title: "关闭未保存的页签",
-          message: `以下页签有未保存更改，关闭将丢失修改：\n${shown}${more}\n\n确定全部关闭？`,
-          confirmText: "全部关闭",
-          danger: true,
-        });
-        if (!ok) return false;
+        // 查询由 store 直接保存；表格/设计器需要组件已挂载（注册了保存器）
+        const allSavable =
+          dirtyTables.every((t) => hasTabSaver(t.id)) &&
+          dirtyDesigners.every((t) => hasTabSaver(t.id));
+        if (allSavable) {
+          const choice = await confirmCloseDialog({
+            title: "关闭未保存的页签",
+            message: `以下页签有未保存更改：\n${shown}${more}\n\n是否保存后关闭？`,
+          });
+          if (choice === "cancel") return false;
+          if (choice === "save") {
+            for (const t of dirtyQueries) {
+              if (!(await get().saveQueryTab(t.id))) return false;
+            }
+            for (const t of [...dirtyTables, ...dirtyDesigners]) {
+              if (!(await saveTabThenVerify(t.id))) return false;
+            }
+          }
+        } else {
+          const ok = await confirmDialog({
+            title: "关闭未保存的页签",
+            message: `以下页签有未保存更改，关闭将丢失修改：\n${shown}${more}\n\n确定全部关闭？`,
+            confirmText: "全部关闭",
+            danger: true,
+          });
+          if (!ok) return false;
+        }
       }
     }
 

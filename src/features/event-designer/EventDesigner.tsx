@@ -6,6 +6,7 @@ import { dropEvent, fetchEventDdl } from "../nav-tree/eventMenuActions";
 import { emitTableDataChanged } from "../../lib/tableEvents";
 import { useWorkspaceStore, type DesignerTab } from "../../stores/workspaceStore";
 import { useModSaveShortcut } from "../../hooks/useModSaveShortcut";
+import { useTabSaver } from "../../hooks/useTabSaver";
 import {
   buildCreateEventSql,
   EVENT_INTERVAL_UNITS,
@@ -284,6 +285,8 @@ export function EventDesigner({ tab }: Props) {
   useModSaveShortcut(() => {
     if (!loading && !saving) void save();
   });
+
+  useTabSaver(tab.id, save);
 
   const atActive = scheduleKind === "AT";
   const everyActive = scheduleKind === "EVERY";

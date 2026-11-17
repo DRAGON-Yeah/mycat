@@ -7,6 +7,7 @@ import { emitTableDataChanged } from "../../lib/tableEvents";
 import { useWorkspaceStore, type DesignerTab } from "../../stores/workspaceStore";
 import { buildCreateViewSql, parseViewSelectBody } from "./viewDdl";
 import { useModSaveShortcut } from "../../hooks/useModSaveShortcut";
+import { useTabSaver } from "../../hooks/useTabSaver";
 
 type Props = { tab: DesignerTab };
 
@@ -129,6 +130,8 @@ export function ViewDesigner({ tab }: Props) {
   useModSaveShortcut(() => {
     if (!loading && !saving) void save();
   });
+
+  useTabSaver(tab.id, save);
 
   return (
     <div className="view-designer">

@@ -14,6 +14,7 @@ import {
   openConnection,
 } from "../connections/sessionApi";
 import { useModSaveShortcut } from "../../hooks/useModSaveShortcut";
+import { useTabSaver } from "../../hooks/useTabSaver";
 import type { DesignerTab } from "../../stores/workspaceStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { engineKey, identOk, quoteIdent, quoteTable } from "../nav-tree/sqlIdent";
@@ -1003,6 +1004,8 @@ export function TableDesigner({ tab }: Props) {
   useModSaveShortcut(() => {
     if (canSave) void onSave();
   }, canSave);
+
+  useTabSaver(tab.id, onSave);
 
   return (
     <div className="table-designer navicat-designer">

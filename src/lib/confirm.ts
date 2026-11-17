@@ -14,9 +14,22 @@ export type ConfirmOptions = {
   danger?: boolean;
 };
 
-export type ConfirmState = (ConfirmOptions & {
-  resolve: (ok: boolean) => void;
-}) | null;
+/** 关闭未保存页签时的三选一结果 */
+export type CloseChoice = "cancel" | "discard" | "save";
+
+export type CloseConfirmOptions = ConfirmOptions & {
+  saveText?: string;
+  discardText?: string;
+};
+
+export type ConfirmState =
+  | { kind: "confirm"; options: ConfirmOptions; resolve: (ok: boolean) => void }
+  | {
+      kind: "close";
+      options: CloseConfirmOptions;
+      resolve: (choice: CloseChoice) => void;
+    }
+  | null;
 
 let current: ConfirmState = null;
 const listeners = new Set<(state: ConfirmState) => void>();
@@ -33,18 +46,33 @@ export function subscribeConfirm(fn: (state: ConfirmState) => void) {
   };
 }
 
+function settle(prev: ConfirmState) {
+  if (!prev) return;
+  if (prev.kind === "confirm") prev.resolve(false);
+  else prev.resolve("cancel");
+}
+
+/** 二选一确认 */
 export function confirmDialog(
   options: ConfirmOptions | string,
 ): Promise<boolean> {
   const opts = typeof options === "string" ? { message: options } : options;
   return new Promise<boolean>((resolve) => {
     // 已有待确认弹窗时按“取消”收尾，避免叠加出无法关闭的弹窗
-    if (current) {
-      const prev = current;
-      current = null;
-      prev.resolve(false);
-    }
-    current = { ...opts, resolve };
+    settle(current);
+    current = { kind: "confirm", options: opts, resolve };
+    emit();
+  });
+}
+
+/** 关闭未保存页签：取消 / 不保存并关闭 / 保存并关闭 */
+export function confirmCloseDialog(
+  options: CloseConfirmOptions | string,
+): Promise<CloseChoice> {
+  const opts = typeof options === "string" ? { message: options } : options;
+  return new Promise<CloseChoice>((resolve) => {
+    settle(current);
+    current = { kind: "close", options: opts, resolve };
     emit();
   });
 }
@@ -54,5 +82,15 @@ export function resolveConfirm(ok: boolean) {
   if (!pending) return;
   current = null;
   emit();
-  pending.resolve(ok);
+  if (pending.kind === "confirm") pending.resolve(ok);
+  else pending.resolve(ok ? "discard" : "cancel");
+}
+
+export function resolveClose(choice: CloseChoice) {
+  const pending = current;
+  if (!pending) return;
+  current = null;
+  emit();
+  if (pending.kind === "close") pending.resolve(choice);
+  else pending.resolve(choice === "cancel" ? false : true);
 }

@@ -9,6 +9,7 @@ import {
 import { emitTableDataChanged } from "../../lib/tableEvents";
 import { useWorkspaceStore, type DesignerTab } from "../../stores/workspaceStore";
 import { useModSaveShortcut } from "../../hooks/useModSaveShortcut";
+import { useTabSaver } from "../../hooks/useTabSaver";
 import type { RoutineType } from "../object-list/routineMeta";
 import {
   buildRoutineTemplateSql,
@@ -182,6 +183,8 @@ export function FunctionDesigner({ tab }: Props) {
       setSaving(false);
     }
   }
+
+  useTabSaver(tab.id, save);
 
   useModSaveShortcut(() => {
     if (!loading && !saving && !readonlyHint) void save();

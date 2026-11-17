@@ -29,6 +29,7 @@ import {
   type EditorKind,
 } from "./columnEditors";
 import { useModSaveShortcut } from "../../hooks/useModSaveShortcut";
+import { useTabSaver } from "../../hooks/useTabSaver";
 import { setGridViewSnapshot } from "./gridViewSnapshot";
 import { useColumnResize } from "./useColumnResize";
 import {
@@ -627,6 +628,8 @@ ORDER BY ordinal_position`;
   useModSaveShortcut(() => {
     if (dirty && !saving) void commit();
   }, Boolean(data) && dirty && !saving);
+
+  useTabSaver(tab.id, commit);
 
   async function copyText(text: string) {
     setClipboard(text);
