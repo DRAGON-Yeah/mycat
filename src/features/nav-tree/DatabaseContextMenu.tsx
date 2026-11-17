@@ -8,6 +8,7 @@ import {
 } from "../connections/sessionApi";
 import { downloadTextFile, isSaveCancelled } from "../import-export/csv";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { confirmDialog } from "../../lib/confirm";
 
 export type DbMenuTarget = {
   x: number;
@@ -254,11 +255,12 @@ export function DatabaseContextMenu({
         disabled={busy}
         onClick={() =>
           void run(async () => {
-            if (
-              !window.confirm(
-                `确定删除数据库「${database}」？此操作不可恢复。`,
-              )
-            ) {
+            const ok = await confirmDialog({
+              message: `确定删除数据库「${database}」？此操作不可恢复。`,
+              confirmText: "删除",
+              danger: true,
+            });
+            if (!ok) {
               return;
             }
             ensureContext();

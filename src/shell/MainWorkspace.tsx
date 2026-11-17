@@ -103,12 +103,12 @@ export function MainWorkspace() {
   }
 
   function closeMenuTab() {
-    if (tabMenu) closeTabsByIds([tabMenu.id]);
+    if (tabMenu) void closeTabsByIds([tabMenu.id]);
   }
 
   function closeMenuOthers() {
     if (!tabMenu) return;
-    closeTabsByIds(
+    void closeTabsByIds(
       closableTabs.filter((t) => t.id !== tabMenu.id).map((t) => t.id),
     );
   }
@@ -119,11 +119,11 @@ export function MainWorkspace() {
       (t) => t.kind === tabMenu.kind && t.id === tabMenu.id,
     );
     if (index < 0) return;
-    closeTabsByIds(closableTabs.slice(index + 1).map((t) => t.id));
+    void closeTabsByIds(closableTabs.slice(index + 1).map((t) => t.id));
   }
 
   function closeMenuAll() {
-    closeTabsByIds(closableTabs.map((t) => t.id));
+    void closeTabsByIds(closableTabs.map((t) => t.id));
   }
 
   function revealMenuTab() {
@@ -265,7 +265,7 @@ export function MainWorkspace() {
                     e.preventDefault();
                     e.stopPropagation();
                     const id = q.id;
-                    window.setTimeout(() => closeQueryTab(id), 0);
+                    window.setTimeout(() => void closeQueryTab(id), 0);
                   }}
                   onClick={(e) => {
                     e.preventDefault();
@@ -370,7 +370,7 @@ export function MainWorkspace() {
                     e.stopPropagation();
                     const id = t.id;
                     (document.activeElement as HTMLElement | null)?.blur?.();
-                    window.setTimeout(() => closeDesignerTab(id), 0);
+                    window.setTimeout(() => void closeDesignerTab(id), 0);
                   }}
                   onClick={(e) => {
                     e.preventDefault();

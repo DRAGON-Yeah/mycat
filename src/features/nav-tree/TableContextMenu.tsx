@@ -39,6 +39,7 @@ import {
   type MaintainOp,
 } from "./tableMenuActions";
 import { SimpleChartDialog } from "./SimpleChartDialog";
+import { confirmDialog } from "../../lib/confirm";
 
 export type TableMenuTarget = {
   x: number;
@@ -155,7 +156,7 @@ export function TableContextMenu({
         t.table === tableName,
     );
     for (const t of related) {
-      closeTab(t.id, { force: true });
+      void closeTab(t.id, { force: true });
     }
     const designers = designerTabs.filter(
       (t) =>
@@ -164,7 +165,7 @@ export function TableContextMenu({
         t.table === tableName,
     );
     for (const t of designers) {
-      closeDesignerTab(t.id, { force: true });
+      void closeDesignerTab(t.id, { force: true });
     }
   }
 
@@ -256,7 +257,12 @@ export function TableContextMenu({
   }
 
   async function deleteGroup(groupName: string) {
-    if (!window.confirm(`删除组「${groupName}」？（表不会被删除）`)) return;
+    const ok = await confirmDialog({
+      message: `删除组「${groupName}」？（表不会被删除）`,
+      confirmText: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     const nextMembership = { ...membership };
     for (const [k, v] of Object.entries(nextMembership)) {
       if (v === groupName) delete nextMembership[k];
@@ -640,12 +646,13 @@ export function TableContextMenu({
                     key={op}
                     type="button"
                     disabled={!maintainOps.includes(op)}
-                    onClick={() => {
-                      if (
-                        (op === "repair" || op === "optimize") &&
-                        !window.confirm(`${label}「${table}」可能锁表，继续？`)
-                      ) {
-                        return;
+                    onClick={async () => {
+                      if (op === "repair" || op === "optimize") {
+                        const ok = await confirmDialog({
+                          message: `${label}「${table}」可能锁表，继续？`,
+                          confirmText: "继续",
+                        });
+                        if (!ok) return;
                       }
                       void (async () => {
                         try {

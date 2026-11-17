@@ -86,6 +86,7 @@ import {
   IconTables,
   IconViews,
 } from "./TreeIcons";
+import { confirmDialog } from "../../lib/confirm";
 
 type PendingClose =
   | {
@@ -749,11 +750,12 @@ export function ConnectionTree() {
   }
 
   async function handleDeleteConnection(conn: ConnectionDto) {
-    if (
-      !window.confirm(`确定删除连接「${conn.name}」？此操作不可恢复。`)
-    ) {
-      return;
-    }
+    const ok = await confirmDialog({
+      message: `确定删除连接「${conn.name}」？此操作不可恢复。`,
+      confirmText: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     await finalizeCloseConnection(conn.id);
     await deleteConnection(conn.id);
     if (activeConnectionId === conn.id) clearConnection();
@@ -1836,13 +1838,19 @@ export function ConnectionTree() {
             onClick={() => {
               const { conn, database, query } = savedQueryMenu;
               setSavedQueryMenu(null);
-              if (!window.confirm(`删除已保存查询「${query.name}」？`)) return;
-              void deleteSavedQuery(query.id)
-                .then(() => loadSavedQueries(conn.id, database))
-                .catch((err) => {
-                  setToast(err instanceof Error ? err.message : String(err));
-                  window.setTimeout(() => setToast(null), 2500);
-                });
+              void confirmDialog({
+                message: `删除已保存查询「${query.name}」？`,
+                confirmText: "删除",
+                danger: true,
+              }).then((ok) => {
+                if (!ok) return;
+                return deleteSavedQuery(query.id)
+                  .then(() => loadSavedQueries(conn.id, database))
+                  .catch((err) => {
+                    setToast(err instanceof Error ? err.message : String(err));
+                    window.setTimeout(() => setToast(null), 2500);
+                  });
+              });
             }}
           >
             删除

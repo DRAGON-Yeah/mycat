@@ -158,7 +158,7 @@ export function ViewDesigner({ tab }: Props) {
           <button
             type="button"
             disabled={saving}
-            onClick={() => closeDesignerTab(tab.id)}
+            onClick={() => void closeDesignerTab(tab.id)}
           >
             关闭
           </button>

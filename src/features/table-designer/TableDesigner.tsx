@@ -977,7 +977,7 @@ export function TableDesigner({ tab }: Props) {
     // Exit/revert immediately — no native confirm (unreliable while a cell is focused).
     (document.activeElement as HTMLElement | null)?.blur?.();
     if (tab.mode === "create") {
-      closeDesignerTab(tab.id, { force: true });
+      void closeDesignerTab(tab.id, { force: true });
       return;
     }
     if (!dirty) return;

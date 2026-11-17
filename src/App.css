@@ -2910,6 +2910,21 @@ tr.is-inserted {
   width: min(560px, 94vw);
 }
 
+/* 应用内确认框（替代 window.confirm） */
+.modal.confirm-modal {
+  width: min(460px, 92vw);
+}
+
+.confirm-text {
+  margin: 0;
+  max-height: 40vh;
+  overflow: auto;
+  white-space: pre-line;
+  line-height: 1.65;
+  font-size: 13px;
+  color: var(--text);
+}
+
 .modal-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { AppShell } from "./shell/AppShell";
+import { ConfirmHost } from "./components/ConfirmHost";
 import { useUiStore } from "./stores/uiStore";
 import "./App.css";
 
@@ -15,7 +16,12 @@ function App() {
     return <div className="boot">加载中…</div>;
   }
 
-  return <AppShell />;
+  return (
+    <>
+      <AppShell />
+      <ConfirmHost />
+    </>
+  );
 }
 
 export default App;

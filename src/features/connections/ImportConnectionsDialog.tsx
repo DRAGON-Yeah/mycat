@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { downloadTextFile, isSaveCancelled } from "../import-export/csv";
 import { importConnections, type ConnectionExportItem } from "./api";
+import { confirmDialog } from "../../lib/confirm";
 
 type Props = {
   onClose: () => void;
@@ -87,9 +88,11 @@ export function ImportConnectionsDialog({ onClose, onImported }: Props) {
 
   async function onImport() {
     if (!picked) return;
-    const ok = window.confirm(
-      `即将导入 ${picked.items.length} 条连接。\n\n密码不会随文件导入，导入后请在「编辑连接」中补填。\n\n是否继续？`,
-    );
+    const ok = await confirmDialog({
+      title: "导入连接",
+      message: `即将导入 ${picked.items.length} 条连接。\n\n密码不会随文件导入，导入后请在「编辑连接」中补填。\n\n是否继续？`,
+      confirmText: "开始导入",
+    });
     if (!ok) {
       setInfo("已取消导入，可重新选择文件或修改后再试。");
       return;

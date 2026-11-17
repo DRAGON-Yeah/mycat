@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { ConnectionDto } from "../features/connections/types";
+import { confirmDialog } from "../lib/confirm";
 
 export type TableOpenOptions = {
   sortCol?: string;
@@ -178,7 +179,7 @@ type WorkspaceState = {
     mode: "create" | "alter";
   }) => string | null;
   setActiveDesigner: (id: string) => void;
-  closeDesignerTab: (id: string, opts?: { force?: boolean }) => boolean;
+  closeDesignerTab: (id: string, opts?: { force?: boolean }) => Promise<boolean>;
   markDesignerDirty: (id: string, dirty: boolean) => void;
   updateDesignerTab: (
     id: string,
@@ -199,10 +200,10 @@ type WorkspaceState = {
   }) => string | null;
   consumePendingQueryAutoRun: () => string | null;
   applyQueryContext: (connection: ConnectionDto, database: string) => void;
-  closeTab: (id: string, opts?: { force?: boolean }) => boolean;
-  closeQueryTab: (id: string, opts?: { force?: boolean }) => boolean;
+  closeTab: (id: string, opts?: { force?: boolean }) => Promise<boolean>;
+  closeQueryTab: (id: string, opts?: { force?: boolean }) => Promise<boolean>;
   /** Close several document tabs (query/table/designer ids) in one pass. */
-  closeTabsByIds: (ids: string[], opts?: { force?: boolean }) => boolean;
+  closeTabsByIds: (ids: string[], opts?: { force?: boolean }) => Promise<boolean>;
   setActiveTab: (id: string) => void;
   setActiveQuery: (id: string) => void;
   updateQueryTab: (
@@ -859,16 +860,19 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       selectionKind: "table",
     });
   },
-  closeDesignerTab: (id, opts) => {
+  closeDesignerTab: async (id, opts) => {
     const tab = get().designerTabs.find((t) => t.id === id);
     if (!tab) return false;
     if (!opts?.force && tab.dirty) {
       const obj = tab.kind === "view" ? "视图" : "表";
-      const ok = window.confirm(
-        tab.mode === "create"
-          ? `新建${obj}「${tab.table}」尚未保存，确定关闭并丢弃？`
-          : `设计器「${tab.table}」有未保存更改，确定关闭？`,
-      );
+      const ok = await confirmDialog({
+        message:
+          tab.mode === "create"
+            ? `新建${obj}「${tab.table}」尚未保存，确定关闭并丢弃？`
+            : `设计器「${tab.table}」有未保存更改，确定关闭？`,
+        confirmText: "关闭并丢弃",
+        danger: true,
+      });
       if (!ok) return false;
     }
     const designerTabs = get().designerTabs.filter((t) => t.id !== id);
@@ -1030,11 +1034,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       placeholderFeature: null,
       activeTabId: null,
     }),
-  closeTab: (id, opts) => {
+  closeTab: async (id, opts) => {
     const tab = get().tabs.find((t) => t.id === id);
     if (!tab) return false;
     if (!opts?.force && tab.dirty) {
-      const ok = window.confirm(`「${tab.table}」有未保存更改，确定关闭？`);
+      const ok = await confirmDialog({
+        message: `「${tab.table}」有未保存更改，确定关闭？`,
+        confirmText: "关闭并丢弃",
+        danger: true,
+      });
       if (!ok) return false;
     }
     const tabs = get().tabs.filter((t) => t.id !== id);
@@ -1056,14 +1064,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
     return true;
   },
-  closeQueryTab: (id, opts) => {
+  closeQueryTab: async (id, opts) => {
     const tab = get().queryTabs.find((t) => t.id === id);
     if (!tab) return false;
     if (!opts?.force && tab.dirty && tab.sql.trim()) {
       const label = tab.title?.trim() || "无标题";
-      const ok = window.confirm(
-        `「${label}」有未保存更改，关闭将丢失修改。确定关闭？`,
-      );
+      const ok = await confirmDialog({
+        message: `「${label}」有未保存更改，关闭将丢失修改。确定关闭？`,
+        confirmText: "关闭并丢弃",
+        danger: true,
+      });
       if (!ok) return false;
     }
     const queryTabs = get().queryTabs.filter((t) => t.id !== id);
@@ -1085,7 +1095,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
     return true;
   },
-  closeTabsByIds: (ids, opts) => {
+  closeTabsByIds: async (ids, opts) => {
     const targets = new Set(ids);
     if (targets.size === 0) return true;
     const state = get();
@@ -1097,26 +1107,26 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       (t) => targets.has(t.id) && t.dirty,
     );
     if (!opts?.force) {
-      for (const t of dirtyTables) {
-        if (!window.confirm(`「${t.table}」有未保存更改，确定关闭？`)) return false;
-      }
-      for (const t of dirtyQueries) {
-        const label = t.title?.trim() || "无标题";
-        if (
-          !window.confirm(
-            `「${label}」有未保存更改，关闭将丢失修改。确定关闭？`,
-          )
-        ) {
-          return false;
-        }
-      }
-      for (const t of dirtyDesigners) {
-        const obj = t.kind === "view" ? "视图" : "表";
-        const ok = window.confirm(
+      const labels = [
+        ...dirtyTables.map((t) => `· 表「${t.table}」`),
+        ...dirtyQueries.map((t) => `· 查询「${t.title?.trim() || "无标题"}」`),
+        ...dirtyDesigners.map((t) =>
           t.mode === "create"
-            ? `新建${obj}「${t.table}」尚未保存，确定关闭并丢弃？`
-            : `设计器「${t.table}」有未保存更改，确定关闭？`,
-        );
+            ? `· 新建${t.kind === "view" ? "视图" : "表"}「${t.table}」`
+            : `· 设计器「${t.table}」`,
+        ),
+      ];
+      if (labels.length > 0) {
+        // 一次确认全部，避免连续弹 N 个对话框
+        const shown = labels.slice(0, 8).join("\n");
+        const more =
+          labels.length > 8 ? `\n… 等共 ${labels.length} 个页签` : "";
+        const ok = await confirmDialog({
+          title: "关闭未保存的页签",
+          message: `以下页签有未保存更改，关闭将丢失修改：\n${shown}${more}\n\n确定全部关闭？`,
+          confirmText: "全部关闭",
+          danger: true,
+        });
         if (!ok) return false;
       }
     }
