@@ -3,12 +3,12 @@ use crate::meta::MetaDb;
 use crate::session::{opts_from_connection, SessionPool};
 use tauri::State;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn test_connection(opts: ConnectOpts) -> Result<(), String> {
     SessionPool::test_connect(&opts).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_connection(
     meta: State<'_, MetaDb>,
     pool: State<'_, SessionPool>,
@@ -18,12 +18,12 @@ pub fn open_connection(
     pool.open(&connection_id, opts).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn close_connection(pool: State<'_, SessionPool>, connection_id: String) -> Result<(), String> {
     pool.close(&connection_id).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_databases(
     pool: State<'_, SessionPool>,
     connection_id: String,
@@ -32,7 +32,7 @@ pub fn list_databases(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_schemas(
     pool: State<'_, SessionPool>,
     connection_id: String,
@@ -42,7 +42,7 @@ pub fn list_schemas(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_tables(
     meta: State<'_, MetaDb>,
     pool: State<'_, SessionPool>,
@@ -59,7 +59,7 @@ pub fn list_tables(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fetch_table_page(
     pool: State<'_, SessionPool>,
     connection_id: String,
@@ -87,7 +87,7 @@ pub fn fetch_table_page(
     .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn execute_sql(
     pool: State<'_, SessionPool>,
     connection_id: String,
@@ -104,12 +104,12 @@ pub fn execute_sql(
     result.map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn cancel_query(pool: State<'_, SessionPool>, connection_id: String) -> Result<(), String> {
     pool.cancel_query(&connection_id).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn apply_row_changes(
     pool: State<'_, SessionPool>,
     connection_id: String,

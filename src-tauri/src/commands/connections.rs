@@ -73,7 +73,7 @@ fn validate(input: &UpsertConnectionInput) -> AppResult<()> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_connections(state: State<'_, MetaDb>) -> Result<Vec<ConnectionDto>, String> {
     let rows = state.list_connections().map_err(|e| e.to_string())?;
     let mut out = Vec::new();
@@ -91,7 +91,7 @@ pub fn list_connections(state: State<'_, MetaDb>) -> Result<Vec<ConnectionDto>, 
     Ok(out)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn upsert_connection(
     state: State<'_, MetaDb>,
     input: UpsertConnectionInput,
@@ -155,7 +155,7 @@ pub fn upsert_connection(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_connection(state: State<'_, MetaDb>, id: String) -> Result<(), String> {
     if let Some(existing) = state.get_connection(&id).map_err(|e| e.to_string())? {
         if let Some(secret_ref) = existing.secret_ref {
@@ -174,7 +174,7 @@ pub struct ConnectionSecretsDto {
 }
 
 /// Reveal stored secrets for the edit form (local vault only).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_connection_secrets(
     state: State<'_, MetaDb>,
     id: String,
@@ -225,7 +225,7 @@ pub struct ConnectionExportItem {
     pub password: Option<String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn export_connections(state: State<'_, MetaDb>) -> Result<Vec<ConnectionExportItem>, String> {
     let rows = state.list_connections().map_err(|e| e.to_string())?;
     Ok(rows
@@ -252,7 +252,7 @@ pub fn export_connections(state: State<'_, MetaDb>) -> Result<Vec<ConnectionExpo
         .collect())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_connections(
     state: State<'_, MetaDb>,
     items: Vec<ConnectionExportItem>,

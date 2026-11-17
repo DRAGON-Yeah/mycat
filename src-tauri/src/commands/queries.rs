@@ -46,7 +46,7 @@ fn to_dto(r: SavedQueryRecord) -> SavedQueryDto {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_saved_queries(
     state: State<'_, MetaDb>,
     connection_id: String,
@@ -58,7 +58,7 @@ pub fn list_saved_queries(
     Ok(rows.into_iter().map(to_dto).collect())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn upsert_saved_query(
     state: State<'_, MetaDb>,
     input: UpsertSavedQueryInput,
@@ -97,12 +97,12 @@ pub fn upsert_saved_query(
     Ok(to_dto(record))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_saved_query(state: State<'_, MetaDb>, id: String) -> Result<(), String> {
     state.delete_saved_query(&id).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_saved_query(
     state: State<'_, MetaDb>,
     id: String,

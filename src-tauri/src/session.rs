@@ -5,7 +5,7 @@ use crate::tunnel::{SshParams, SshTunnel};
 use crate::vault;
 use rusqlite::InterruptHandle;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 struct LiveSession {
     session: Box<dyn DriverSession>,
@@ -13,7 +13,8 @@ struct LiveSession {
 }
 
 pub struct SessionPool {
-    sessions: Mutex<HashMap<String, LiveSession>>,
+    /// 每个连接独立加锁：慢查询只阻塞同一连接，不会卡住其它连接/全局表
+    sessions: Mutex<HashMap<String, Arc<Mutex<LiveSession>>>>,
     /// Resolved opts for side-channel KILL / pg_cancel (tunnel-rewritten).
     cancel_opts: Mutex<HashMap<String, ConnectOpts>>,
     /// connection_id → backend pid while a query is running (0 = sqlite / unknown).
@@ -56,10 +57,10 @@ impl SessionPool {
             .map_err(|_| AppError::Message("session lock".into()))?;
         guard.insert(
             connection_id.to_string(),
-            LiveSession {
+            Arc::new(Mutex::new(LiveSession {
                 session,
                 _tunnel: tunnel,
-            },
+            })),
         );
         drop(guard);
 
@@ -105,13 +106,20 @@ impl SessionPool {
         connection_id: &str,
         f: impl FnOnce(&dyn DriverSession) -> AppResult<R>,
     ) -> AppResult<R> {
-        let guard = self
-            .sessions
+        // 只在取句柄时持有全局表锁，真正的 I/O 在连接自己的锁内执行
+        let handle = {
+            let guard = self
+                .sessions
+                .lock()
+                .map_err(|_| AppError::Message("session lock".into()))?;
+            guard
+                .get(connection_id)
+                .cloned()
+                .ok_or_else(|| AppError::Message("连接未打开".into()))?
+        };
+        let live = handle
             .lock()
-            .map_err(|_| AppError::Message("session lock".into()))?;
-        let live = guard
-            .get(connection_id)
-            .ok_or_else(|| AppError::Message("连接未打开".into()))?;
+            .map_err(|_| AppError::Message("session busy".into()))?;
         f(live.session.as_ref())
     }
 

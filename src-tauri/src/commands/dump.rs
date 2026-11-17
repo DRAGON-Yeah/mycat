@@ -138,7 +138,7 @@ fn export_all_pages(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn dump_table_sql(
     pool: State<'_, SessionPool>,
     connection_id: String,
