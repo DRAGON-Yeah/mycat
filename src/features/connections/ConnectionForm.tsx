@@ -72,16 +72,20 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
   const [info, setInfo] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  /** 测试连接耗时较长时才显示遮罩，避免闪烁 */
+  /** 测试连接遮罩：立即显示，且至少停留 400ms 避免一闪而过 */
   const [busyVisible, setBusyVisible] = useState(false);
+  const busyStartRef = useRef(0);
   const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
-    if (!testing) {
-      setBusyVisible(false);
+    if (testing) {
+      busyStartRef.current = Date.now();
+      setBusyVisible(true);
       return;
     }
-    const timer = window.setTimeout(() => setBusyVisible(true), 200);
+    const elapsed = Date.now() - busyStartRef.current;
+    const rest = Math.max(0, 400 - elapsed);
+    const timer = window.setTimeout(() => setBusyVisible(false), rest);
     return () => window.clearTimeout(timer);
   }, [testing]);
 
