@@ -248,9 +248,10 @@ export function buildCreateEventSql(args: {
     parts.push(`COMMENT '${args.comment.trim().replace(/'/g, "\\'")}'`);
   }
   let body = args.body.trim();
-  if (!body) body = "";
-  if (body && !/;\s*$/.test(body)) body = `${body};`;
-  parts.push(`DO ${body || ";"}`);
+  // 空事件体生成 `DO ;` 是非法 SQL，退化为空语句块
+  if (!body) body = "BEGIN\nEND";
+  if (!/;\s*$/.test(body)) body = `${body};`;
+  parts.push(`DO ${body}`);
   const sql = parts.join("\n");
   return sql.endsWith(";") ? sql : `${sql};`;
 }

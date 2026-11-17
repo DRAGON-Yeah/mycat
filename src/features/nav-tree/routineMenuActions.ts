@@ -206,8 +206,9 @@ export async function runRoutine(args: {
   nullFlags?: boolean[];
 }): Promise<{ columns: string[]; rows: unknown[][] }> {
   const { conn, database, name, routineType, values, nullFlags } = args;
+  // 留空按 NULL 传参，避免 INT 等类型收到 '' 报 Incorrect integer value
   const literals = values.map((v, i) =>
-    nullFlags?.[i] ? "NULL" : sqlLiteral(v),
+    nullFlags?.[i] || !String(v ?? "").trim() ? "NULL" : sqlLiteral(v),
   );
   const sql = buildRunSql({
     engine: String(conn.engine),

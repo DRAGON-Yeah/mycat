@@ -47,7 +47,9 @@ export function EventDesigner({ tab }: Props) {
   >("NOT PRESERVE");
   const [comment, setComment] = useState("");
 
-  const [scheduleKind, setScheduleKind] = useState<EventScheduleKind>("AT");
+  // 默认 EVERY 1 DAY：AT CURRENT_TIMESTAMP + NOT PRESERVE 会导致事件保存后
+  // 立即执行并被 MySQL 自动删除，用户会看到“已保存”但列表里没有
+  const [scheduleKind, setScheduleKind] = useState<EventScheduleKind>("EVERY");
   const [atDatetime, setAtDatetime] = useState("CURRENT_TIMESTAMP");
   const [atIntervalOn, setAtIntervalOn] = useState(false);
   const [atIntervalValue, setAtIntervalValue] = useState("1");
@@ -69,7 +71,7 @@ export function EventDesigner({ tab }: Props) {
   const [endsIntervalUnit, setEndsIntervalUnit] =
     useState<EventIntervalUnit>("DAY");
 
-  const [body, setBody] = useState("");
+  const [body, setBody] = useState("BEGIN\nEND");
   const [loading, setLoading] = useState(tab.mode === "alter");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
