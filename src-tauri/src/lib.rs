@@ -91,6 +91,7 @@ pub fn run() {
             commands::session::apply_row_changes,
             commands::session::get_table_ddl,
             commands::dump::dump_table_sql,
+            commands::files::write_text_file,
             commands::queries::list_saved_queries,
             commands::queries::upsert_saved_query,
             commands::queries::delete_saved_query,

@@ -75,6 +75,7 @@ import {
 } from "./BackupsFolderContextMenu";
 import { BackupWizard } from "../backup/BackupWizard";
 import { RunSqlFileDialog } from "../sqlfile/RunSqlFileDialog";
+import { DumpSqlFileDialog } from "../sqlfile/DumpSqlFileDialog";
 import { TreeObjectFolder } from "./TreeObjectFolder";
 import type { RoutineType } from "../object-list/routineMeta";
 import { emitTableDataChanged } from "../../lib/tableEvents";
@@ -206,6 +207,11 @@ export function ConnectionTree() {
   const [sqlFileRun, setSqlFileRun] = useState<{
     conn: ConnectionDto;
     database: string;
+  } | null>(null);
+  const [dumpSqlFile, setDumpSqlFile] = useState<{
+    conn: ConnectionDto;
+    database: string;
+    includeData: boolean;
   } | null>(null);
   /** Long-running connect/open: overlay label + delayed visibility */
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
@@ -1612,6 +1618,9 @@ export function ConnectionTree() {
           onRunSqlFile={(conn, database) =>
             setSqlFileRun({ conn, database })
           }
+          onDumpSqlFile={(conn, database, includeData) =>
+            setDumpSqlFile({ conn, database, includeData })
+          }
           onMessage={(msg) => {
             setToast(msg);
             window.setTimeout(() => setToast(null), 2500);
@@ -1735,6 +1744,19 @@ export function ConnectionTree() {
           conn={sqlFileRun.conn}
           database={sqlFileRun.database}
           onClose={() => setSqlFileRun(null)}
+          onMessage={(msg) => {
+            setToast(msg);
+            window.setTimeout(() => setToast(null), 2500);
+          }}
+        />
+      )}
+
+      {dumpSqlFile && (
+        <DumpSqlFileDialog
+          conn={dumpSqlFile.conn}
+          database={dumpSqlFile.database}
+          includeData={dumpSqlFile.includeData}
+          onClose={() => setDumpSqlFile(null)}
           onMessage={(msg) => {
             setToast(msg);
             window.setTimeout(() => setToast(null), 2500);
