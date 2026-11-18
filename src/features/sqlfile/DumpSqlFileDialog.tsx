@@ -162,8 +162,7 @@ export function DumpSqlFileDialog({
       }
 
       appendLog("info", `写入文件 ${filePath}（${encoding}）`);
-      const bytes = new TextEncoder().encode(result.sql).length;
-      await writeTextFileEncoded(filePath, result.sql, encoding);
+      const bytes = await writeTextFileEncoded(filePath, result.sql, encoding);
       appendLog(
         "ok",
         `已写入 ${(bytes / 1024).toFixed(1)} KB${

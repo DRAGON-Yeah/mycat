@@ -169,6 +169,9 @@ export function ObjectListGrid() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [runOpen, setRunOpen] = useState(false);
   const [fnWizardOpen, setFnWizardOpen] = useState(false);
+  /** 多选（⌘/Ctrl+A 全选、⌘/Ctrl+点击、Shift+点击）；selectedTable 为“主选中项”。 */
+  const [selectedNames, setSelectedNames] = useState<string[]>([]);
+  const anchorRef = useRef<string | null>(null);
   const filterRef = useRef<HTMLInputElement>(null);
   const listResetKey = useMemo(
     () => `${connection?.id ?? ""}:${database ?? ""}:${folder ?? ""}`,
@@ -196,6 +199,54 @@ export function ObjectListGrid() {
       : wantViews
         ? "视图"
         : "表";
+
+  /** 当前可见（过滤后）的行顺序，用于全选 / Shift 区间选择。 */
+  const visibleNames = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (wantEvents) {
+      return events
+        .filter((ev) => ev.name.toLowerCase().includes(q))
+        .map((ev) => ev.name);
+    }
+    if (wantFunctions) {
+      return routines
+        .filter((r) => r.name.toLowerCase().includes(q))
+        .map((r) => r.name);
+    }
+    return tables
+      .filter((t) => t.name.toLowerCase().includes(q))
+      .slice()
+      .sort((a, b) => {
+        const ga = groupMap[a.name] || "";
+        const gb = groupMap[b.name] || "";
+        if (ga !== gb) return ga.localeCompare(gb, "zh");
+        return a.name.localeCompare(b.name, "zh");
+      })
+      .map((t) => t.name);
+  }, [tables, routines, events, filter, wantEvents, wantFunctions, groupMap]);
+
+  // 主选中项变化（树节点点击、设计器打开等）时同步多选状态。
+  useEffect(() => {
+    if (!selectedTable) {
+      setSelectedNames((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+    anchorRef.current = selectedTable;
+    setSelectedNames((prev) =>
+      prev.includes(selectedTable) ? prev : [selectedTable],
+    );
+  }, [selectedTable]);
+
+  // 数据刷新后丢弃已不存在的选中项（列表为空时可能是加载中/过滤无结果，保留原选中）。
+  useEffect(() => {
+    if (visibleNames.length === 0) return;
+    setSelectedNames((prev) => {
+      if (prev.length === 0) return prev;
+      const visible = new Set(visibleNames);
+      const next = prev.filter((name) => visible.has(name));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [visibleNames]);
 
   useEffect(() => {
     setFilter(objectListFilter);
@@ -243,6 +294,24 @@ export function ObjectListGrid() {
         return;
       }
       const key = e.key.toLowerCase();
+      if (key === "a") {
+        // 仅在工作区对象列表获得焦点（或焦点在页面空白处）时全选，
+        // 避免抢走查询编辑器 / 数据表格里的原生全选。
+        const active = document.activeElement as HTMLElement | null;
+        const inGrid = !!active?.closest?.(".object-list-grid");
+        const idle = !active || active === document.body;
+        if ((!inGrid && !idle) || document.querySelector(".modal-backdrop")) {
+          return;
+        }
+        if (visibleNames.length === 0) return;
+        e.preventDefault();
+        setSelectedNames(visibleNames);
+        anchorRef.current = visibleNames[0] ?? null;
+        if (!selectedTable || !visibleNames.includes(selectedTable)) {
+          selectTableMeta(visibleNames[0] ?? null);
+        }
+        return;
+      }
       if (key === "r") {
         e.preventDefault();
         setTick((x) => x + 1);
@@ -331,6 +400,8 @@ export function ObjectListGrid() {
     wantFunctions,
     wantEvents,
     routineMetaMap,
+    visibleNames,
+    selectTableMeta,
     openTable,
     openTableDesigner,
     openViewDesigner,
@@ -503,6 +574,37 @@ export function ObjectListGrid() {
   function showToast(msg: string) {
     setToast(msg);
     window.setTimeout(() => setToast(null), 2800);
+  }
+
+  /** 行点击：普通=单选，⌘/Ctrl=切换，Shift=区间选择。 */
+  function handleRowSelect(name: string, e: React.MouseEvent) {
+    if (e.shiftKey && anchorRef.current) {
+      const from = visibleNames.indexOf(anchorRef.current);
+      const to = visibleNames.indexOf(name);
+      if (from >= 0 && to >= 0) {
+        const [start, end] = from <= to ? [from, to] : [to, from];
+        setSelectedNames(visibleNames.slice(start, end + 1));
+        selectTableMeta(name);
+        return;
+      }
+    }
+    if (e.metaKey || e.ctrlKey) {
+      const has = selectedNames.includes(name);
+      const next = has
+        ? selectedNames.filter((n) => n !== name)
+        : [...selectedNames, name];
+      setSelectedNames(next);
+      anchorRef.current = name;
+      if (!has) {
+        selectTableMeta(name);
+      } else if (selectedTable === name) {
+        selectTableMeta(next[next.length - 1] ?? null);
+      }
+      return;
+    }
+    setSelectedNames([name]);
+    anchorRef.current = name;
+    selectTableMeta(name);
   }
 
   function completeFnWizard(result: FunctionWizardResult) {
@@ -720,6 +822,11 @@ export function ObjectListGrid() {
           <span className="object-list-title">
             对象 · {title}
             <span className="object-list-count">{count}</span>
+            {selectedNames.length > 1 && (
+              <span className="object-list-selected">
+                已选 {selectedNames.length} 项
+              </span>
+            )}
           </span>
         </div>
         <input
@@ -797,9 +904,11 @@ export function ObjectListGrid() {
                     <tr
                       key={`event-${ev.name}`}
                       className={
-                        selectedTable === ev.name ? "is-selected" : undefined
+                        selectedNames.includes(ev.name)
+                          ? "is-selected"
+                          : undefined
                       }
-                      onClick={() => selectTableMeta(ev.name)}
+                      onClick={(e) => handleRowSelect(ev.name, e)}
                       onDoubleClick={() =>
                         openEventDesigner({
                           connection,
@@ -852,9 +961,11 @@ export function ObjectListGrid() {
                     <tr
                       key={`${r.routineType}-${r.name}`}
                       className={
-                        selectedTable === r.name ? "is-selected" : undefined
+                        selectedNames.includes(r.name)
+                          ? "is-selected"
+                          : undefined
                       }
-                      onClick={() => selectTableMeta(r.name)}
+                      onClick={(e) => handleRowSelect(r.name, e)}
                       onDoubleClick={() =>
                         openFunctionDesigner({
                           connection,
@@ -915,9 +1026,11 @@ export function ObjectListGrid() {
                       <tr
                         key={`${t.kind}-${t.name}`}
                         className={
-                          selectedTable === t.name ? "is-selected" : undefined
+                          selectedNames.includes(t.name)
+                            ? "is-selected"
+                            : undefined
                         }
-                        onClick={() => selectTableMeta(t.name)}
+                        onClick={(e) => handleRowSelect(t.name, e)}
                         onDoubleClick={() => openTable(t.name)}
                         onContextMenu={(e) => {
                           e.preventDefault();

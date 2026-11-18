@@ -5177,6 +5177,15 @@ tr.is-inserted {
   font-size: 12px;
 }
 
+.object-list-selected {
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+
 .object-list-filter {
   border: 1px solid var(--border);
   background: var(--bg-elevated);
