@@ -92,7 +92,7 @@ npm run build:mac:intel  # 仅 Intel
 
 ```text
 src-tauri/target/universal-apple-darwin/release/bundle/macos/Mycat.app
-src-tauri/target/universal-apple-darwin/release/bundle/dmg/Mycat_0.1.0_universal.dmg
+src-tauri/target/universal-apple-darwin/release/bundle/dmg/Mycat_0.2.0_universal.dmg
 ```
 
 仅 Apple Silicon 时路径为 `src-tauri/target/aarch64-apple-darwin/release/bundle/`，Intel 为 `x86_64-apple-darwin`。
@@ -113,7 +113,7 @@ npm run build:win
 产物：
 
 ```text
-src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\Mycat_0.1.0_x64-setup.exe
+src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\Mycat_0.2.0_x64-setup.exe
 ```
 
 安装包为 NSIS、`currentUser` 安装模式，语言为简体中文 + English。
