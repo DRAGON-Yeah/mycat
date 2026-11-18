@@ -4,7 +4,7 @@ use crate::meta::MetaDb;
 use crate::tunnel::{SshParams, SshTunnel};
 use crate::vault;
 use rusqlite::InterruptHandle;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 struct LiveSession {
@@ -23,6 +23,8 @@ pub struct SessionPool {
     active_pids: Mutex<HashMap<String, i64>>,
     /// SQLite interrupt handles (callable while Connection is busy).
     sqlite_interrupts: Mutex<HashMap<String, InterruptHandle>>,
+    /// connection_id 集合：批量执行 SQL 文件时被请求停止。
+    batch_cancel: Mutex<HashSet<String>>,
 }
 
 impl SessionPool {
@@ -33,6 +35,7 @@ impl SessionPool {
             open_opts: Mutex::new(HashMap::new()),
             active_pids: Mutex::new(HashMap::new()),
             sqlite_interrupts: Mutex::new(HashMap::new()),
+            batch_cancel: Mutex::new(HashSet::new()),
         }
     }
 
@@ -129,6 +132,9 @@ impl SessionPool {
         if let Ok(mut m) = self.sqlite_interrupts.lock() {
             m.remove(connection_id);
         }
+        if let Ok(mut m) = self.batch_cancel.lock() {
+            m.remove(connection_id);
+        }
         Ok(())
     }
 
@@ -168,6 +174,33 @@ impl SessionPool {
     pub fn end_query(&self, connection_id: &str) {
         if let Ok(mut pids) = self.active_pids.lock() {
             pids.remove(connection_id);
+        }
+    }
+
+    /// 批量执行开始：清掉上一次的停止标记。
+    pub fn begin_batch(&self, connection_id: &str) {
+        if let Ok(mut flags) = self.batch_cancel.lock() {
+            flags.remove(connection_id);
+        }
+    }
+
+    /// 请求停止批量执行（当前语句跑完后生效）。
+    pub fn cancel_batch(&self, connection_id: &str) {
+        if let Ok(mut flags) = self.batch_cancel.lock() {
+            flags.insert(connection_id.to_string());
+        }
+    }
+
+    pub fn is_batch_cancelled(&self, connection_id: &str) -> bool {
+        self.batch_cancel
+            .lock()
+            .map(|flags| flags.contains(connection_id))
+            .unwrap_or(false)
+    }
+
+    pub fn clear_batch(&self, connection_id: &str) {
+        if let Ok(mut flags) = self.batch_cancel.lock() {
+            flags.remove(connection_id);
         }
     }
 

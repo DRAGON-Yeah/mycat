@@ -74,6 +74,39 @@ export function cancelQuery(connectionId: string) {
   return invoke<void>("cancel_query", { connectionId });
 }
 
+export type BatchStatementOutcome = {
+  ok: boolean;
+  rowsAffected: number;
+  /** 多语句单包发送时没有单条耗时 */
+  elapsedMs: number | null;
+  error: string | null;
+};
+
+export type BatchOutcome = {
+  results: BatchStatementOutcome[];
+  stopped: boolean;
+  cancelled: boolean;
+};
+
+/** 一次 IPC 执行多条语句（同一会话、只做一次 USE），用于运行 SQL 文件。 */
+export function executeSqlBatch(
+  connectionId: string,
+  statements: string[],
+  database?: string | null,
+  continueOnError = true,
+) {
+  return invoke<BatchOutcome>("execute_sql_batch", {
+    connectionId,
+    statements,
+    database: database?.trim() || null,
+    continueOnError,
+  });
+}
+
+export function cancelSqlBatch(connectionId: string) {
+  return invoke<void>("cancel_sql_batch", { connectionId });
+}
+
 export type RowChange = {
   op: "update" | "insert" | "delete" | string;
   pkColumns: string[];

@@ -77,6 +77,15 @@ pub struct QueryOutcome {
     pub elapsed_ms: u128,
 }
 
+/// 一次多语句请求的执行结果。
+#[derive(Debug, Clone, Default)]
+pub struct MultiOutcome {
+    /// 每条成功语句的受影响行数（按执行顺序）
+    pub affected: Vec<i64>,
+    /// 中途出错时：出错语句在本次请求中的下标（0-based）与错误信息
+    pub error: Option<(usize, String)>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RowChange {
@@ -104,6 +113,17 @@ pub trait DriverSession: Send {
         filter_value: Option<&str>,
     ) -> AppResult<RowsPage>;
     fn execute_sql(&self, sql: &str) -> AppResult<QueryOutcome>;
+    /// 是否支持一次发送多条语句（MySQL 多语句协议）。
+    fn supports_multi_statement(&self) -> bool {
+        false
+    }
+    /// 一次发送多条语句（用 `;` 连接），返回每条语句的受影响行数。
+    /// 出错时已执行的语句不回滚，错误下标用于定位失败语句。
+    fn execute_sql_multi(&self, _sql: &str) -> AppResult<MultiOutcome> {
+        Err(crate::error::AppError::Message(
+            "当前引擎不支持多语句执行".into(),
+        ))
+    }
     /// Select schema/database for subsequent unqualified SQL (MySQL USE / PG search_path).
     fn use_database(&self, _database: Option<&str>) -> AppResult<()> {
         Ok(())

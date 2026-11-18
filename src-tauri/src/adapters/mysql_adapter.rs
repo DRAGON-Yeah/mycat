@@ -1,5 +1,6 @@
 use super::{
-    ColumnMeta, ConnectOpts, DbObject, DriverSession, QueryOutcome, RowChange, RowsPage,
+    ColumnMeta, ConnectOpts, DbObject, DriverSession, MultiOutcome, QueryOutcome, RowChange,
+    RowsPage,
 };
 use crate::error::{AppError, AppResult};
 use mysql::prelude::*;
@@ -403,6 +404,59 @@ impl DriverSession for MysqlSession {
         })
     }
 
+    fn supports_multi_statement(&self) -> bool {
+        true
+    }
+
+    /// 一次把多条语句发给服务器（CLIENT_MULTI_STATEMENTS），按结果集逐条统计。
+    /// 比逐条往返快一个数量级，且能精确定位出错的是第几条。
+    fn execute_sql_multi(&self, sql: &str) -> AppResult<MultiOutcome> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::Message("mysql lock".into()))?;
+
+        let mut result = match conn.query_iter(sql) {
+            Ok(result) => result,
+            Err(err) => {
+                // 服务端拒绝第一条语句：连接仍然可用，按第 0 条失败返回；
+                // 网络/协议错误则上抛，避免在已损坏的连接上继续发语句
+                if matches!(&err, mysql::Error::MySqlError(_)) {
+                    return Ok(MultiOutcome {
+                        affected: Vec::new(),
+                        error: Some((0, err.to_string())),
+                    });
+                }
+                return Err(err.into());
+            }
+        };
+
+        let mut affected = Vec::with_capacity(16);
+        let mut error = None;
+        loop {
+            let Some(mut set) = result.iter() else {
+                break;
+            };
+            // 必须在消费行之前取，消费完会推进到下一个结果集
+            let rows = set.affected_rows() as i64;
+            let mut set_error = None;
+            for row in set.by_ref() {
+                if let Err(err) = row {
+                    set_error = Some(err.to_string());
+                    break;
+                }
+            }
+            drop(set);
+            if let Some(message) = set_error {
+                error = Some((affected.len(), message));
+                break;
+            }
+            affected.push(rows);
+        }
+
+        Ok(MultiOutcome { affected, error })
+    }
+
     fn apply_row_changes(
         &self,
         database: Option<&str>,
@@ -685,6 +739,64 @@ mod tests {
 
         pool.close("c1").expect("close");
         assert!(pool.with_session("c1", |s| s.ping()).is_err());
+    }
+
+    /// 多语句单包：逐条统计受影响行数，并能定位出错语句。
+    #[test]
+    fn mysql_live_multi_statement() {
+        let Some(opts) = live_opts() else {
+            return;
+        };
+        let session = MysqlSession::connect(&opts).expect("connect");
+        session
+            .execute_sql(
+                "DROP DATABASE IF EXISTS mycat_batch;
+                 CREATE DATABASE mycat_batch;
+                 CREATE TABLE mycat_batch.t (id INT PRIMARY KEY, v VARCHAR(32));",
+            )
+            .expect("setup");
+        session.use_database(Some("mycat_batch")).expect("use");
+
+        let out = session
+            .execute_sql_multi(
+                "INSERT INTO t VALUES (1,'a');\nINSERT INTO t VALUES (2,'b');\nINSERT INTO t VALUES (3,'c')",
+            )
+            .expect("multi");
+        assert_eq!(out.affected, vec![1, 1, 1]);
+        assert!(out.error.is_none());
+
+        // 第 2 条主键冲突：前 1 条成功，错误下标 1，连接仍可用
+        let out = session
+            .execute_sql_multi(
+                "INSERT INTO t VALUES (4,'d');\nINSERT INTO t VALUES (1,'dup');\nINSERT INTO t VALUES (5,'e')",
+            )
+            .expect("multi with error");
+        assert_eq!(out.affected, vec![1]);
+        let (idx, msg) = out.error.expect("error");
+        assert_eq!(idx, 1);
+        assert!(msg.contains("Duplicate"), "{msg}");
+
+        let out = session
+            .execute_sql_multi("INSERT INTO t VALUES (5,'e')")
+            .expect("reuse");
+        assert_eq!(out.affected, vec![1]);
+
+        // 首条语句就报错
+        let out = session
+            .execute_sql_multi("SELECT * FROM no_such_table; SELECT 1")
+            .expect("first error");
+        assert_eq!(out.error.expect("error").0, 0);
+
+        // SELECT 结果集也要能跳过并推进到下一条
+        let out = session
+            .execute_sql_multi("SELECT * FROM t; INSERT INTO t VALUES (6,'f')")
+            .expect("select + insert");
+        assert_eq!(out.affected.len(), 2);
+        assert_eq!(out.affected[1], 1);
+
+        session
+            .execute_sql("DROP DATABASE mycat_batch")
+            .expect("cleanup");
     }
 
     #[test]

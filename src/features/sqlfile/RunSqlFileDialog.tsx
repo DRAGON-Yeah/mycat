@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
 import type { ConnectionDto } from "../connections/types";
+import { cancelSqlBatch } from "../connections/sessionApi";
 import {
   countSqlStatements,
   runSqlFile,
+  type SqlFileLogEntry,
   type SqlFileLogLevel,
 } from "./runSqlFile";
 
@@ -27,7 +29,10 @@ const ENCODINGS: { value: string; label: string }[] = [
   { value: "iso-8859-1", label: "latin1" },
 ];
 
-const MAX_LOG_LINES = 5000;
+const MAX_LOG_LINES = 20000;
+/** 日志行高（与 .sqlfile-log-line 的 height 保持一致），用于虚拟滚动 */
+const LOG_ROW_HEIGHT = 18;
+const LOG_OVERSCAN = 20;
 
 type LogLine = {
   id: number;
@@ -85,6 +90,16 @@ export function RunSqlFileDialog({ conn, database, onClose, onMessage }: Props) 
   const cancelRef = useRef({ cancelled: false });
   const startedAtRef = useRef(0);
   const logListRef = useRef<HTMLDivElement>(null);
+  /** 日志区滚动位置（虚拟滚动只渲染可见行） */
+  const [logView, setLogView] = useState({ top: 0, height: 320 });
+  /** 用户是否停在底部：是则自动跟随新日志 */
+  const followTailRef = useRef(true);
+  const progressFrameRef = useRef(0);
+  const pendingProgressRef = useRef<{
+    done: number;
+    total: number;
+    failed: number;
+  } | null>(null);
 
   const decoded = useMemo(
     () => (bytes ? decodeBytes(bytes, encoding) : null),
@@ -109,22 +124,72 @@ export function RunSqlFileDialog({ conn, database, onClose, onMessage }: Props) 
 
   useEffect(() => {
     const el = logListRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    const sync = () => {
+      setLogView({ top: el.scrollTop, height: el.clientHeight });
+      followTailRef.current =
+        el.scrollHeight - el.scrollTop - el.clientHeight < LOG_ROW_HEIGHT * 2;
+    };
+    sync();
+    el.addEventListener("scroll", sync, { passive: true });
+    const observer = new ResizeObserver(sync);
+    observer.observe(el);
+    return () => {
+      el.removeEventListener("scroll", sync);
+      observer.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    const el = logListRef.current;
+    if (!el || !followTailRef.current) return;
+    el.scrollTop = el.scrollHeight;
   }, [logs]);
 
-  function appendLog(level: SqlFileLogLevel, text: string) {
-    logIdRef.current += 1;
-    const line: LogLine = {
-      id: logIdRef.current,
-      level,
-      time: new Date().toLocaleTimeString(),
-      text,
-    };
+  useEffect(
+    () => () => {
+      if (progressFrameRef.current) {
+        cancelAnimationFrame(progressFrameRef.current);
+        progressFrameRef.current = 0;
+      }
+    },
+    [],
+  );
+
+  /** 进度更新合并到下一帧，避免每条语句都触发一次渲染 */
+  function pushProgress(done: number, total: number, failed: number) {
+    pendingProgressRef.current = { done, total, failed };
+    if (progressFrameRef.current) return;
+    progressFrameRef.current = requestAnimationFrame(() => {
+      progressFrameRef.current = 0;
+      const next = pendingProgressRef.current;
+      if (!next) return;
+      pendingProgressRef.current = null;
+      setProgress((p) => ({
+        ...p,
+        ...next,
+        elapsedMs: Date.now() - startedAtRef.current,
+      }));
+    });
+  }
+
+  function appendLogs(entries: SqlFileLogEntry[]) {
+    if (entries.length === 0) return;
+    const time = new Date().toLocaleTimeString();
+    const lines: LogLine[] = entries.map((entry) => {
+      logIdRef.current += 1;
+      return { id: logIdRef.current, level: entry.level, time, text: entry.text };
+    });
     setLogs((prev) => {
-      const next = [...prev, line];
-      return next.length > MAX_LOG_LINES
-        ? next.slice(next.length - MAX_LOG_LINES)
-        : next;
+      const next = prev.concat(lines);
+      if (next.length <= MAX_LOG_LINES) return next;
+      const overflow = next.length - MAX_LOG_LINES;
+      // 裁剪时保留被裁掉的错误行，避免失败信息被冲掉
+      const errors = next
+        .slice(0, overflow)
+        .filter((line) => line.level === "error");
+      const kept = next.slice(overflow);
+      return errors.length > 0 ? errors.concat(kept) : kept;
     });
   }
 
@@ -174,8 +239,11 @@ export function RunSqlFileDialog({ conn, database, onClose, onMessage }: Props) 
     });
     startedAtRef.current = Date.now();
     cancelRef.current = { cancelled: false };
+    followTailRef.current = true;
 
-    if (decoded.warning) appendLog("warn", decoded.warning);
+    if (decoded.warning) {
+      appendLogs([{ level: "warn", text: decoded.warning }]);
+    }
 
     try {
       const result = await runSqlFile({
@@ -187,15 +255,8 @@ export function RunSqlFileDialog({ conn, database, onClose, onMessage }: Props) 
         multipleQueries,
         autoCommitOff,
         cancel: cancelRef.current,
-        onLog: appendLog,
-        onProgress: (done, total, failed) =>
-          setProgress((p) => ({
-            ...p,
-            total,
-            done,
-            failed,
-            elapsedMs: Date.now() - startedAtRef.current,
-          })),
+        onLogs: appendLogs,
+        onProgress: pushProgress,
       });
       setSummary(result);
       setProgress((p) => ({
@@ -206,14 +267,18 @@ export function RunSqlFileDialog({ conn, database, onClose, onMessage }: Props) 
         elapsedMs: Date.now() - startedAtRef.current,
       }));
       if (result.failed === 0 && !result.cancelled) {
-        appendLog("ok", `全部完成：共 ${result.total} 条语句`);
+        appendLogs([
+          { level: "ok", text: `全部完成：共 ${result.total} 条语句` },
+        ]);
       } else {
-        appendLog(
-          "warn",
-          `执行结束：成功 ${result.done} 条，失败 ${result.failed} 条${
-            result.cancelled ? "（已停止）" : ""
-          }`,
-        );
+        appendLogs([
+          {
+            level: "warn",
+            text: `执行结束：成功 ${result.done} 条，失败 ${result.failed} 条${
+              result.cancelled ? "（已停止）" : ""
+            }`,
+          },
+        ]);
       }
       onMessage(
         `运行 SQL 文件：成功 ${result.done} 条${
@@ -225,7 +290,7 @@ export function RunSqlFileDialog({ conn, database, onClose, onMessage }: Props) 
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      appendLog("error", `执行失败：${message}`);
+      appendLogs([{ level: "error", text: `执行失败：${message}` }]);
       setSummary({ done: 0, failed: 1, cancelled: false });
       onMessage(message);
     } finally {
@@ -238,6 +303,18 @@ export function RunSqlFileDialog({ conn, database, onClose, onMessage }: Props) 
       ? Math.min(100, Math.round((progress.done / progress.total) * 100))
       : 0;
   const elapsedLabel = `${(progress.elapsedMs / 1000).toFixed(2)}s`;
+
+  const logStart = Math.max(
+    0,
+    Math.floor(logView.top / LOG_ROW_HEIGHT) - LOG_OVERSCAN,
+  );
+  const logEnd = Math.min(
+    logs.length,
+    logStart +
+      Math.ceil((logView.height || 320) / LOG_ROW_HEIGHT) +
+      LOG_OVERSCAN * 2,
+  );
+  const visibleLogs = logs.slice(logStart, logEnd);
 
   return (
     <div
@@ -406,15 +483,22 @@ export function RunSqlFileDialog({ conn, database, onClose, onMessage }: Props) 
                 {logs.length === 0 ? (
                   <p className="pane-placeholder">尚未开始执行</p>
                 ) : (
-                  logs.map((line) => (
-                    <div
-                      key={line.id}
-                      className={`sqlfile-log-line is-${line.level}`}
-                    >
-                      <span className="sqlfile-log-time">{line.time}</span>
-                      <span className="sqlfile-log-text">{line.text}</span>
-                    </div>
-                  ))
+                  <div
+                    className="sqlfile-log-virtual"
+                    style={{ height: logs.length * LOG_ROW_HEIGHT }}
+                  >
+                    {visibleLogs.map((line, offset) => (
+                      <div
+                        key={line.id}
+                        className={`sqlfile-log-line is-${line.level}`}
+                        style={{ top: (logStart + offset) * LOG_ROW_HEIGHT }}
+                        title={line.text}
+                      >
+                        <span className="sqlfile-log-time">{line.time}</span>
+                        <span className="sqlfile-log-text">{line.text}</span>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
 
@@ -453,7 +537,13 @@ export function RunSqlFileDialog({ conn, database, onClose, onMessage }: Props) 
                 className="is-danger"
                 onClick={() => {
                   cancelRef.current.cancelled = true;
-                  appendLog("warn", "正在停止…（当前语句执行完后停止）");
+                  void cancelSqlBatch(conn.id).catch(() => {});
+                  appendLogs([
+                    {
+                      level: "warn",
+                      text: "正在停止…（当前语句执行完后停止）",
+                    },
+                  ]);
                 }}
               >
                 停止

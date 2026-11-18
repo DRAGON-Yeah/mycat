@@ -1,7 +1,17 @@
-import { executeSql, openConnection } from "../connections/sessionApi";
-import { splitSqlStatements } from "../query/sqlSplit";
+import {
+  executeSql,
+  executeSqlBatch,
+  openConnection,
+  type BatchOutcome,
+} from "../connections/sessionApi";
+import { splitSqlStatements, stripSqlComments } from "../query/sqlSplit";
 
 export type SqlFileLogLevel = "info" | "ok" | "warn" | "error";
+
+export type SqlFileLogEntry = {
+  level: SqlFileLogLevel;
+  text: string;
+};
 
 export type SqlFileRunOptions = {
   connectionId: string;
@@ -15,7 +25,8 @@ export type SqlFileRunOptions = {
   /** SET AUTOCOMMIT=0（仅 MySQL / MariaDB） */
   autoCommitOff: boolean;
   cancel: { cancelled: boolean };
-  onLog: (level: SqlFileLogLevel, text: string) => void;
+  /** 批量追加日志：一次 setState，避免逐条重渲染 */
+  onLogs: (entries: SqlFileLogEntry[]) => void;
   onProgress: (done: number, total: number, failed: number) => void;
 };
 
@@ -26,18 +37,20 @@ export type SqlFileRunResult = {
   cancelled: boolean;
 };
 
+/** 每批发送的语句数：一次 IPC + 一次多语句包，避免逐条往返 */
+export const SQL_FILE_BATCH_SIZE = 1000;
+
 function isMysql(engine: string) {
   return /mysql|mariadb/i.test(engine);
 }
 
-/** 去掉注释后判断语句是否可执行 */
+function errorText(err: unknown) {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** 去掉注释后判断语句是否可执行；MySQL 的版本注释（斜杠星号感叹号）会被保留 */
 function isRunnable(stmt: string) {
-  const text = stmt
-    .replace(/^--.*$/gm, "")
-    .replace(/^#.*$/gm, "")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .trim();
-  return text.length > 0;
+  return stripSqlComments(stmt).trim().length > 0;
 }
 
 export function previewStatement(stmt: string, max = 120) {
@@ -63,10 +76,19 @@ export async function runSqlFile(
   let cancelled = false;
   let fatal = false;
 
+  const pending: SqlFileLogEntry[] = [];
+  const log = (level: SqlFileLogLevel, text: string) => {
+    pending.push({ level, text });
+  };
+  const flush = () => {
+    if (pending.length === 0) return;
+    args.onLogs(pending.splice(0, pending.length));
+  };
+
   args.onProgress(0, total, 0);
 
   if (total === 0) {
-    args.onLog("warn", "文件中没有可执行的语句");
+    args.onLogs([{ level: "warn", text: "文件中没有可执行的语句" }]);
     return { total: 0, done: 0, failed: 0, cancelled: false };
   }
 
@@ -74,57 +96,95 @@ export async function runSqlFile(
 
   const autoCommit = args.autoCommitOff && mysql;
   if (args.autoCommitOff && !mysql) {
-    args.onLog(
+    log(
       "warn",
       "SET AUTOCOMMIT=0 仅支持 MySQL / MariaDB，当前连接已忽略该选项",
     );
+    flush();
   }
   if (autoCommit) {
     try {
       await executeSql(args.connectionId, "SET AUTOCOMMIT=0", args.database);
-      args.onLog("info", "SET AUTOCOMMIT=0");
+      log("info", "SET AUTOCOMMIT=0");
     } catch (err) {
-      args.onLog(
-        "warn",
-        `SET AUTOCOMMIT=0 失败：${err instanceof Error ? err.message : String(err)}`,
-      );
+      log("warn", `SET AUTOCOMMIT=0 失败：${errorText(err)}`);
     }
+    flush();
   }
 
-  args.onLog("info", `开始执行 ${total} 条语句`);
+  log("info", `开始执行 ${total} 条语句（每批 ${SQL_FILE_BATCH_SIZE} 条）`);
+  flush();
 
-  for (let i = 0; i < statements.length; i += 1) {
+  for (let start = 0; start < statements.length; start += SQL_FILE_BATCH_SIZE) {
     if (args.cancel.cancelled) {
       cancelled = true;
-      args.onLog("warn", "已停止执行（剩余语句未运行）");
+      log("warn", "已停止执行（剩余语句未运行）");
+      flush();
       break;
     }
-    const stmt = statements[i]!;
-    args.onLog("info", `[${i + 1}/${total}] ${previewStatement(stmt)}`);
+
+    const chunk = statements.slice(start, start + SQL_FILE_BATCH_SIZE);
+    let outcome: BatchOutcome;
     try {
-      const result = await executeSql(
+      outcome = await executeSqlBatch(
         args.connectionId,
-        stmt,
+        chunk,
         args.database,
-      );
-      done += 1;
-      const affected =
-        result.rowsAffected > 0 ? ` · 影响 ${result.rowsAffected} 行` : "";
-      args.onLog(
-        "ok",
-        `[${i + 1}/${total}] 成功${affected} · ${result.elapsedMs}ms`,
+        args.continueOnError,
       );
     } catch (err) {
-      failed += 1;
-      const message = err instanceof Error ? err.message : String(err);
-      args.onLog("error", `[${i + 1}/${total}] 失败：${message}`);
+      // 整批失败（USE 失败 / 连接断开等）
+      failed += chunk.length;
+      log(
+        "error",
+        `[${start + 1}-${start + chunk.length}/${total}] 批次执行失败：${errorText(err)}`,
+      );
+      flush();
+      args.onProgress(done + failed, total, failed);
       if (!args.continueOnError) {
         fatal = true;
-        args.onLog("error", "遇到错误，已终止执行（未勾选“遇到错误时继续”）");
+        log("error", "遇到错误，已终止执行（未勾选“遇到错误时继续”）");
+        flush();
         break;
       }
+      continue;
     }
+
+    for (let k = 0; k < outcome.results.length; k += 1) {
+      const result = outcome.results[k]!;
+      const index = start + k + 1;
+      const preview = previewStatement(chunk[k]!, 100);
+      if (result.ok) {
+        done += 1;
+        const affected =
+          result.rowsAffected > 0 ? ` · 影响 ${result.rowsAffected} 行` : "";
+        const cost =
+          result.elapsedMs === null ? "" : ` · ${result.elapsedMs}ms`;
+        log("ok", `[${index}/${total}] 成功${affected}${cost} · ${preview}`);
+      } else {
+        failed += 1;
+        log(
+          "error",
+          `[${index}/${total}] 失败：${result.error ?? "未知错误"} · ${preview}`,
+        );
+      }
+    }
+
+    flush();
     args.onProgress(done + failed, total, failed);
+
+    if (outcome.cancelled) {
+      cancelled = true;
+      log("warn", "已停止执行（剩余语句未运行）");
+      flush();
+      break;
+    }
+    if (outcome.stopped) {
+      fatal = true;
+      log("error", "遇到错误，已终止执行（未勾选“遇到错误时继续”）");
+      flush();
+      break;
+    }
   }
 
   if (autoCommit) {
@@ -132,20 +192,19 @@ export async function runSqlFile(
     const sql = shouldCommit ? "COMMIT" : "ROLLBACK";
     try {
       await executeSql(args.connectionId, sql, args.database);
-      args.onLog("info", shouldCommit ? "COMMIT" : "ROLLBACK");
+      log("info", shouldCommit ? "COMMIT" : "ROLLBACK");
     } catch (err) {
-      args.onLog(
-        "warn",
-        `${sql} 失败：${err instanceof Error ? err.message : String(err)}`,
-      );
+      log("warn", `${sql} 失败：${errorText(err)}`);
     }
     try {
       await executeSql(args.connectionId, "SET AUTOCOMMIT=1", args.database);
     } catch {
       /* ignore */
     }
+    flush();
   }
 
+  flush();
   args.onProgress(done + failed, total, failed);
   return { total, done, failed, cancelled };
 }
