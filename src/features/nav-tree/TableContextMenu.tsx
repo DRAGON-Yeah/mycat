@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ConnectionDto } from "../connections/types";
 import { executeSql, openConnection } from "../connections/sessionApi";
 import { downloadTextFile, isSaveCancelled } from "../import-export/csv";
@@ -24,18 +24,19 @@ import {
 } from "./tableDataTools";
 import { getGridViewSnapshot } from "../data-grid/gridViewSnapshot";
 import {
+  batchSummary,
   copyTable,
   copyView,
-  dropTableOrView,
+  dropTablesOrViews,
   dumpSingleTable,
-  emptyTable,
+  emptyTables,
   exportTableDictionary,
   fetchCreateDdl,
   maintainOpsForEngine,
   maintainTable,
   renameTable,
   reverseSingleTableModel,
-  truncateTable,
+  truncateTables,
   type MaintainOp,
 } from "./tableMenuActions";
 import { SimpleChartDialog } from "./SimpleChartDialog";
@@ -52,6 +53,8 @@ export type TableMenuTarget = {
 
 type Props = {
   target: TableMenuTarget;
+  /** 多选的行（包含 target.table 时对这些行批量操作）。 */
+  selected?: string[];
   onClose: () => void;
   onRefresh: () => void;
   onMessage: (msg: string) => void;
@@ -59,6 +62,7 @@ type Props = {
 
 export function TableContextMenu({
   target,
+  selected,
   onClose,
   onRefresh,
   onMessage,
@@ -116,6 +120,17 @@ export function TableContextMenu({
   const isView = kind === "view";
   const maintainOps = maintainOpsForEngine(String(conn.engine));
   const isMysql = String(conn.engine).toLowerCase() === "mysql";
+
+  // 批量目标：右键的行在多选集合内时，作用于全部选中行；否则只作用于当前行。
+  const targets = useMemo(() => {
+    const names =
+      selected && selected.length > 1 && selected.includes(table)
+        ? selected
+        : [table];
+    return Array.from(new Set(names)).map((name) => ({ name, isView }));
+  }, [selected, table, isView]);
+  const batchCount = targets.length;
+  const unit = isView ? "视图" : "表";
 
   useEffect(() => {
     void listTableProfiles(conn.id, database, table)
@@ -424,7 +439,7 @@ export function TableContextMenu({
           disabled={busy}
           onClick={() => setDangerConfirm("delete")}
         >
-          删除{isView ? "视图" : "表"}
+          {batchCount > 1 ? `删除 ${batchCount} 个${unit}` : `删除${unit}`}
         </button>
         {isView ? (
           <button
@@ -445,14 +460,14 @@ export function TableContextMenu({
               disabled={busy}
               onClick={() => setDangerConfirm("empty")}
             >
-              清空表
+              {batchCount > 1 ? `清空 ${batchCount} 个表` : "清空表"}
             </button>
             <button
               type="button"
               disabled={busy}
               onClick={() => setDangerConfirm("truncate")}
             >
-              截断表
+              {batchCount > 1 ? `截断 ${batchCount} 个表` : "截断表"}
             </button>
             <div
               className={`dg-menu-item has-sub ${copyOpen ? "is-open" : ""}`}
@@ -919,13 +934,34 @@ export function TableContextMenu({
           >
             <h2>
               {dangerConfirm === "delete"
-                ? `删除${isView ? "视图" : "表"}`
+                ? batchCount > 1
+                  ? `删除 ${batchCount} 个${unit}`
+                  : `删除${isView ? "视图" : "表"}`
                 : dangerConfirm === "empty"
-                  ? "清空表"
-                  : "截断表"}
+                  ? batchCount > 1
+                    ? `清空 ${batchCount} 个表`
+                    : "清空表"
+                  : batchCount > 1
+                    ? `截断 ${batchCount} 个表`
+                    : "截断表"}
             </h2>
-            <p className="danger-confirm-text">
-              {dangerConfirm === "delete" ? (
+            <div className="danger-confirm-text">
+              {batchCount > 1 ? (
+                <>
+                  {dangerConfirm === "delete"
+                    ? `确定删除以下 ${batchCount} 个${unit}吗？此操作不可恢复，相关打开的页签也会关闭。`
+                    : dangerConfirm === "empty"
+                      ? `确定清空以下 ${batchCount} 个表的全部数据吗？表结构会保留，自增计数通常不变。`
+                      : `确定截断以下 ${batchCount} 个表吗？全部数据将被删除，自增计数通常会重置。`}
+                  <span className="danger-confirm-list">
+                    {targets
+                      .slice(0, 12)
+                      .map((t) => `${database}.${t.name}`)
+                      .join("\n")}
+                    {batchCount > 12 ? `\n… 等 ${batchCount} 个` : ""}
+                  </span>
+                </>
+              ) : dangerConfirm === "delete" ? (
                 <>
                   确定删除{isView ? "视图" : "表"}{" "}
                   <strong>
@@ -950,7 +986,7 @@ export function TableContextMenu({
                   吗？全部数据将被删除，自增计数通常会重置。
                 </>
               )}
-            </p>
+            </div>
             <div className="modal-actions">
               <button
                 type="button"
@@ -968,42 +1004,52 @@ export function TableContextMenu({
                   const op = dangerConfirm;
                   setDangerConfirm(null);
                   if (op === "delete") {
-                    const label = isView ? "视图" : "表";
                     void run(async () => {
-                      await dropTableOrView({
+                      const result = await dropTablesOrViews({
                         conn,
                         database,
-                        table,
-                        isView,
+                        targets,
                       });
-                      closeRelatedTabs(table);
-                      onMessage(`已删除${label} ${table}`);
+                      for (const name of result.ok) closeRelatedTabs(name);
                       onRefresh();
+                      onMessage(batchSummary("删除", unit, result));
                     });
                     return;
                   }
                   if (op === "empty") {
                     void run(async () => {
-                      await emptyTable({ conn, database, table });
-                      emitTableDataChanged({
-                        connectionId: conn.id,
+                      const result = await emptyTables({
+                        conn,
                         database,
-                        table,
+                        tables: targets.map((t) => t.name),
                       });
-                      onMessage(`已清空表 ${table}`);
+                      for (const name of result.ok) {
+                        emitTableDataChanged({
+                          connectionId: conn.id,
+                          database,
+                          table: name,
+                        });
+                      }
                       onRefresh();
+                      onMessage(batchSummary("清空", "表", result));
                     });
                     return;
                   }
                   void run(async () => {
-                    await truncateTable({ conn, database, table });
-                    emitTableDataChanged({
-                      connectionId: conn.id,
+                    const result = await truncateTables({
+                      conn,
                       database,
-                      table,
+                      tables: targets.map((t) => t.name),
                     });
-                    onMessage(`已截断表 ${table}`);
+                    for (const name of result.ok) {
+                      emitTableDataChanged({
+                        connectionId: conn.id,
+                        database,
+                        table: name,
+                      });
+                    }
                     onRefresh();
+                    onMessage(batchSummary("截断", "表", result));
                   });
                 }}
               >

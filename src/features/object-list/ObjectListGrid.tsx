@@ -165,7 +165,7 @@ export function ObjectListGrid() {
   const [routineMetaMap, setRoutineMetaMap] = useState<
     Record<string, RoutineMeta>
   >({});
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string[] | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [runOpen, setRunOpen] = useState(false);
   const [fnWizardOpen, setFnWizardOpen] = useState(false);
@@ -634,6 +634,12 @@ export function ObjectListGrid() {
     setFnWizardOpen(false);
   }
 
+  const deleteUnit = wantEvents
+    ? "事件"
+    : wantFunctions
+      ? "函数/过程"
+      : "视图";
+
   return (
     <div
       className="object-list-grid"
@@ -809,13 +815,21 @@ export function ObjectListGrid() {
                     ? "删除函数"
                     : "删除视图"
               }
-              disabled={!selectedTable || deleteBusy}
+              disabled={selectedNames.length === 0 || deleteBusy}
               onClick={() => {
-                if (!selectedTable) return;
-                setDeleteConfirm(selectedTable);
+                const names =
+                  selectedNames.length > 0
+                    ? selectedNames
+                    : selectedTable
+                      ? [selectedTable]
+                      : [];
+                if (names.length === 0) return;
+                setDeleteConfirm(names);
               }}
             >
-              删除
+              {selectedNames.length > 1
+                ? `删除 ${selectedNames.length} 个`
+                : "删除"}
             </button>
           )}
           <span className="obj-tool-sep" />
@@ -1035,6 +1049,10 @@ export function ObjectListGrid() {
                         onContextMenu={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
+                          // 右键落在多选集合内时保留多选，批量操作才有意义。
+                          if (!selectedNames.includes(t.name)) {
+                            setSelectedNames([t.name]);
+                          }
                           selectTableMeta(t.name);
                           setRoutineMenu(null);
                           setMenu({
@@ -1119,6 +1137,7 @@ export function ObjectListGrid() {
       {menu && (
         <TableContextMenu
           target={menu}
+          selected={selectedNames}
           onClose={() => setMenu(null)}
           onRefresh={() => setTick((x) => x + 1)}
           onMessage={showToast}
@@ -1183,7 +1202,7 @@ export function ObjectListGrid() {
         />
       )}
 
-      {deleteConfirm && connection && database && (
+      {deleteConfirm && deleteConfirm.length > 0 && connection && database && (
         <div
           className="modal-backdrop"
           role="presentation"
@@ -1204,18 +1223,31 @@ export function ObjectListGrid() {
                   ? "删除函数"
                   : "删除视图"}
             </h2>
-            <p className="danger-confirm-text">
-              确定删除
-              {wantEvents
-                ? "事件"
-                : wantFunctions
-                  ? "函数/过程"
-                  : "视图"}{" "}
-              <strong>
-                {database}.{deleteConfirm}
-              </strong>{" "}
-              吗？此操作不可恢复。
-            </p>
+            <div className="danger-confirm-text">
+              {deleteConfirm.length > 1 ? (
+                <>
+                  确定删除以下 {deleteConfirm.length} 个{deleteUnit}
+                  吗？此操作不可恢复。
+                  <span className="danger-confirm-list">
+                    {deleteConfirm
+                      .slice(0, 12)
+                      .map((name) => `${database}.${name}`)
+                      .join("\n")}
+                    {deleteConfirm.length > 12
+                      ? `\n… 等 ${deleteConfirm.length} 个`
+                      : ""}
+                  </span>
+                </>
+              ) : (
+                <>
+                  确定删除{deleteUnit}{" "}
+                  <strong>
+                    {database}.{deleteConfirm[0]}
+                  </strong>{" "}
+                  吗？此操作不可恢复。
+                </>
+              )}
+            </div>
             <div className="modal-actions">
               <button
                 type="button"
@@ -1230,61 +1262,75 @@ export function ObjectListGrid() {
                 disabled={deleteBusy}
                 autoFocus
                 onClick={() => {
-                  const name = deleteConfirm;
+                  const names = deleteConfirm;
                   void (async () => {
                     setDeleteBusy(true);
-                    try {
-                      if (wantEvents) {
-                        await dropEvent({
-                          conn: connection,
-                          database,
-                          name,
-                        });
-                      } else if (wantFunctions) {
-                        const rt =
-                          routineMetaMap[name]?.routineType ?? "PROCEDURE";
-                        await dropRoutine({
-                          conn: connection,
-                          database,
-                          name,
-                          routineType: rt,
-                        });
-                      } else {
-                        await dropTableOrView({
-                          conn: connection,
+                    const ok: string[] = [];
+                    const failed: { name: string; error: string }[] = [];
+                    for (const name of names) {
+                      try {
+                        if (wantEvents) {
+                          await dropEvent({
+                            conn: connection,
+                            database,
+                            name,
+                          });
+                        } else if (wantFunctions) {
+                          const rt =
+                            routineMetaMap[name]?.routineType ?? "PROCEDURE";
+                          await dropRoutine({
+                            conn: connection,
+                            database,
+                            name,
+                            routineType: rt,
+                          });
+                        } else {
+                          await dropTableOrView({
+                            conn: connection,
+                            database,
+                            table: name,
+                            isView: true,
+                          });
+                        }
+                        ok.push(name);
+                        emitTableDataChanged({
+                          connectionId: connection.id,
                           database,
                           table: name,
-                          isView: true,
+                        });
+                      } catch (err) {
+                        failed.push({
+                          name,
+                          error:
+                            err instanceof Error ? err.message : String(err),
                         });
                       }
-                      emitTableDataChanged({
-                        connectionId: connection.id,
-                        database,
-                        table: name,
-                      });
-                      selectTableMeta(null);
-                      setDeleteConfirm(null);
-                      setTick((x) => x + 1);
+                    }
+                    selectTableMeta(null);
+                    setDeleteConfirm(null);
+                    setTick((x) => x + 1);
+                    setDeleteBusy(false);
+                    if (failed.length === 0) {
+                      showToast(`已删除 ${ok.length} 个${deleteUnit}`);
+                    } else {
+                      const detail = failed
+                        .slice(0, 3)
+                        .map((f) => `${f.name}: ${f.error}`)
+                        .join("；");
                       showToast(
-                        `已删除${
-                          wantEvents
-                            ? "事件"
-                            : wantFunctions
-                              ? "函数"
-                              : "视图"
-                        } ${name}`,
+                        `已删除 ${ok.length} 个${deleteUnit}，失败 ${failed.length} 个（${detail}${
+                          failed.length > 3 ? " …" : ""
+                        }）`,
                       );
-                    } catch (err) {
-                      showToast(
-                        err instanceof Error ? err.message : String(err),
-                      );
-                    } finally {
-                      setDeleteBusy(false);
                     }
                   })();
                 }}
               >
-                {deleteBusy ? "删除中…" : "删除"}
+                {deleteBusy
+                  ? "删除中…"
+                  : deleteConfirm.length > 1
+                    ? `删除 ${deleteConfirm.length} 个`
+                    : "删除"}
               </button>
             </div>
           </div>

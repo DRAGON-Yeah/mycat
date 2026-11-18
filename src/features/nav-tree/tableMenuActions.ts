@@ -613,6 +613,97 @@ export async function dropTableOrView(args: {
   );
 }
 
+export type BatchTarget = { name: string; isView: boolean };
+
+export type BatchResult = {
+  ok: string[];
+  failed: { name: string; error: string }[];
+};
+
+function errorText(err: unknown) {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** 批量删除表/视图，逐个执行，失败不中断。 */
+export async function dropTablesOrViews(args: {
+  conn: ConnectionDto;
+  database: string;
+  targets: BatchTarget[];
+}): Promise<BatchResult> {
+  const ok: string[] = [];
+  const failed: { name: string; error: string }[] = [];
+  for (const target of args.targets) {
+    try {
+      await dropTableOrView({
+        conn: args.conn,
+        database: args.database,
+        table: target.name,
+        isView: target.isView,
+      });
+      ok.push(target.name);
+    } catch (err) {
+      failed.push({ name: target.name, error: errorText(err) });
+    }
+  }
+  return { ok, failed };
+}
+
+/** 批量清空表数据，逐个执行，失败不中断。 */
+export async function emptyTables(args: {
+  conn: ConnectionDto;
+  database: string;
+  tables: string[];
+}): Promise<BatchResult> {
+  const ok: string[] = [];
+  const failed: { name: string; error: string }[] = [];
+  for (const table of args.tables) {
+    try {
+      await emptyTable({ conn: args.conn, database: args.database, table });
+      ok.push(table);
+    } catch (err) {
+      failed.push({ name: table, error: errorText(err) });
+    }
+  }
+  return { ok, failed };
+}
+
+/** 批量截断表，逐个执行，失败不中断。 */
+export async function truncateTables(args: {
+  conn: ConnectionDto;
+  database: string;
+  tables: string[];
+}): Promise<BatchResult> {
+  const ok: string[] = [];
+  const failed: { name: string; error: string }[] = [];
+  for (const table of args.tables) {
+    try {
+      await truncateTable({ conn: args.conn, database: args.database, table });
+      ok.push(table);
+    } catch (err) {
+      failed.push({ name: table, error: errorText(err) });
+    }
+  }
+  return { ok, failed };
+}
+
+/** 批量操作结果的一句话摘要。 */
+export function batchSummary(
+  action: string,
+  unit: string,
+  result: BatchResult,
+): string {
+  if (result.failed.length === 0) {
+    return `已${action} ${result.ok.length} 个${unit}`;
+  }
+  const detail = result.failed
+    .slice(0, 3)
+    .map((f) => `${f.name}: ${f.error}`)
+    .join("；");
+  return `已${action} ${result.ok.length} 个${unit}，失败 ${result.failed.length} 个（${detail}${
+    result.failed.length > 3 ? " …" : ""
+  }）`;
+}
+
 export async function renameTable(args: {
   conn: ConnectionDto;
   database: string;

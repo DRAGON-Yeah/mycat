@@ -3113,6 +3113,20 @@ tr.is-inserted {
 .danger-confirm-text strong {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+.danger-confirm-list {
+  display: block;
+  margin-top: 8px;
+  max-height: 160px;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
 .modal-actions {
   display: flex;
   justify-content: flex-end;
