@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { ConnectionDto } from "../features/connections/types";
+import type { QueryBatchItem } from "../features/query/QueryResultPanel";
 import { confirmCloseDialog, confirmDialog } from "../lib/confirm";
 import { hasTabSaver, runTabSaver } from "../lib/tabSavers";
 import { upsertSavedQuery } from "../features/query/savedQueriesApi";
@@ -68,6 +69,24 @@ export type QueryTab = {
   dirty: boolean;
   /** Persisted saved_queries.id when linked to a stored query. */
   savedQueryId?: string | null;
+};
+
+/**
+ * 查询页签的执行结果。放在 store 里按页签 id 保存，
+ * 这样切到别的 tab / 切换查询页签再回来，结果不会丢。
+ */
+export type QueryRunState = {
+  items: QueryBatchItem[];
+  messages: string[];
+  error: string | null;
+  status: string | null;
+};
+
+export const EMPTY_QUERY_RUN_STATE: QueryRunState = {
+  items: [],
+  messages: [],
+  error: null,
+  status: null,
 };
 
 export type DesignerTab = {
@@ -147,6 +166,8 @@ type WorkspaceState = {
   activeTabId: string | null;
   queryTabs: QueryTab[];
   activeQueryId: string | null;
+  /** 按查询页签 id 保存的执行结果 */
+  queryResults: Record<string, QueryRunState>;
   designerTabs: DesignerTab[];
   activeDesignerId: string | null;
   /** When set, QueryEditor should auto-run this tab once after mount. */
@@ -235,6 +256,9 @@ type WorkspaceState = {
   closeTabsByIds: (ids: string[], opts?: { force?: boolean }) => Promise<boolean>;
   setActiveTab: (id: string) => void;
   setActiveQuery: (id: string) => void;
+  /** 更新某个查询页签的执行结果（局部 patch） */
+  setQueryRunState: (id: string, patch: Partial<QueryRunState>) => void;
+  clearQueryRunState: (id: string) => void;
   updateQueryTab: (
     id: string,
     patch: Partial<
@@ -285,6 +309,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   activeTabId: null,
   queryTabs: [],
   activeQueryId: null,
+  queryResults: {},
   designerTabs: [],
   activeDesignerId: null,
   pendingQueryAutoRunId: null,
@@ -317,6 +342,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       activeTabId: null,
       queryTabs: [],
       activeQueryId: null,
+      queryResults: {},
       designerTabs: [],
       activeDesignerId: null,
       pendingQueryAutoRunId: null,
@@ -1134,9 +1160,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const activeQueryId = closingActive
       ? (queryTabs[queryTabs.length - 1]?.id ?? null)
       : get().activeQueryId;
+    const queryResults = { ...get().queryResults };
+    delete queryResults[id];
     set({
       queryTabs,
       activeQueryId,
+      queryResults,
       centerMode: activeQueryId
         ? "query"
         : get().activeTabId
@@ -1242,6 +1271,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const tabs = state.tabs.filter((t) => !targets.has(t.id));
     const queryTabs = state.queryTabs.filter((t) => !targets.has(t.id));
     const designerTabs = state.designerTabs.filter((t) => !targets.has(t.id));
+    const queryResults = { ...state.queryResults };
+    for (const id of targets) delete queryResults[id];
     let activeTabId =
       state.activeTabId && targets.has(state.activeTabId)
         ? (tabs[tabs.length - 1]?.id ?? null)
@@ -1287,6 +1318,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({
       tabs,
       queryTabs,
+      queryResults,
       designerTabs,
       activeTabId,
       activeQueryId,
@@ -1336,6 +1368,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         : {
             activeConnectionId: tab.connectionId,
           }),
+    });
+  },
+  setQueryRunState: (id, patch) => {
+    set((s) => ({
+      queryResults: {
+        ...s.queryResults,
+        [id]: { ...(s.queryResults[id] ?? EMPTY_QUERY_RUN_STATE), ...patch },
+      },
+    }));
+  },
+  clearQueryRunState: (id) => {
+    set((s) => {
+      if (!s.queryResults[id]) return {};
+      const queryResults = { ...s.queryResults };
+      delete queryResults[id];
+      return { queryResults };
     });
   },
   updateQueryTab: (id, patch) => {

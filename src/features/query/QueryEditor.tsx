@@ -19,7 +19,10 @@ import {
 import type { ConnectionDto } from "../connections/types";
 import { Splitter } from "../../shell/Splitter";
 import { useUiStore } from "../../stores/uiStore";
-import { useWorkspaceStore } from "../../stores/workspaceStore";
+import {
+  useWorkspaceStore,
+  type QueryRunState,
+} from "../../stores/workspaceStore";
 import {
   QueryResultPanel,
   type QueryBatchItem,
@@ -42,6 +45,10 @@ import {
 } from "./sqlSplit";
 
 type RunMode = "all" | "selection" | "current";
+
+/** 稳定的空数组，避免每次渲染都产生新引用 */
+const EMPTY_ITEMS: QueryBatchItem[] = [];
+const EMPTY_MESSAGES: string[] = [];
 
 export function QueryEditor() {
   const theme = useUiStore((s) => s.theme);
@@ -76,10 +83,38 @@ export function QueryEditor() {
   const [runMenuOpen, setRunMenuOpen] = useState(false);
   const [connMenuOpen, setConnMenuOpen] = useState(false);
   const [dbMenuOpen, setDbMenuOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  const [batchItems, setBatchItems] = useState<QueryBatchItem[]>([]);
-  const [batchMessages, setBatchMessages] = useState<string[]>([]);
+  // 执行结果按页签保存在 store 里：切到别的 tab、或在查询页签之间切换再回来都不会丢
+  const runState = useWorkspaceStore((s) =>
+    activeQueryId ? s.queryResults[activeQueryId] : undefined,
+  );
+  const setQueryRunState = useWorkspaceStore((s) => s.setQueryRunState);
+  const batchItems = runState?.items ?? EMPTY_ITEMS;
+  const batchMessages = runState?.messages ?? EMPTY_MESSAGES;
+  const error = runState?.error ?? null;
+  const status = runState?.status ?? null;
+  const tabId = tab?.id ?? null;
+  const updateRun = useCallback(
+    (patch: Partial<QueryRunState>) => {
+      if (tabId) setQueryRunState(tabId, patch);
+    },
+    [tabId, setQueryRunState],
+  );
+  const setError = useCallback(
+    (value: string | null) => updateRun({ error: value }),
+    [updateRun],
+  );
+  const setStatus = useCallback(
+    (value: string | null) => updateRun({ status: value }),
+    [updateRun],
+  );
+  const setBatchItems = useCallback(
+    (items: QueryBatchItem[]) => updateRun({ items }),
+    [updateRun],
+  );
+  const setBatchMessages = useCallback(
+    (messages: string[]) => updateRun({ messages }),
+    [updateRun],
+  );
   const resultCollapsed = useUiStore((s) => s.layout.bottomCollapsed);
   const toggleBottom = useUiStore((s) => s.toggleBottom);
   const setBottomCollapsed = useUiStore((s) => s.setBottomCollapsed);
@@ -235,10 +270,7 @@ export function QueryEditor() {
   }, [tab?.connectionId, tab?.database, tab?.connectionEngine]);
 
   useEffect(() => {
-    setError(null);
-    setBatchItems([]);
-    setBatchMessages([]);
-    setStatus(null);
+    // 结果集按页签保存在 store 里，切换页签时不再清空
     setRunMenuOpen(false);
     setConnMenuOpen(false);
     setDbMenuOpen(false);
