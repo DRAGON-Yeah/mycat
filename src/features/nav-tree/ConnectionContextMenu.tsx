@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CONNECTION_COLORS,
   connectionToUpsert,
@@ -11,7 +11,6 @@ import {
 } from "../connections/connectionProfiles";
 import { upsertConnection } from "../connections/api";
 import type { ConnectionDto } from "../connections/types";
-import { openConnection } from "../connections/sessionApi";
 import { downloadTextFile, isSaveCancelled } from "../import-export/csv";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 
@@ -34,6 +33,8 @@ type Props = {
   onDeleteConnection: (conn: ConnectionDto) => void;
   onMessage: (msg: string) => void;
   onAskNewDatabase: (conn: ConnectionDto) => void;
+  /** Open the "运行 SQL 文件" dialog. */
+  onRunSqlFile: (conn: ConnectionDto, database: string) => void;
 };
 
 export function ConnectionContextMenu({
@@ -49,6 +50,7 @@ export function ConnectionContextMenu({
   onDeleteConnection,
   onMessage,
   onAskNewDatabase,
+  onRunSqlFile,
 }: Props) {
   const { conn } = target;
   const [busy, setBusy] = useState(false);
@@ -57,7 +59,6 @@ export function ConnectionContextMenu({
   const [groupOpen, setGroupOpen] = useState(false);
   const [profiles, setProfiles] = useState<ConnProfile[]>([]);
   const [newGroup, setNewGroup] = useState("");
-  const sqlFileRef = useRef<HTMLInputElement>(null);
 
   const openConn = useWorkspaceStore((s) => s.openConnection);
   const openQuery = useWorkspaceStore((s) => s.openQuery);
@@ -291,34 +292,14 @@ export function ConnectionContextMenu({
       <button
         type="button"
         disabled={busy}
-        onClick={() => sqlFileRef.current?.click()}
+        onClick={() => {
+          openConn(conn);
+          onRunSqlFile(conn, conn.database?.trim() || "");
+          onClose();
+        }}
       >
         运行 SQL 文件…
       </button>
-      <input
-        ref={sqlFileRef}
-        type="file"
-        accept=".sql,text/plain"
-        hidden
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          e.target.value = "";
-          if (!file) return;
-          void run(async () => {
-            await openConnection(conn.id);
-            const text = await file.text();
-            const title = file.name.replace(/\.sql$/i, "") || file.name;
-            openQuery({
-              connection: conn,
-              database: conn.database?.trim() || undefined,
-              title,
-              sql: text,
-              autoRun: true,
-            });
-            onMessage(`已打开并执行 SQL 文件：${file.name}`);
-          });
-        }}
-      />
 
       <div
         className={`dg-menu-item has-sub ${reloadOpen ? "is-open" : ""}`}

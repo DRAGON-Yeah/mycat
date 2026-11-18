@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import type { ConnectionDto } from "../connections/types";
 import {
   dumpTableSql,
@@ -33,6 +33,8 @@ type Props = {
   onForceCloseDatabase: (connId: string, database: string) => void;
   /** Open new-database dialog (charset dropdown). */
   onAskNewDatabase?: (conn: ConnectionDto) => void;
+  /** Open the "运行 SQL 文件" dialog. */
+  onRunSqlFile: (conn: ConnectionDto, database: string) => void;
   onMessage: (msg: string) => void;
 };
 
@@ -48,11 +50,11 @@ export function DatabaseContextMenu({
   onRequestEditDatabase,
   onForceCloseDatabase,
   onAskNewDatabase,
+  onRunSqlFile,
   onMessage,
 }: Props) {
   const [dumpOpen, setDumpOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const sqlFileRef = useRef<HTMLInputElement>(null);
   const openConn = useWorkspaceStore((s) => s.openConnection);
   const selectDatabase = useWorkspaceStore((s) => s.selectDatabase);
   const selectObjectFolder = useWorkspaceStore((s) => s.selectObjectFolder);
@@ -315,34 +317,14 @@ export function DatabaseContextMenu({
       <button
         type="button"
         disabled={busy}
-        onClick={() => sqlFileRef.current?.click()}
+        onClick={() => {
+          ensureContext();
+          onRunSqlFile(conn, database);
+          onClose();
+        }}
       >
         运行 SQL 文件…
       </button>
-      <input
-        ref={sqlFileRef}
-        type="file"
-        accept=".sql,text/plain"
-        hidden
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          e.target.value = "";
-          if (!file) return;
-          void run(async () => {
-            ensureContext();
-            const text = await file.text();
-            const title = file.name.replace(/\.sql$/i, "") || file.name;
-            openQuery({
-              connection: conn,
-              database,
-              title,
-              sql: text,
-              autoRun: true,
-            });
-            onMessage(`已打开并执行 SQL 文件：${file.name}`);
-          });
-        }}
-      />
       <div
         className={`dg-menu-item has-sub ${dumpOpen ? "is-open" : ""}`}
         onMouseEnter={() => setDumpOpen(true)}

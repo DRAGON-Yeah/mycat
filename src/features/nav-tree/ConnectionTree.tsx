@@ -74,6 +74,7 @@ import {
   type BackupsFolderMenuTarget,
 } from "./BackupsFolderContextMenu";
 import { BackupWizard } from "../backup/BackupWizard";
+import { RunSqlFileDialog } from "../sqlfile/RunSqlFileDialog";
 import { TreeObjectFolder } from "./TreeObjectFolder";
 import type { RoutineType } from "../object-list/routineMeta";
 import { emitTableDataChanged } from "../../lib/tableEvents";
@@ -199,6 +200,10 @@ export function ConnectionTree() {
   const [backupsFolderMenu, setBackupsFolderMenu] =
     useState<BackupsFolderMenuTarget | null>(null);
   const [backupWizard, setBackupWizard] = useState<{
+    conn: ConnectionDto;
+    database: string;
+  } | null>(null);
+  const [sqlFileRun, setSqlFileRun] = useState<{
     conn: ConnectionDto;
     database: string;
   } | null>(null);
@@ -1579,6 +1584,9 @@ export function ConnectionTree() {
           }
           onDeleteConnection={(conn) => void handleDeleteConnection(conn)}
           onAskNewDatabase={(conn) => setNewDbFor(conn)}
+          onRunSqlFile={(conn, database) =>
+            setSqlFileRun({ conn, database })
+          }
           onMessage={(msg) => {
             setToast(msg);
             window.setTimeout(() => setToast(null), 2500);
@@ -1601,6 +1609,9 @@ export function ConnectionTree() {
             finalizeCloseDatabase(connId, database)
           }
           onAskNewDatabase={(c) => setNewDbFor(c)}
+          onRunSqlFile={(conn, database) =>
+            setSqlFileRun({ conn, database })
+          }
           onMessage={(msg) => {
             setToast(msg);
             window.setTimeout(() => setToast(null), 2500);
@@ -1712,6 +1723,18 @@ export function ConnectionTree() {
           onCompleted={() => {
             window.dispatchEvent(new Event("mycat:object-list-refresh"));
           }}
+          onMessage={(msg) => {
+            setToast(msg);
+            window.setTimeout(() => setToast(null), 2500);
+          }}
+        />
+      )}
+
+      {sqlFileRun && (
+        <RunSqlFileDialog
+          conn={sqlFileRun.conn}
+          database={sqlFileRun.database}
+          onClose={() => setSqlFileRun(null)}
           onMessage={(msg) => {
             setToast(msg);
             window.setTimeout(() => setToast(null), 2500);

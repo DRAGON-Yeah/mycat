@@ -6200,3 +6200,326 @@ tr.is-inserted {
   color: #2e7d32;
   font-size: 12px;
 }
+
+/* —— 运行 SQL 文件 —— */
+.sqlfile-dialog {
+  width: min(660px, 94vw);
+  height: min(520px, 88vh);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sqlfile-header {
+  padding: 12px 16px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sqlfile-header h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text);
+}
+
+.sqlfile-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+}
+
+.sqlfile-tabs button {
+  border: none;
+  background: transparent;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.sqlfile-tabs button.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.sqlfile-tabs button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sqlfile-body {
+  flex: 1;
+  min-height: 0;
+  padding: 18px 24px 10px;
+  overflow: auto;
+}
+
+.sqlfile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sqlfile-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  min-height: 30px;
+}
+
+.sqlfile-label {
+  flex: 0 0 56px;
+  text-align: left;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.sqlfile-value {
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sqlfile-file-input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.sqlfile-browse {
+  flex: 0 0 32px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-muted);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sqlfile-browse:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sqlfile-select {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 8px;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.sqlfile-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0 0 64px;
+}
+
+.sqlfile-hint {
+  margin: 4px 0 0 64px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.sqlfile-log-pane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sqlfile-log-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 24px;
+  font-size: 13px;
+  padding: 2px 0 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.sqlfile-log-stats .is-error,
+.sqlfile-log-stats .is-error strong {
+  color: #cf222e;
+}
+
+.sqlfile-summary {
+  margin: 0 0 8px;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+.sqlfile-summary.is-ok {
+  color: #2e7d32;
+  background: color-mix(in srgb, #2e7d32 10%, transparent);
+}
+
+.sqlfile-summary.is-error {
+  color: #cf222e;
+  background: color-mix(in srgb, #cf222e 10%, transparent);
+}
+
+.sqlfile-log-list {
+  flex: 1;
+  min-height: 140px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  padding: 6px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sqlfile-log-line {
+  display: flex;
+  gap: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sqlfile-log-time {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
+.sqlfile-log-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.sqlfile-log-line.is-ok .sqlfile-log-text {
+  color: #2e7d32;
+}
+
+.sqlfile-log-line.is-warn .sqlfile-log-text {
+  color: #a15c00;
+}
+
+.sqlfile-log-line.is-error .sqlfile-log-text {
+  color: #cf222e;
+  font-weight: 500;
+}
+
+.sqlfile-progress {
+  height: 6px;
+  background: var(--bg-muted);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+}
+
+.sqlfile-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s ease;
+}
+
+.sqlfile-progress-bar.is-error {
+  background: #cf222e;
+}
+
+.sqlfile-progress-label {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.sqlfile-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-muted);
+}
+
+.sqlfile-status {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.sqlfile-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.sqlfile-actions button {
+  height: 30px;
+  min-width: 72px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sqlfile-actions button.is-primary:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.sqlfile-actions button.is-primary:not(:disabled):hover {
+  filter: brightness(0.95);
+}
+
+.sqlfile-actions button.is-danger:not(:disabled) {
+  background: #cf222e;
+  border-color: #cf222e;
+  color: #fff;
+}
+
+.sqlfile-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+[data-theme="dark"] .sqlfile-log-stats .is-error,
+[data-theme="dark"] .sqlfile-log-stats .is-error strong,
+[data-theme="dark"] .sqlfile-log-line.is-error .sqlfile-log-text,
+[data-theme="dark"] .sqlfile-summary.is-error {
+  color: #ff7b72;
+}
+
+[data-theme="dark"] .sqlfile-log-line.is-ok .sqlfile-log-text,
+[data-theme="dark"] .sqlfile-summary.is-ok {
+  color: #3fb950;
+}
+
+[data-theme="dark"] .sqlfile-log-line.is-warn .sqlfile-log-text {
+  color: #d29922;
+}
