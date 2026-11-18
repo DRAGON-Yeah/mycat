@@ -68,6 +68,17 @@ pub fn run() {
             logging::log_line("INFO", "application setup complete");
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // 点关闭按钮不退出进程：macOS 隐藏窗口（点 Dock 图标恢复），
+                // 其它平台最小化到任务栏。真正退出用 ⌘Q / 菜单「退出」。
+                api.prevent_close();
+                #[cfg(target_os = "macos")]
+                let _ = window.hide();
+                #[cfg(not(target_os = "macos"))]
+                let _ = window.minimize();
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             get_setting,
@@ -97,6 +108,29 @@ pub fn run() {
             commands::queries::delete_saved_query,
             commands::queries::get_saved_query,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // macOS：点击 Dock 图标时把隐藏的主窗口重新显示出来。
+            #[cfg(target_os = "macos")]
+            {
+                if let tauri::RunEvent::Reopen {
+                    has_visible_windows,
+                    ..
+                } = event
+                {
+                    if !has_visible_windows {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
+                    }
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = (app_handle, event);
+            }
+        });
 }
