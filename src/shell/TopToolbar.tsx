@@ -1,4 +1,5 @@
 import catLogo from "../assets/cat-logo.png";
+import { APP_VERSION } from "../lib/version";
 import { ThemeToggle } from "../features/settings/ThemeToggle";
 import {
   useUiStore,
@@ -130,9 +131,12 @@ export function TopToolbar() {
 
   return (
     <header className="top-toolbar" aria-label="主工具栏">
-      <div className="top-toolbar-brand">
+      <div className="top-toolbar-brand" title={`Mycat ${APP_VERSION}`}>
         <img className="brand-mark" src={catLogo} alt="" />
-        <span className="brand-text">Mycat</span>
+        <span className="brand-text">
+          Mycat
+          <span className="brand-version">v{APP_VERSION}</span>
+        </span>
       </div>
       <nav className="top-toolbar-items">
         {ITEMS.map((item) => {
