@@ -1,5 +1,6 @@
 import type { ConnectionDto } from "../connections/types";
 import { dumpTableSql, executeSql, openConnection } from "../connections/sessionApi";
+import { stripSqlComments } from "../query/sqlSplit";
 import { fetchRoutineDdl, resolveRoutineType } from "../nav-tree/routineMenuActions";
 import { fetchEventDdl } from "../nav-tree/eventMenuActions";
 import { fetchCreateDdl } from "../nav-tree/tableMenuActions";
@@ -342,16 +343,11 @@ export async function executeSqlFile(args: {
   onProgress?: (done: number, total: number, line: string) => void;
 }): Promise<{ done: number; total: number }> {
   await openConnection(args.connectionId);
-  const stmts = splitSqlStatements(args.sql).filter(
-    (s) => !/^--/.test(s.trim()) || s.includes("\n"),
+  // 只跳过纯注释 / 空语句：带前置注释的真实语句必须执行，
+  // `/*! ... */` 是 MySQL 可执行注释（mysqldump 常见），不能当普通注释删掉。
+  const runnable = splitSqlStatements(args.sql).filter(
+    (s) => stripSqlComments(s).trim().length > 0,
   );
-  const runnable = stmts.filter((s) => {
-    const t = s
-      .replace(/^--.*$/gm, "")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .trim();
-    return t.length > 0;
-  });
   let done = 0;
   for (const stmt of runnable) {
     args.onProgress?.(done, runnable.length, stmt.slice(0, 80));

@@ -13,10 +13,15 @@ function isDashComment(sql: string, i: number): boolean {
 
 const DELIMITER_RE = /^[ \t]*delimiter[ \t]+(\S+)/i;
 
-/** Split SQL script into executable statements (respects quotes / comments / DELIMITER). */
-export function splitSqlStatements(sql: string): string[] {
-  const out: string[] = [];
+/**
+ * Split SQL script into statements, keeping each statement's offsets in the
+ * original text (respects quotes / comments / DELIMITER).
+ */
+export function splitSqlWithRanges(sql: string): StatementRange[] {
+  const out: StatementRange[] = [];
   let buf = "";
+  /** buf 首字符在原始 sql 中的偏移；-1 表示 buf 为空 */
+  let bufStart = -1;
   /** 当前语句结束符，可被 `DELIMITER xxx` 改写（存储过程 / 触发器） */
   let delimiter = ";";
   let i = 0;
@@ -26,10 +31,25 @@ export function splitSqlStatements(sql: string): string[] {
   let inLineComment = false;
   let inBlockComment = false;
 
+  const append = (text: string) => {
+    if (buf.length === 0) bufStart = i;
+    buf += text;
+  };
+
   const commit = () => {
-    const stmt = buf.trim();
-    if (stmt) out.push(stmt);
+    const raw = buf;
+    const stmt = raw.trim();
+    if (stmt) {
+      const lead = raw.length - raw.trimStart().length;
+      const start = (bufStart < 0 ? 0 : bufStart) + lead;
+      out.push({
+        sql: stmt,
+        startOffset: start,
+        endOffset: start + stmt.length,
+      });
+    }
     buf = "";
+    bufStart = -1;
   };
 
   while (i < sql.length) {
@@ -37,15 +57,15 @@ export function splitSqlStatements(sql: string): string[] {
     const next = sql[i + 1] ?? "";
 
     if (inLineComment) {
-      buf += ch;
+      append(ch);
       if (ch === "\n") inLineComment = false;
       i += 1;
       continue;
     }
     if (inBlockComment) {
-      buf += ch;
+      append(ch);
       if (ch === "*" && next === "/") {
-        buf += next;
+        append(next);
         i += 2;
         inBlockComment = false;
         continue;
@@ -68,6 +88,7 @@ export function splitSqlStatements(sql: string): string[] {
           i += match[0].length;
           while (i < sql.length && sql[i] !== "\n") i += 1;
           buf = "";
+          bufStart = -1;
           continue;
         }
       }
@@ -86,19 +107,19 @@ export function splitSqlStatements(sql: string): string[] {
 
       if (ch === "-" && next === "-" && isDashComment(sql, i)) {
         inLineComment = true;
-        buf += ch;
+        append(ch);
         i += 1;
         continue;
       }
       if (ch === "#") {
         inLineComment = true;
-        buf += ch;
+        append(ch);
         i += 1;
         continue;
       }
       if (ch === "/" && next === "*") {
         inBlockComment = true;
-        buf += ch;
+        append(ch);
         i += 1;
         continue;
       }
@@ -107,14 +128,14 @@ export function splitSqlStatements(sql: string): string[] {
     // 反斜杠转义（MySQL 默认行为）：\' \" \\ 不改变引号状态，
     // 否则 JSON / 文本里的反斜杠会把语句从中间切断。
     if ((inSingle || inDouble) && ch === "\\" && next) {
-      buf += ch + next;
+      append(ch + next);
       i += 2;
       continue;
     }
 
     if (ch === "'" && !inDouble && !inBacktick) {
       if (inSingle && next === "'") {
-        buf += "''";
+        append("''");
         i += 2;
         continue;
       }
@@ -125,12 +146,17 @@ export function splitSqlStatements(sql: string): string[] {
       inBacktick = !inBacktick;
     }
 
-    buf += ch;
+    append(ch);
     i += 1;
   }
 
   commit();
   return out;
+}
+
+/** Split SQL script into executable statements (respects quotes / comments / DELIMITER). */
+export function splitSqlStatements(sql: string): string[] {
+  return splitSqlWithRanges(sql).map((r) => r.sql);
 }
 
 /**
@@ -222,21 +248,6 @@ export type StatementRange = {
   endOffset: number;
 };
 
-/** Map statements back to offsets in the original script (approx). */
-export function splitSqlWithRanges(sql: string): StatementRange[] {
-  const statements = splitSqlStatements(sql);
-  const ranges: StatementRange[] = [];
-  let searchFrom = 0;
-  for (const stmt of statements) {
-    const idx = sql.indexOf(stmt, searchFrom);
-    const start = idx >= 0 ? idx : searchFrom;
-    const end = start + stmt.length;
-    ranges.push({ sql: stmt, startOffset: start, endOffset: end });
-    searchFrom = end;
-  }
-  return ranges;
-}
-
 /** Find statement containing caret offset (0-based). */
 export function statementAtOffset(
   sql: string,
@@ -255,5 +266,6 @@ export function statementAtOffset(
 }
 
 export function isExplainSql(sql: string): boolean {
-  return /^\s*EXPLAIN\b/i.test(sql);
+  // 语句前面可能带注释行（`-- xxx` / `# xxx` / `/* xxx */`），先剥掉再判断
+  return /^EXPLAIN\b/i.test(stripSqlComments(sql).trimStart());
 }

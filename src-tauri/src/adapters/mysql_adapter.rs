@@ -77,6 +77,54 @@ fn ident_ok(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// 跳过语句开头的空白与注释（`-- ` / `#` / `/* */`），用于判断语句类型。
+/// `/*! ... */` 是 MySQL 可执行注释，不能跳过。
+fn skip_leading_comments(sql: &str) -> &str {
+    let bytes = sql.as_bytes();
+    let mut i = 0usize;
+    loop {
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i + 1 < bytes.len() && bytes[i] == b'-' && bytes[i + 1] == b'-' {
+            // MySQL 规则：`--` 后必须跟空白（或行尾）才算注释
+            let is_comment = match bytes.get(i + 2) {
+                None => true,
+                Some(c) => c.is_ascii_whitespace(),
+            };
+            if is_comment {
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+        }
+        if i < bytes.len() && bytes[i] == b'#' {
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            if bytes.get(i + 2) == Some(&b'!') {
+                break;
+            }
+            match sql[i + 2..].find("*/") {
+                Some(pos) => {
+                    i += 2 + pos + 2;
+                    continue;
+                }
+                None => {
+                    i = bytes.len();
+                    break;
+                }
+            }
+        }
+        break;
+    }
+    &sql[i..]
+}
+
 /// Qualify as `db`.`table` when database is set so ops work without session USE.
 fn table_ref(database: Option<&str>, table: &str) -> AppResult<String> {
     if !ident_ok(table) {
@@ -353,7 +401,9 @@ impl DriverSession for MysqlSession {
             .lock()
             .map_err(|_| AppError::Message("mysql lock".into()))?;
 
-        let upper = trimmed.to_uppercase();
+        // 语句可能带前置注释（`-- 说明` / `/* 说明 */`），判断类型前先跳过，
+        // 否则 `-- x\nSELECT ...` 会走 query_drop，结果集被丢掉。
+        let upper = skip_leading_comments(trimmed).to_uppercase();
         // CHECK/ANALYZE/OPTIMIZE/REPAIR TABLE return result sets (Msg_text).
         if upper.starts_with("SELECT")
             || upper.starts_with("SHOW")

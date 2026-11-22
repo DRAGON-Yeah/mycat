@@ -42,6 +42,7 @@ import {
   isExplainSql,
   splitSqlStatements,
   statementAtOffset,
+  stripSqlComments,
 } from "./sqlSplit";
 
 type RunMode = "all" | "selection" | "current";
@@ -76,6 +77,8 @@ export function QueryEditor() {
   const saveRef = useRef<() => void>(() => undefined);
   const cancelRequestedRef = useRef(false);
   const runningConnRef = useRef<string | null>(null);
+  /** 执行中标记（ref 版本，避免同一 tick 内连按快捷键时状态还没更新） */
+  const runningRef = useRef(false);
   const [connections, setConnections] = useState<ConnectionDto[]>([]);
   const [databases, setDatabases] = useState<string[]>([]);
   const [dbLoading, setDbLoading] = useState(false);
@@ -710,6 +713,9 @@ export function QueryEditor() {
 
   async function run(mode: RunMode, explain = false) {
     if (!tab) return;
+    // 串行执行：并发 run 会让两条语句流交错、结果互相覆盖（表现为乱序 / 漏执行）
+    if (runningRef.current) return;
+    runningRef.current = true;
     setRunMenuOpen(false);
     cancelRequestedRef.current = false;
     runningConnRef.current = tab.connectionId;
@@ -752,10 +758,11 @@ export function QueryEditor() {
 
       let statements = splitSqlStatements(script);
       if (statements.length === 0) statements = [script];
-      // Ignore empty / comment-only leftovers
+      // 只跳过「纯注释 / 空」的残留，不能按开头字符过滤：
+      // `-- 说明\nCREATE TABLE ...` 是完整语句，按前缀丢会整条漏执行。
       statements = statements
         .map((s) => s.trim())
-        .filter((s) => s.length > 0 && !/^(--|#|\/\*)/.test(s));
+        .filter((s) => s.length > 0 && stripSqlComments(s).trim().length > 0);
       if (statements.length === 0) {
         setError("没有可执行的 SQL");
         return;
@@ -931,6 +938,7 @@ export function QueryEditor() {
     } finally {
       cancelRequestedRef.current = false;
       runningConnRef.current = null;
+      runningRef.current = false;
       setRunning(false);
     }
   }
