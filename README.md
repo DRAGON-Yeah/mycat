@@ -57,6 +57,27 @@ npm run dev
 | `npm run build:mac:arm` | macOS Apple Silicon 包 |
 | `npm run build:mac:intel` | macOS Intel 包 |
 | `npm run build:win` | Windows x64 安装包（需在 Windows 上执行） |
+| `npm run version:sync` | 把 `package.json` 的版本同步到 Cargo / lock / Tauri 配置 |
+
+## 版本号管理
+
+版本号只在 **`package.json` 的 `version`** 字段维护，其他位置自动引用或同步：
+
+| 位置 | 方式 |
+| --- | --- |
+| 前端 `APP_VERSION` | 直接 `import package.json` |
+| `src-tauri/tauri.conf.json` | `"version": "../package.json"` 直接引用 |
+| `src-tauri/Cargo.toml` / `Cargo.lock` | `npm run dev/build/tauri` 前由 `scripts/sync-version.mjs` 自动同步 |
+| `package-lock.json` | 同上自动同步 |
+| README 产物文件名 | 使用 `<version>` 占位 |
+
+升级版本：
+
+```bash
+npm version patch   # 或 minor / major；会自动同步所有位置
+# 也可以直接改 package.json 后执行：
+npm run version:sync
+```
 
 ## 打包发布
 
@@ -93,7 +114,7 @@ npm run build:mac:intel  # 仅 Intel
 
 ```text
 src-tauri/target/universal-apple-darwin/release/bundle/macos/Mycat.app
-src-tauri/target/universal-apple-darwin/release/bundle/dmg/Mycat_0.2.2_universal.dmg
+src-tauri/target/universal-apple-darwin/release/bundle/dmg/Mycat_<version>_universal.dmg
 ```
 
 仅 Apple Silicon 时路径为 `src-tauri/target/aarch64-apple-darwin/release/bundle/`，Intel 为 `x86_64-apple-darwin`。
@@ -114,7 +135,7 @@ npm run build:win
 产物：
 
 ```text
-src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\Mycat_0.2.2_x64-setup.exe
+src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\Mycat_<version>_x64-setup.exe
 ```
 
 安装包为 NSIS、`currentUser` 安装模式，语言为简体中文 + English。

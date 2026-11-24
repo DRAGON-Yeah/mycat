@@ -1,6 +1,6 @@
 # Redis MVP 手工烟测
 
-> 适用版本：Mycat 0.2.3+（Redis Phase 1 MVP）
+> 适用版本：含 Redis 支持的 Mycat 版本（Redis Phase 1 MVP）
 > 前置：Docker 可用；已完成 `npm install` 与 Rust 工具链安装。
 
 ## 0. 启动本地 Redis
