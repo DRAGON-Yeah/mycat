@@ -124,10 +124,21 @@ export function TopToolbar() {
   const centerMode = useWorkspaceStore((s) => s.centerMode);
   const setToolbarAction = useWorkspaceStore((s) => s.setToolbarAction);
   const openConsole = useWorkspaceStore((s) => s.openConsole);
+  const activeConnection = useWorkspaceStore((s) => s.activeConnection);
   const layout = useUiStore((s) => s.layout);
   const toggleTree = useUiStore((s) => s.toggleTree);
   const toggleInspector = useUiStore((s) => s.toggleInspector);
   const toggleBottom = useUiStore((s) => s.toggleBottom);
+  const isRedis =
+    String(activeConnection?.engine ?? "").toLowerCase() === "redis";
+  const items = isRedis
+    ? ITEMS.filter(
+        (item) =>
+          !["table", "view", "function", "query", "backup", "console"].includes(
+            item.id,
+          ),
+      )
+    : ITEMS;
 
   return (
     <header className="top-toolbar" aria-label="主工具栏">
@@ -139,7 +150,7 @@ export function TopToolbar() {
         </span>
       </div>
       <nav className="top-toolbar-items">
-        {ITEMS.map((item) => {
+        {items.map((item) => {
           const isConsole = item.id === "console";
           const active = isConsole
             ? centerMode === "console"

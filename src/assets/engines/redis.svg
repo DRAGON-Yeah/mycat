@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="redis-red" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#ff6b6b" offset="0" />
+      <stop stop-color="#c6302b" offset="1" />
+    </linearGradient>
+  </defs>
+  <g fill="url(#redis-red)" stroke="#8f1d1a" stroke-width="3" stroke-linejoin="round">
+    <ellipse cx="64" cy="32" rx="44" ry="16" />
+    <path d="M20 32v22c0 9 20 16 44 16s44-7 44-16V32c0 9-20 16-44 16S20 41 20 32z" />
+    <path d="M20 60v22c0 9 20 16 44 16s44-7 44-16V60c0 9-20 16-44 16S20 69 20 60z" />
+    <path d="M20 88v12c0 9 20 16 44 16s44-7 44-16V88c0 9-20 16-44 16S20 97 20 88z" />
+  </g>
+  <text x="64" y="40" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700" fill="#ffffff">R</text>
+</svg>

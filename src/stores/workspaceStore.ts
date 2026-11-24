@@ -119,6 +119,7 @@ export type CenterMode =
   | "table-designer"
   | "query"
   | "console"
+  | "redis"
   | "placeholder"
   | "automation"
   | "model"
@@ -186,6 +187,11 @@ type WorkspaceState = {
   setCenterMode: (mode: CenterMode) => void;
   /** Activate Console for a connection (optional database context). */
   openConsole: (opts?: {
+    connection?: ConnectionDto;
+    database?: string | null;
+  }) => void;
+  /** Open the Redis workspace for a connection/db index. */
+  openRedis: (opts?: {
     connection?: ConnectionDto;
     database?: string | null;
   }) => void;
@@ -473,6 +479,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       selectionKind: database ? "database" : "connection",
       centerMode: "console",
       placeholderFeature: null,
+    });
+  },
+  openRedis: (opts) => {
+    const conn = opts?.connection ?? get().activeConnection;
+    if (!conn) return;
+    const database =
+      opts && "database" in opts
+        ? opts.database?.trim() || "0"
+        : get().selectedDatabase || conn.database?.trim() || "0";
+    set({
+      activeConnectionId: conn.id,
+      activeConnection: conn,
+      selectedDatabase: database,
+      selectedTable: null,
+      selectedFolder: null,
+      selectionKind: "database",
+      centerMode: "redis",
+      toolbarAction: "connection",
+      placeholderFeature: null,
+      activeTabId: null,
+      activeQueryId: null,
+      activeDesignerId: null,
     });
   },
   setObjectListFilter: (filter, focus = false) =>

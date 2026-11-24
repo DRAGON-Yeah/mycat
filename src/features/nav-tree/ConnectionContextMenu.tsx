@@ -63,6 +63,8 @@ export function ConnectionContextMenu({
   const openConn = useWorkspaceStore((s) => s.openConnection);
   const openQuery = useWorkspaceStore((s) => s.openQuery);
   const openConsole = useWorkspaceStore((s) => s.openConsole);
+  const openRedis = useWorkspaceStore((s) => s.openRedis);
+  const isRedis = String(conn.engine).toLowerCase() === "redis";
 
   useEffect(() => {
     void listConnProfiles(conn.id).then(setProfiles).catch(() => setProfiles([]));
@@ -251,55 +253,78 @@ export function ConnectionContextMenu({
 
       <div className="dg-menu-sep" />
 
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => {
-          onAskNewDatabase(conn);
-          onClose();
-        }}
-      >
-        新建数据库…
-      </button>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => {
-          openConn(conn);
-          openQuery({ connection: conn, database: conn.database ?? undefined });
-          onClose();
-        }}
-      >
-        新建查询
-        <span className="menu-shortcut">⌘Y</span>
-      </button>
+      {!isRedis && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            onAskNewDatabase(conn);
+            onClose();
+          }}
+        >
+          新建数据库…
+        </button>
+      )}
+      {!isRedis && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            openConn(conn);
+            openQuery({ connection: conn, database: conn.database ?? undefined });
+            onClose();
+          }}
+        >
+          新建查询
+          <span className="menu-shortcut">⌘Y</span>
+        </button>
+      )}
 
       <div className="dg-menu-sep" />
 
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => {
-          openConsole({
-            connection: conn,
-            database: conn.database?.trim() || null,
-          });
-          onClose();
-        }}
-      >
-        命令行界面
-      </button>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => {
-          openConn(conn);
-          onRunSqlFile(conn, conn.database?.trim() || "");
-          onClose();
-        }}
-      >
-        运行 SQL 文件…
-      </button>
+      {isRedis ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            openConn(conn);
+            openRedis({
+              connection: conn,
+              database: conn.database?.trim() || "0",
+            });
+            onClose();
+          }}
+        >
+          打开 Redis 工作台
+        </button>
+      ) : (
+        <>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              openConsole({
+                connection: conn,
+                database: conn.database?.trim() || null,
+              });
+              onClose();
+            }}
+          >
+            命令行界面
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              openConn(conn);
+              onRunSqlFile(conn, conn.database?.trim() || "");
+              onClose();
+            }}
+          >
+            运行 SQL 文件…
+          </button>
+        </>
+      )}
 
       <div
         className={`dg-menu-item has-sub ${reloadOpen ? "is-open" : ""}`}

@@ -1,5 +1,6 @@
 import mysqlLogo from "../../assets/engines/mysql.svg";
 import postgresLogo from "../../assets/engines/postgresql.svg";
+import redisLogo from "../../assets/engines/redis.svg";
 import sqliteLogo from "../../assets/engines/sqlite.svg";
 
 type EngineIconProps = { active?: boolean; large?: boolean };
@@ -63,6 +64,20 @@ export function IconEngineSqlite({
   );
 }
 
+export function IconEngineRedis({
+  active = false,
+  large = false,
+}: EngineIconProps) {
+  return (
+    <EngineBadge
+      active={active}
+      large={large}
+      src={redisLogo}
+      alt="Redis"
+    />
+  );
+}
+
 export function IconEngine({
   engine,
   active = false,
@@ -78,6 +93,9 @@ export function IconEngine({
   }
   if (e === "sqlite") {
     return <IconEngineSqlite active={active} large={large} />;
+  }
+  if (e === "redis") {
+    return <IconEngineRedis active={active} large={large} />;
   }
   return <IconEngineMysql active={active} large={large} />;
 }

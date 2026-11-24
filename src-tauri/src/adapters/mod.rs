@@ -1,5 +1,6 @@
 pub mod mysql_adapter;
 pub mod postgres_adapter;
+pub mod redis_adapter;
 pub mod sqlite;
 
 use crate::error::AppResult;

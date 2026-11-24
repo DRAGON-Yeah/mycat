@@ -1,3 +1,4 @@
+use crate::adapters::redis_adapter::RedisSession;
 use crate::adapters::{connect, ConnectOpts, DriverSession};
 use crate::error::{AppError, AppResult};
 use crate::meta::MetaDb;
@@ -7,8 +8,13 @@ use rusqlite::InterruptHandle;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+enum SessionKind {
+    Sql(Box<dyn DriverSession>),
+    Redis(RedisSession),
+}
+
 struct LiveSession {
-    session: Box<dyn DriverSession>,
+    kind: SessionKind,
     _tunnel: Option<SshTunnel>,
 }
 
@@ -41,6 +47,11 @@ impl SessionPool {
 
     pub fn test_connect(opts: &ConnectOpts) -> AppResult<()> {
         let (resolved, _tunnel) = resolve_with_tunnel(opts.clone())?;
+        if resolved.engine == "redis" {
+            let session = RedisSession::connect(&resolved)?;
+            session.ping()?;
+            return Ok(());
+        }
         let _session = connect(&resolved)?;
         Ok(())
     }
@@ -55,13 +66,16 @@ impl SessionPool {
 
         let (resolved, tunnel) = resolve_with_tunnel(opts.clone())?;
         let engine = resolved.engine.clone();
-        let session = connect(&resolved)?;
+        let kind = if engine == "redis" {
+            SessionKind::Redis(RedisSession::connect(&resolved)?)
+        } else {
+            SessionKind::Sql(connect(&resolved)?)
+        };
 
         // Capture SQLite interrupt handle before moving session into the pool.
-        let sqlite_ih = if engine == "sqlite" {
-            session.sqlite_interrupt_handle()
-        } else {
-            None
+        let sqlite_ih = match &kind {
+            SessionKind::Sql(session) if engine == "sqlite" => session.sqlite_interrupt_handle(),
+            _ => None,
         };
 
         let mut guard = self
@@ -71,7 +85,7 @@ impl SessionPool {
         guard.insert(
             connection_id.to_string(),
             Arc::new(Mutex::new(LiveSession {
-                session,
+                kind,
                 _tunnel: tunnel,
             })),
         );
@@ -101,16 +115,22 @@ impl SessionPool {
 
     /// True when the pooled session was opened with the same settings and is alive.
     fn can_reuse(&self, connection_id: &str, opts: &ConnectOpts) -> bool {
-        let same = {
+        let engine = {
             let Ok(map) = self.open_opts.lock() else {
                 return false;
             };
-            map.get(connection_id).map(|o| o == opts).unwrap_or(false)
+            match map.get(connection_id) {
+                Some(opened) if opened == opts => opened.engine.clone(),
+                _ => return false,
+            }
         };
-        if !same {
-            return false;
+        if engine == "redis" {
+            self.with_redis(connection_id, |session| session.ping())
+                .is_ok()
+        } else {
+            self.with_session(connection_id, |session| session.ping())
+                .is_ok()
         }
-        self.with_session(connection_id, |s| s.ping()).is_ok()
     }
 
     pub fn close(&self, connection_id: &str) -> AppResult<()> {
@@ -157,11 +177,55 @@ impl SessionPool {
         let live = handle
             .lock()
             .map_err(|_| AppError::Message("session busy".into()))?;
-        f(live.session.as_ref())
+        match &live.kind {
+            SessionKind::Sql(session) => f(session.as_ref()),
+            SessionKind::Redis(_) => Err(AppError::Message(
+                "该连接不是 SQL 引擎，请使用 Redis 工作台".into(),
+            )),
+        }
+    }
+
+    /// Run a closure against a Redis session. SQL connections return a clear error.
+    pub fn with_redis<R>(
+        &self,
+        connection_id: &str,
+        f: impl FnOnce(&RedisSession) -> AppResult<R>,
+    ) -> AppResult<R> {
+        let handle = {
+            let guard = self
+                .sessions
+                .lock()
+                .map_err(|_| AppError::Message("session lock".into()))?;
+            guard
+                .get(connection_id)
+                .cloned()
+                .ok_or_else(|| AppError::Message("连接未打开".into()))?
+        };
+        let live = handle
+            .lock()
+            .map_err(|_| AppError::Message("session busy".into()))?;
+        match &live.kind {
+            SessionKind::Redis(session) => f(session),
+            SessionKind::Sql(_) => Err(AppError::Message("该连接不是 Redis 引擎".into())),
+        }
     }
 
     /// Capture backend pid before a long-running execute (call while session is idle).
     pub fn begin_query(&self, connection_id: &str) -> AppResult<()> {
+        let is_redis = self
+            .open_opts
+            .lock()
+            .ok()
+            .and_then(|map| map.get(connection_id).map(|opts| opts.engine == "redis"))
+            .unwrap_or(false);
+        if is_redis {
+            let mut pids = self
+                .active_pids
+                .lock()
+                .map_err(|_| AppError::Message("cancel lock".into()))?;
+            pids.insert(connection_id.to_string(), 0);
+            return Ok(());
+        }
         let pid = self.with_session(connection_id, |s| s.backend_pid())?;
         let mut pids = self
             .active_pids
@@ -212,6 +276,16 @@ impl SessionPool {
                 handle.interrupt();
                 return Ok(());
             }
+        }
+
+        let is_redis = self
+            .cancel_opts
+            .lock()
+            .ok()
+            .and_then(|map| map.get(connection_id).map(|opts| opts.engine == "redis"))
+            .unwrap_or(false);
+        if is_redis {
+            return Err(AppError::Message("Redis 命令不支持取消".into()));
         }
 
         let pid = {
@@ -281,10 +355,7 @@ fn resolve_with_tunnel(mut opts: ConnectOpts) -> AppResult<(ConnectOpts, Option<
         .clone()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "127.0.0.1".into());
-    let remote_port = opts.port.unwrap_or(match opts.engine.as_str() {
-        "postgres" => 5432,
-        _ => 3306,
-    }) as u16;
+    let remote_port = opts.port.unwrap_or(default_remote_port(&opts.engine)) as u16;
 
     let tunnel = SshTunnel::open(&SshParams {
         ssh_host,
@@ -300,6 +371,14 @@ fn resolve_with_tunnel(mut opts: ConnectOpts) -> AppResult<(ConnectOpts, Option<
     opts.ssh_enabled = Some(false);
     opts.ssh_password = None;
     Ok((opts, Some(tunnel)))
+}
+
+fn default_remote_port(engine: &str) -> i64 {
+    match engine {
+        "postgres" => 5432,
+        "redis" => 6379,
+        _ => 3306,
+    }
 }
 
 pub fn opts_from_connection(db: &MetaDb, connection_id: &str) -> AppResult<ConnectOpts> {
@@ -331,4 +410,16 @@ pub fn opts_from_connection(db: &MetaDb, connection_id: &str) -> AppResult<Conne
         ssh_user: record.ssh_user,
         ssh_password,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_remote_port;
+
+    #[test]
+    fn redis_tunnel_default_port() {
+        assert_eq!(default_remote_port("redis"), 6379);
+        assert_eq!(default_remote_port("postgres"), 5432);
+        assert_eq!(default_remote_port("mysql"), 3306);
+    }
 }

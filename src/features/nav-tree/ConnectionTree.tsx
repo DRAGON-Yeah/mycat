@@ -23,6 +23,7 @@ import {
   listDatabases,
   openConnection,
 } from "../connections/sessionApi";
+import { redisListDatabases } from "../redis/redisApi";
 import {
   useWorkspaceStore,
   type ObjectFolder,
@@ -257,6 +258,7 @@ export function ConnectionTree() {
   const openFunctionDesigner = useWorkspaceStore((s) => s.openFunctionDesigner);
   const openEventDesigner = useWorkspaceStore((s) => s.openEventDesigner);
   const openQuery = useWorkspaceStore((s) => s.openQuery);
+  const openRedis = useWorkspaceStore((s) => s.openRedis);
   const activeConnection = useWorkspaceStore((s) => s.activeConnection);
   const activeQueryId = useWorkspaceStore((s) => s.activeQueryId);
   const queryTabs = useWorkspaceStore((s) => s.queryTabs);
@@ -466,6 +468,9 @@ export function ConnectionTree() {
     if (node.conn.engine === "sqlite") {
       return [node.conn.host || "main"];
     }
+    if (String(node.conn.engine).toLowerCase() === "redis") {
+      return redisListDatabases(node.conn.id);
+    }
     return listDatabases(node.conn.id);
   }
 
@@ -533,7 +538,9 @@ export function ConnectionTree() {
       const databases =
         node.conn.engine === "sqlite"
           ? [node.conn.host || "main"]
-          : await listDatabases(node.conn.id);
+          : String(node.conn.engine).toLowerCase() === "redis"
+            ? await redisListDatabases(node.conn.id)
+            : await listDatabases(node.conn.id);
       setNodes((prev) =>
         prev.map((n) =>
           n.conn.id === connId
@@ -887,6 +894,10 @@ export function ConnectionTree() {
         );
       }
       openConn(node.conn);
+      if (String(node.conn.engine).toLowerCase() === "redis") {
+        openRedis({ connection: node.conn, database: db });
+        return;
+      }
       selectDatabase(db);
       selectObjectFolder(db, "tables");
     } catch (err) {
@@ -1039,6 +1050,8 @@ export function ConnectionTree() {
                     const dbActive =
                       activeConnectionId === n.conn.id &&
                       selectedDatabase === db;
+                    const eng = String(n.conn.engine).toLowerCase();
+                    const isRedis = eng === "redis";
                     return (
                       <li key={db}>
                         <div
@@ -1046,6 +1059,7 @@ export function ConnectionTree() {
                           onContextMenu={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
+                            if (isRedis) return;
                             openConn(n.conn);
                             selectDatabase(db);
                             setDbMenu({
@@ -1056,39 +1070,44 @@ export function ConnectionTree() {
                             });
                           }}
                         >
-                          <button
-                            type="button"
-                            className={`tree-twist ${dbOpen ? "is-expanded" : ""}`}
-                            onClick={() =>
-                              setNodes((prev) =>
-                                prev.map((x) =>
-                                  x.conn.id === n.conn.id
-                                    ? {
-                                        ...x,
-                                        openDbs: {
-                                          ...x.openDbs,
-                                          [db]: !x.openDbs[db],
-                                        },
-                                      }
-                                    : x,
-                                ),
-                              )
-                            }
-                            aria-label={dbOpen ? "折叠" : "展开"}
-                          />
+                          {isRedis ? (
+                            <span className="tree-twist" aria-hidden />
+                          ) : (
+                            <button
+                              type="button"
+                              className={`tree-twist ${dbOpen ? "is-expanded" : ""}`}
+                              onClick={() =>
+                                setNodes((prev) =>
+                                  prev.map((x) =>
+                                    x.conn.id === n.conn.id
+                                      ? {
+                                          ...x,
+                                          openDbs: {
+                                            ...x.openDbs,
+                                            [db]: !x.openDbs[db],
+                                          },
+                                        }
+                                      : x,
+                                  ),
+                                )
+                              }
+                              aria-label={dbOpen ? "折叠" : "展开"}
+                            />
+                          )}
                           <button
                             type="button"
                             className="tree-label"
                             onClick={() => void onSelectDatabase(n, db)}
                           >
                             <IconDatabase active={dbOpen} />
-                            <span className="tree-text">{db}</span>
+                            <span className="tree-text">
+                              {isRedis ? `db${db}` : db}
+                            </span>
                           </button>
                         </div>
-                        {dbOpen && (
+                        {dbOpen && !isRedis && (
                           <ul className="tree-children">
                             {FOLDERS.map((folder) => {
-                              const eng = String(n.conn.engine).toLowerCase();
                               // MySQL Event Scheduler only.
                               if (folder.id === "events" && !/mysql|mariadb/.test(eng)) {
                                 return null;

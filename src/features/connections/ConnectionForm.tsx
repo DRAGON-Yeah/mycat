@@ -22,6 +22,7 @@ const defaultPort: Record<EngineType, number> = {
   mysql: 3306,
   postgres: 5432,
   sqlite: 0,
+  redis: 6379,
 };
 
 /** CJK ideographs / compatibility — blocked on technical fields. */
@@ -140,11 +141,22 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
     };
   }
 
+  /** Redis 的 database 字段表示 DB 编号，不是库名。 */
+  function assertRedisDbIndex(): string | null {
+    if (engine !== "redis") return null;
+    const raw = database.trim();
+    if (!raw) return null;
+    if (!/^\d+$/.test(raw) || Number(raw) > 255) {
+      return "DB 编号应为 0–255 的整数";
+    }
+    return null;
+  }
+
   /** 显示名、分组可中文；其余技术字段禁止中文。 */
   function assertNoChineseFields(): string | null {
     const checks: [string, string][] = [
       [engine === "sqlite" ? "文件路径" : "主机", host],
-      ["数据库", database],
+      [engine === "redis" ? "DB 编号" : "数据库", database],
       ["用户名", user],
       ["密码", password],
       ["SSH 主机", sshHost],
@@ -162,6 +174,11 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
   async function onTest() {
     setError(null);
     setInfo(null);
+    const redisErr = assertRedisDbIndex();
+    if (redisErr) {
+      setError(redisErr);
+      return;
+    }
     const chineseErr = assertNoChineseFields();
     if (chineseErr) {
       setError(chineseErr);
@@ -198,6 +215,11 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
     e.preventDefault();
     setError(null);
     setInfo(null);
+    const redisErr = assertRedisDbIndex();
+    if (redisErr) {
+      setError(redisErr);
+      return;
+    }
     const chineseErr = assertNoChineseFields();
     if (chineseErr) {
       setError(chineseErr);
@@ -230,12 +252,19 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
               onChange={(e) => {
                 const next = e.target.value as EngineType;
                 setEngine(next);
-                if (!initial) setPort(defaultPort[next]);
+                if (!initial) {
+                  setPort(defaultPort[next]);
+                  if (next === "redis" && !database.trim()) setDatabase("0");
+                  if (engine === "redis" && next !== "redis" && database.trim() === "0") {
+                    setDatabase("");
+                  }
+                }
               }}
             >
               <option value="mysql">MySQL</option>
               <option value="postgres">PostgreSQL</option>
               <option value="sqlite">SQLite</option>
+              <option value="redis">Redis</option>
             </select>
           </label>
 
@@ -269,15 +298,16 @@ export function ConnectionForm({ initial, onCancel, onSaved, save }: Props) {
                 />
               </label>
               <label>
-                数据库
+                {engine === "redis" ? "DB 编号（0–255）" : "数据库"}
                 <input
                   value={database}
                   onChange={onNoChineseField(setDatabase)}
+                  placeholder={engine === "redis" ? "0" : undefined}
                   spellCheck={false}
                 />
               </label>
               <label>
-                用户名
+                {engine === "redis" ? "ACL 用户名（可选）" : "用户名"}
                 <input
                   value={user}
                   onChange={onNoChineseField(setUser)}

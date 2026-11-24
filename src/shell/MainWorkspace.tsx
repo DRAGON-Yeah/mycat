@@ -12,6 +12,7 @@ import { ObjectListGrid } from "../features/object-list/ObjectListGrid";
 import { PlaceholderPane } from "../features/placeholders/PlaceholderPane";
 import { ConsolePanel } from "../features/query/Console";
 import { QueryEditor } from "../features/query/QueryEditor";
+import { RedisWorkspace } from "../features/redis/RedisWorkspace";
 import { TableDesigner } from "../features/table-designer/TableDesigner";
 import { ViewDesigner } from "../features/view-designer/ViewDesigner";
 import { FunctionDesigner } from "../features/function-designer/FunctionDesigner";
@@ -61,8 +62,11 @@ export function MainWorkspace() {
   const closeDesignerTab = useWorkspaceStore((s) => s.closeDesignerTab);
   const setCenterMode = useWorkspaceStore((s) => s.setCenterMode);
   const openConsole = useWorkspaceStore((s) => s.openConsole);
+  const openRedis = useWorkspaceStore((s) => s.openRedis);
   const selectedDatabase = useWorkspaceStore((s) => s.selectedDatabase);
   const activeConnection = useWorkspaceStore((s) => s.activeConnection);
+  const isRedisConn =
+    String(activeConnection?.engine ?? "").toLowerCase() === "redis";
   const openQuery = useWorkspaceStore((s) => s.openQuery);
   const closeTabsByIds = useWorkspaceStore((s) => s.closeTabsByIds);
   const setToolbarAction = useWorkspaceStore((s) => s.setToolbarAction);
@@ -205,6 +209,10 @@ export function MainWorkspace() {
       window.alert("请先在左侧打开一个连接，再新建查询。");
       return;
     }
+    if (isRedisConn) {
+      window.alert("Redis 连接请使用 Redis 工作台执行命令。");
+      return;
+    }
     openQuery({
       connection: activeConnection,
       database: selectedDatabase || undefined,
@@ -229,15 +237,29 @@ export function MainWorkspace() {
             </span>
           </button>
 
-          <button
-            type="button"
-            role="tab"
-            aria-selected={centerMode === "console"}
-            className={`ws-tab ws-tab-system ${centerMode === "console" ? "is-active" : ""}`}
-            onClick={() => openConsole()}
-          >
-            <span className="ws-tab-label">Console</span>
-          </button>
+          {!isRedisConn && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={centerMode === "console"}
+              className={`ws-tab ws-tab-system ${centerMode === "console" ? "is-active" : ""}`}
+              onClick={() => openConsole()}
+            >
+              <span className="ws-tab-label">Console</span>
+            </button>
+          )}
+
+          {isRedisConn && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={centerMode === "redis"}
+              className={`ws-tab ws-tab-system ${centerMode === "redis" ? "is-active" : ""}`}
+              onClick={() => openRedis()}
+            >
+              <span className="ws-tab-label">Redis</span>
+            </button>
+          )}
 
           {FEATURE_TABS.map((f) => (
             <button
@@ -418,15 +440,17 @@ export function MainWorkspace() {
           })}
         </div>
 
-        <button
-          type="button"
-          className="ws-tab-add"
-          title="新建查询"
-          aria-label="新建查询"
-          onClick={onNewQuery}
-        >
-          +
-        </button>
+        {!isRedisConn && (
+          <button
+            type="button"
+            className="ws-tab-add"
+            title="新建查询"
+            aria-label="新建查询"
+            onClick={onNewQuery}
+          >
+            +
+          </button>
+        )}
       </div>
 
       <div className="ws-body">
@@ -440,8 +464,10 @@ export function MainWorkspace() {
           <BiPane />
         ) : centerMode === "query" ? (
           <QueryEditor />
+        ) : centerMode === "redis" ? (
+          <RedisWorkspace />
         ) : centerMode === "console" ? (
-          <ConsolePanel />
+          isRedisConn ? <RedisWorkspace /> : <ConsolePanel />
         ) : centerMode === "table-designer" && activeDesigner ? (
           activeDesigner.kind === "event" ? (
             <EventDesigner tab={activeDesigner} />

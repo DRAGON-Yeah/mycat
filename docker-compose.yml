@@ -29,3 +29,15 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+
+  redis:
+    image: redis:8-alpine
+    container_name: mycat-redis
+    command: ["redis-server", "--requirepass", "navicat", "--appendonly", "no"]
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "navicat", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20

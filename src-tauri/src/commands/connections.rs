@@ -51,7 +51,7 @@ fn validate(input: &UpsertConnectionInput) -> AppResult<()> {
         return Err(AppError::Validation("显示名不能为空".into()));
     }
     match input.engine.as_str() {
-        "mysql" | "postgres" | "sqlite" => {}
+        "mysql" | "postgres" | "sqlite" | "redis" => {}
         other => {
             return Err(AppError::Validation(format!("不支持的引擎: {other}")));
         }
@@ -68,6 +68,16 @@ fn validate(input: &UpsertConnectionInput) -> AppResult<()> {
             Some(p) if (1..=65535).contains(&p) => {}
             Some(_) => return Err(AppError::Validation("端口非法，应在 1–65535".into())),
             None => return Err(AppError::Validation("端口不能为空".into())),
+        }
+    }
+    if input.engine == "redis" {
+        if let Some(db) = input.database.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            let index = db
+                .parse::<i64>()
+                .map_err(|_| AppError::Validation("DB 编号应为 0–255 的整数".into()))?;
+            if !(0..=255).contains(&index) {
+                return Err(AppError::Validation("DB 编号应为 0–255 的整数".into()));
+            }
         }
     }
     Ok(())

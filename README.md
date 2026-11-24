@@ -1,6 +1,6 @@
 # Mycat
 
-跨平台桌面端多数据库管理工具（Phase 0 MVP）。技术栈：**Tauri 2 + React + TypeScript + Rust**。
+跨平台桌面端多数据库管理工具（Phase 0 MVP + Redis Phase 1 MVP）。技术栈：**Tauri 2 + React + TypeScript + Rust**。
 
 对标能力与分期见 [navicat-prd.md](./navicat-prd.md)；本迭代执行计划见 [.codebuddy/plans/phase0-desktop-mvp/](./.codebuddy/plans/phase0-desktop-mvp/)。
 
@@ -23,6 +23,7 @@ docker compose up -d
 | --- | --- | --- |
 | MySQL | **3307**（避免与本机 3306 冲突） | `navicat` / `navicat`，库 `demo` |
 | PostgreSQL | 5432 | `navicat` / `navicat`，库 `demo` |
+| Redis | **6380**（避免与本机 6379 冲突） | 密码 `navicat`，DB `0`–`15` |
 
 ## 快速开始
 
@@ -165,3 +166,17 @@ MySQL、PostgreSQL、SQLite。支持 SSL、SSH Tunnel（密码）、CSV 导入�
 cd src-tauri && cargo test --lib
 npm run build
 ```
+
+## Redis（Phase 1 MVP）
+
+支持 standalone Redis 6+：连接（密码 / ACL 用户名 / DB 编号 / SSL / SSH Tunnel）、键空间浏览（`SCAN` + glob pattern + 游标分页）、按类型查看（string / hash / list / set / zset / stream）、string 与 hash 编辑、TTL 设置、删除键、原生命令控制台。
+
+端到端手工烟测见 [docs/redis-smoke.md](./docs/redis-smoke.md)。自动化回归：
+
+```bash
+docker compose up -d redis
+MYCAT_REDIS_TEST=1 MYCAT_REDIS_PORT=6380 MYCAT_REDIS_PASSWORD=navicat cargo test --lib redis_
+npm run build
+```
+
+> 本迭代不含 Cluster / Sentinel / Pub/Sub / 备份恢复，详见 `.codebuddy/plans/redis-support/tasks.md` 的 Backlog。

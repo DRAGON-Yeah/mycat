@@ -1,4 +1,4 @@
-export type EngineType = "mysql" | "postgres" | "sqlite";
+export type EngineType = "mysql" | "postgres" | "sqlite" | "redis";
 
 export type ConnectionDto = {
   id: string;
