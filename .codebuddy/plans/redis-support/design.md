@@ -1,6 +1,6 @@
 # 设计文档（Design）— Mycat Redis 引擎支持（MVP）
 
-> 状态：已批准 2026-11-24
+> 状态：已完成 2026-11-24
 > 关联：[requirements.md](./requirements.md) · [tasks.md](./tasks.md)
 
 ## 1. 总体架构
@@ -43,7 +43,7 @@ flowchart LR
 | # | 决策 | 理由 |
 |---|---|---|
 | D1 | Redis 使用独立 `RedisSession`，`LiveSession` 改为 `SessionKind::{Sql(Box<dyn DriverSession>), Redis(RedisSession)}` 枚举，不实现 `DriverSession` | `DriverSession` 的 `list_schemas`/`list_tables`/`query_page`/`apply_row_changes`/`table_ddl` 在 Redis 无对应语义，强行实现会产生 7 个以上桩方法；枚举只改 `session.rs` 内部，SQL 命令零改动 |
-| D2 | 使用 `redis = "1.0"`（同步 API）+ `tls-native-tls`，复用现有 `native-tls` | 与 MySQL/Postgres 适配器的阻塞式实现一致，不引入 tokio 运行时；`rediss://host:port/db#insecure` 原生支持「信任服务端证书」 |
+| D2 | 使用 `redis = "1.0"`（同步 API，Cargo 实际锁定 1.8.3）+ `tls-native-tls`，复用现有 `native-tls` | 与 MySQL/Postgres 适配器的阻塞式实现一致，不引入 tokio 运行时；`rediss://host:port/db#insecure` 原生支持「信任服务端证书」 |
 | D3 | Redis DB 编号复用 `connections.database` 字段，不新增列；后端返回 `"0".."N-1"`，UI 显示为 `db0..dbN-1` | 避免 `meta.db` 迁移；Redis 的 `SELECT index` 与 database 概念天然对应；`database` 在 Redis 连接下不再表示库名 |
 | D4 | 键浏览使用 `SCAN cursor MATCH pattern COUNT n`，禁用 `KEYS` | `KEYS` 在大库会阻塞服务端；`SCAN` 增量返回游标，可「加载更多」且不重复 |
 | D5 | 值编辑 MVP 仅覆盖 string 与 hash；list/set/zset/stream 只读 | 控制范围与 UI 复杂度；覆盖最常见的缓存修正场景，其余类型先保证可查看 |

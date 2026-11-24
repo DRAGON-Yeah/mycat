@@ -1316,6 +1316,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     const keepPane =
       state.centerMode === "console" ||
+      state.centerMode === "redis" ||
       state.centerMode === "objectList" ||
       state.centerMode === "welcome" ||
       state.centerMode === "placeholder" ||

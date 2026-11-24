@@ -358,6 +358,21 @@ mod tests {
     }
 
     #[test]
+    fn redis_accepts_valid_db_and_rejects_invalid() {
+        let mut input = sample("redis", 6379);
+        input.engine = "redis".into();
+        input.database = Some("15".into());
+        assert!(validate(&input).is_ok());
+
+        input.database = Some("300".into());
+        let err = validate(&input).unwrap_err().to_string();
+        assert!(err.contains("DB 编号"));
+
+        input.database = Some("abc".into());
+        assert!(validate(&input).is_err());
+    }
+
+    #[test]
     fn export_item_password_field_is_none() {
         let item = ConnectionExportItem {
             name: "x".into(),

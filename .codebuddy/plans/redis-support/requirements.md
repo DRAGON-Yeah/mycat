@@ -1,6 +1,6 @@
 # 需求文档（Requirements）— Mycat Redis 引擎支持（MVP）
 
-> 状态：已批准 2026-11-24
+> 状态：已完成 2026-11-24
 > 关联：[design.md](./design.md) · [tasks.md](./tasks.md)
 > 复杂度：Complex | 范围：MVP（延后项见 tasks.md 文末 Backlog）
 > 来源：用户需求「增加 redis 功能」+ [navicat-prd.md](../../../navicat-prd.md) Phase 1（`:298`）、C-01（`:109`）
